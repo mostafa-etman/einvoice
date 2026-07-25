@@ -18,6 +18,12 @@ vectors under `specs/005-document-building-serialization/golden-vectors/`)
 3. **CAdES software-key structural gate** (FR-011 checklist; no `Cades.txt`
    byte-compare).
 
+> **HARDWARE_SIGNING_PENDING** (do not clear until field confirmation): Physical
+> eSeal token signing via `Pkcs11TokenSigningProvider` is implemented but
+> **UNVERIFIED**. CI uses `SIGNING_PROVIDER=software` only. Skipped tests:
+> `HardwareTokenSigningPendingTests`. Manual runbook:
+> `HARDWARE-TEST.md` (pair → PIN → sign gv-01 → FR-011 → ETA sandbox).
+
 Also: pairing/revoke API tests, Devices UI smoke. No ETA submission in this
 feature (sandbox acceptance recorded as definitive CAdES oracle for later).
 
@@ -469,7 +475,17 @@ Task: "T023g software-key CAdES golden gate on gv-01"
 ### Notes
 
 - Digest input = canonicalize(document **without** `signatures`)
-- CAdES-BES **detached** via BouncyCastle; PKCS#11 then CSP fallback
+- CAdES-BES **detached** via BouncyCastle; `ISigningProvider`: software (default)
+  or PKCS#11 (+ CSP fallback)
 - Device token hashed at rest; unpair → immediate 401
 - SQLite offline queue is agent-local only
 - No ETA submit in this feature; sandbox accept = definitive CAdES oracle later
+
+### HARDWARE_SIGNING_PENDING (token day)
+
+- [ ] T053 **HARDWARE_SIGNING_PENDING**: On physical eSeal — set
+      `SIGNING_PROVIDER=pkcs11`, complete `HARDWARE-TEST.md` (pair → PIN → sign
+      gv-01 → FR-011 CAdES checklist → ETA sandbox acceptance). Then flip
+      `Pkcs11TokenSigningProvider.IsHardwarePathVerified`, un-Skip
+      `HardwareTokenSigningPendingTests`, clear this marker. Until then hardware
+      signing is **UNVERIFIED** and must not be claimed working.

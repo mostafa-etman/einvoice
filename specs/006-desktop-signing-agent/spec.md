@@ -54,6 +54,17 @@ Frontend: "Devices" screen (pair/unpair, token status, last seen)."
   definitive gate when submit lands). Hardware PKCS#11 (`eps2003csp11.dll`) is
   validated separately in manual/hardware tests.
 
+### Session 2026-07-25 (software-first / token-ready)
+
+- Q: How do we progress without a physical token? → A: **`ISigningProvider`**
+  with `SoftwareKeySigningProvider` (default, CI/dev) and
+  `Pkcs11TokenSigningProvider` (`SIGNING_PROVIDER=pkcs11`). Config:
+  `SIGNING_PROVIDER=software|pkcs11`.
+- Q: Is hardware signing done? → A: **HARDWARE_SIGNING_PENDING** —
+  structure/library/PIN/cert selection implemented; **UNVERIFIED** until
+  `HARDWARE-TEST.md` passes on a real eSeal. Skipped tests must never count as
+  passed (`HardwareTokenSigningPendingTests`).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Pair a desktop signing device to the organization (Priority: P1)

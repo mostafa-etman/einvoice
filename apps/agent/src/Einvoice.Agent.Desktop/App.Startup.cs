@@ -54,14 +54,14 @@ public partial class App
                 services.AddSingleton(_settings);
                 services.AddSingleton(_ => new AgentApiClient(_settings.ApiBaseUrl, _settings.DeviceToken));
                 services.AddSingleton(_ => new SqliteOfflineQueue(_settings.QueueDatabasePath));
-                services.AddSingleton(_ => new SigningMaterialResolver(_settings));
+                services.AddSingleton<ISigningProvider>(_ => SigningProviderFactory.Create(_settings));
                 services.AddSingleton<SigningWorker>(sp =>
                 {
                     var worker = new SigningWorker(
                         sp.GetRequiredService<AgentSettings>(),
                         sp.GetRequiredService<AgentApiClient>(),
                         sp.GetRequiredService<SqliteOfflineQueue>(),
-                        sp.GetRequiredService<SigningMaterialResolver>(),
+                        sp.GetRequiredService<ISigningProvider>(),
                         sp.GetRequiredService<ILogger<SigningWorker>>(),
                         GetPinForSigning);
                     return worker;
@@ -87,7 +87,7 @@ public partial class App
 
     private string? GetPinForSigning()
     {
-        if (_settings!.SigningKeySource == SigningKeySource.Software)
+        if (_settings!.SigningProvider == SigningProviderKind.Software)
             return null;
 
         if (!string.IsNullOrEmpty(_sessionPin) && DateTimeOffset.UtcNow < _pinExpires)
@@ -139,7 +139,7 @@ public partial class App
         if (_tray is null || _worker is null || _settings is null) return;
         var pin = string.IsNullOrEmpty(_sessionPin) ? "PIN locked" : "PIN unlocked";
         var text =
-            $"eInvoice Agent | {_worker.StatusText} | pending={_worker.PendingCount} | {pin} | key={_settings.SigningKeySource}";
+            $"eInvoice Agent | {_worker.StatusText} | pending={_worker.PendingCount} | {pin} | {_settings.SigningProvider.ToConfigValue()}";
         _tray.Text = text.Length <= 63 ? text : text[..63];
     }
 

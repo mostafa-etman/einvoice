@@ -1,4 +1,3 @@
-using System.Text;
 using Einvoice.Agent.Channel;
 using Einvoice.Agent.Config;
 using Einvoice.Agent.Queue;
@@ -11,17 +10,16 @@ using Newtonsoft.Json.Linq;
 namespace Einvoice.Agent.Workers;
 
 /// <summary>
-/// Polls cloud for jobs, signs via token/software, uploads through SQLite offline queue.
+/// Polls cloud for jobs, signs via <see cref="ISigningProvider"/>, uploads through SQLite offline queue.
 /// </summary>
 public sealed class SigningWorker : BackgroundService
 {
     private readonly AgentSettings _settings;
     private readonly AgentApiClient _api;
     private readonly SqliteOfflineQueue _queue;
-    private readonly SigningMaterialResolver _keys;
+    private readonly ISigningProvider _signer;
     private readonly ILogger<SigningWorker> _log;
     private readonly Func<string?> _pinProvider;
-    private readonly object _gate = new();
 
     public event Action? StateChanged;
 
@@ -29,19 +27,20 @@ public sealed class SigningWorker : BackgroundService
     public bool Online { get; private set; }
     public bool HasDeviceToken => !string.IsNullOrWhiteSpace(_settings.DeviceToken) && !_api.IsUnpaired;
     public int PendingCount => _queue.CountPending();
+    public string ProviderId => _signer.ProviderId;
 
     public SigningWorker(
         AgentSettings settings,
         AgentApiClient api,
         SqliteOfflineQueue queue,
-        SigningMaterialResolver keys,
+        ISigningProvider signer,
         ILogger<SigningWorker> log,
         Func<string?> pinProvider)
     {
         _settings = settings;
         _api = api;
         _queue = queue;
-        _keys = keys;
+        _signer = signer;
         _log = log;
         _pinProvider = pinProvider;
     }
@@ -139,20 +138,25 @@ public sealed class SigningWorker : BackgroundService
             ct.ThrowIfCancellationRequested();
             try
             {
-                var pin = _pinProvider();
-                using var material = _keys.Acquire(pin);
-                var result = SignPipelineExtensions.SignDocumentJson(item.PayloadJson, material);
+                var pin = _signer.RequiresPin ? _pinProvider() : null;
+                var result = SignPipeline.SignDocumentJson(item.PayloadJson, _signer, pin);
                 var signedEnvelope = new JObject
                 {
                     ["documentId"] = item.DocumentId,
                     ["documentVersion"] = item.DocumentVersion,
                     ["signatureType"] = result.SignatureType,
                     ["cadesBase64"] = result.CadesBase64,
-                    ["certificateThumbprint"] = material.Certificate.Thumbprint,
-                    ["signingSource"] = material.Source,
+                    ["certificateThumbprint"] = result.CertificateThumbprint,
+                    ["signingSource"] = result.SourceLabel,
+                    ["signingProvider"] = _signer.ProviderId,
+                    ["hardwareVerified"] = _signer.IsHardwarePathVerified,
                 };
                 _queue.MarkSigned(item.Id, signedEnvelope.ToString(Formatting.None));
-                _log.LogInformation("Signed job {JobId} via {Source}", item.JobId, material.Source);
+                _log.LogInformation(
+                    "Signed job {JobId} via provider={Provider} source={Source}",
+                    item.JobId,
+                    _signer.ProviderId,
+                    result.SourceLabel);
             }
             catch (Exception ex)
             {
@@ -208,20 +212,5 @@ public sealed class SigningWorker : BackgroundService
                 _queue.MarkAttemptFailed(item.Id, ex.Message, dead: false);
             }
         }
-    }
-}
-
-public static class SignPipelineExtensions
-{
-    public static SignPipeline.Result SignDocumentJson(string documentJson, TokenSigningContext material)
-    {
-        var canonical = SigningInput.CanonicalWithoutSignaturesFromJson(documentJson);
-        var content = Encoding.UTF8.GetBytes(canonical);
-        var der = SigningMaterialResolver.SignContent(material, content);
-        return new SignPipeline.Result(
-            SignPipeline.IssuerSignatureType,
-            Convert.ToBase64String(der),
-            canonical,
-            content);
     }
 }

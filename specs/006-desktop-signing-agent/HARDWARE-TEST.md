@@ -1,127 +1,112 @@
-# Hardware token signing — Windows test runbook
+# Hardware token signing — PENDING until a physical eSeal arrives
 
-**Status**: Implementation is ready for **your** confirmation on a physical eSeal
-token. Do **not** treat hardware signing as verified until you complete the
-steps below and confirm success.
+**Marker**: `HARDWARE_SIGNING_PENDING`  
+**Status**: Implementation is **token-ready** (library load, cert selection, PIN login,
+CSP fallback), but **UNVERIFIED**. Do **not** claim hardware signing works until you
+complete this runbook on a real token and confirm success.
 
-Software-key CI path remains the automated gate (`EINVOICE_SIGNING_KEY_SOURCE=Software`).
+Software provider (`SIGNING_PROVIDER=software`) is the verified path for CI and
+local progress today.
 
-## Prerequisites
+Skipped CI tests (never counted as passed):
+`HardwareTokenSigningPendingTests` in `apps/agent/tests/Einvoice.Agent.Tests/`.
 
-1. API running (`pnpm --filter @einvoice/api start:dev` or Compose) with migrations applied (`20260725060000_signing_devices`).
-2. Web app running; you can open **Devices** and **Documents**.
-3. .NET 8 SDK; build desktop agent:
+---
+
+## Provider switch
+
+| Config | Provider | When |
+|--------|----------|------|
+| `SIGNING_PROVIDER=software` (default) | `SoftwareKeySigningProvider` | Dev + CI now |
+| `SIGNING_PROVIDER=pkcs11` | `Pkcs11TokenSigningProvider` | Physical token later |
+
+Aliases: `EINVOICE_SIGNING_PROVIDER`, legacy `EINVOICE_SIGNING_KEY_SOURCE`
+(`Software` → software; `Pkcs11` / `Csp` / `Auto` → pkcs11).
+
+---
+
+## Prerequisites (token day)
+
+1. API + web running; migrations include `20260725060000_signing_devices`.
+2. Build desktop agent:
 
 ```powershell
 dotnet build apps/agent/src/Einvoice.Agent.Desktop/Einvoice.Agent.Desktop.csproj -c Release
 ```
 
-4. USB eSeal token plugged in; vendor middleware installed so one of these exists:
+3. USB eSeal plugged in; vendor middleware installed so one of these exists:
    - `C:\Windows\System32\eps2003csp11.dll`
    - `C:\Windows\System32\SignatureP11.dll`
    - or set `EINVOICE_PKCS11_LIBRARY` to the real path
-5. You know the token **PIN**.
+4. You know the token **PIN**.
 
-## Environment (PowerShell before launch)
+## Environment
 
 ```powershell
 $env:AGENT_ENVIRONMENT = "Development"
-$env:EINVOICE_API_BASE_URL = "http://localhost:3001"   # your API
-$env:EINVOICE_SIGNING_KEY_SOURCE = "Auto"              # Pkcs11 then CSP
-# Optional if auto-probe fails:
+$env:EINVOICE_API_BASE_URL = "http://localhost:3001"
+$env:SIGNING_PROVIDER = "pkcs11"
+# Optional:
 # $env:EINVOICE_PKCS11_LIBRARY = "C:\Windows\System32\eps2003csp11.dll"
-# Optional if multiple certs on token:
-# $env:EINVOICE_CERT_FILTER = "Egypt Trust"            # or issuer substring
-# $env:EINVOICE_CERT_THUMBPRINT = "AABBCC..."            # SHA-1 hex, no spaces
-```
+# $env:EINVOICE_CERT_FILTER = "Egypt Trust"
+# $env:EINVOICE_CERT_THUMBPRINT = "AABBCC..."
 
-Launch:
-
-```powershell
 dotnet run --project apps/agent/src/Einvoice.Agent.Desktop -c Release
 ```
 
-Tray icon appears (system tray).
-
 ---
 
-## Test 1 — Pair device (T022)
+## Manual test (exact sequence when token arrives)
+
+### 1. Pair device
 
 | Step | Action | Expected |
 |------|--------|----------|
-| 1 | In web **Devices**, create a pairing code (copy plaintext once) | Code shown once |
-| 2 | Tray → **Pair device…** → paste code → Pair | Success dialog with deviceId/tenantId |
-| 3 | Refresh Devices list | New device **PAIRED**, last seen updates within ~poll interval |
-| 4 | Tray tooltip | Shows Online / Not unpaired |
+| 1 | Web **Devices** → create pairing code | Code shown once |
+| 2 | Tray → **Pair device…** → paste code | Success; device **PAIRED** |
+| 3 | Tray tooltip | Online |
 
-**Fail clues**: 400 expired/consumed code; API URL wrong; CORS/TLS.
-
----
-
-## Test 2 — PIN unlock (T048)
+### 2. Enter PIN
 
 | Step | Action | Expected |
 |------|--------|----------|
-| 1 | Tray → **Unlock token PIN…** | PIN dialog (local only) |
-| 2 | Enter correct PIN | Dialog closes; tray shows `PIN unlocked` |
-| 3 | Enter wrong PIN later when signing | Clear error; no cloud upload of PIN |
+| 1 | Tray → **Unlock token PIN…** | Local PIN dialog |
+| 2 | Enter correct PIN | Tray shows `PIN unlocked` |
+| 3 | Confirm PIN never leaves the machine | No PIN in API/heartbeat/network |
 
-PIN must **never** appear in API logs, heartbeat JSON, or network traces.
-
----
-
-## Test 3 — End-to-end hardware sign (core)
+### 3. Sign gv-01 / READY document (CAdES structural checklist)
 
 | Step | Action | Expected |
 |------|--------|----------|
-| 1 | Create a document in web, validate, **Mark ready**, **Send for signature** | Job pending |
-| 2 | Agent online + PIN unlocked + token inserted | Within poll (~5s) job claimed |
-| 3 | Watch tray `pending=` | Goes up then down after sign+upload |
-| 4 | Refresh document | Status **SIGNED**, `signatures[0].signatureType === "I"`, non-empty Base64 value |
-| 5 | Devices last seen | Recent |
+| 1 | Create/validate document (or use locked gv-01 digest input) → Mark ready → **Send for signature** | Job pending |
+| 2 | Agent claims + signs with PKCS#11/CSP | Tray `pending=` drains |
+| 3 | Document status | **SIGNED**, `signatureType === "I"`, non-empty Base64 |
+| 4 | Confirm source | `signingSource` starts with `PKCS#11:` or `CSP/CNG:` — **not** `SoftwarePEM` |
+| 5 | FR-011 checklist | Detached DigestedData CMS; content-type; SHA-256; signing-time; ESS cert-id; crypto verifies vs **eSeal** cert |
 
-**Confirm in tray/logs** that signing source is `PKCS#11:eps2003csp11.dll` (or your DLL) or `CSP/CNG:CurrentUser\My` — not `SoftwarePEM`.
-
-**If PKCS#11 fails and CSP works**: Auto fallback is OK for this test; note which path worked.
-
-**Do not claim success** until step 4 shows SIGNED with type I from a run that used the hardware path.
-
----
-
-## Test 4 — Revocation while agent running
+### 4. Submit to ETA sandbox (definitive oracle)
 
 | Step | Action | Expected |
 |------|--------|----------|
-| 1 | In Devices, **Unpair** the agent device | Device REVOKED |
-| 2 | Wait one poll / try heartbeat | Tray → Unpaired / 401; uploads stop |
-| 3 | Document left pending | Not corrupted; can send again after re-pair |
+| 1 | Submit the signed document to ETA preprod/sandbox | ETA accepts (or clear reject reason) |
+| 2 | Record acceptance id / response | Keep for clearing `HARDWARE_SIGNING_PENDING` |
 
----
-
-## Test 5 — Offline queue (T037–T039)
+### 5. Revocation + offline (regression)
 
 | Step | Action | Expected |
 |------|--------|----------|
-| 1 | Pair + unlock PIN | Ready |
-| 2 | Stop API (or unplug network) | Tray may show Offline |
-| 3 | Send doc for signature while API down (or claim already queued) | Items persist under `%LocalAppData%\Einvoice.Agent\queue.db` |
-| 4 | Restart agent mid-offline | Queue restored (ListAll / pending count) |
-| 5 | Bring API back | PENDING_UPLOAD drains once; document SIGNED once (no duplicate signatures) |
-
----
-
-## Software-only smoke (optional, no token)
-
-```powershell
-$env:EINVOICE_SIGNING_KEY_SOURCE = "Software"
-# optional paths to TestKeys PEMs
-dotnet test apps/agent/Einvoice.Agent.sln --filter CadesSoftwareKeyGolden
-```
-
-Expected: CI golden CAdES checklist still green.
+| 1 | Unpair device while agent running | Tray Unpaired / 401 |
+| 2 | Offline queue under `%LocalAppData%\Einvoice.Agent\queue.db` | Survives restart; drains once; no duplicate signatures |
 
 ---
 
 ## After you confirm
 
-Reply with: which DLL/path worked, whether source was PKCS#11 or CSP, and that a real document reached **SIGNED** with type **I**. Only then we treat hardware signing as verified.
+Reply with: DLL path, PKCS#11 vs CSP, that a real doc reached **SIGNED** with type **I**,
+FR-011 checklist OK, and ETA sandbox acceptance. Only then:
+
+1. Set `Pkcs11TokenSigningProvider.IsHardwarePathVerified => true`
+2. Remove `Skip` from `HardwareTokenSigningPendingTests` (or convert to gated `EINVOICE_HARDWARE_TOKEN=1`)
+3. Clear `HARDWARE_SIGNING_PENDING` from tasks/spec
+
+Until then: **hardware signing is UNVERIFIED**.

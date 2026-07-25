@@ -1,20 +1,10 @@
 namespace Einvoice.Agent.Config;
 
-public enum SigningKeySource
-{
-    /// <summary>Committed software RSA test key (CI / no token).</summary>
-    Software,
-
-    /// <summary>PKCS#11 first (eps2003csp11.dll / SignatureP11.dll).</summary>
-    Pkcs11,
-
-    /// <summary>Windows certificate store / CSP-CNG only.</summary>
-    Csp,
-
-    /// <summary>Try PKCS#11, then CSP fallback (recommended for hardware).</summary>
-    Auto,
-}
-
+/// <summary>
+/// Preferred config: <c>SIGNING_PROVIDER=software|pkcs11</c>
+/// (aliases: <c>EINVOICE_SIGNING_PROVIDER</c>, legacy <c>EINVOICE_SIGNING_KEY_SOURCE</c>).
+/// Default is <see cref="Signing.SigningProviderKind.Software"/> so progress is not blocked without a token.
+/// </summary>
 public sealed class AgentSettings
 {
     public string Environment { get; init; } = "Development";
@@ -22,7 +12,9 @@ public sealed class AgentSettings
     public string? DeviceToken { get; set; }
     public string DeviceLabel { get; init; } = System.Environment.MachineName;
 
-    public SigningKeySource SigningKeySource { get; init; } = SigningKeySource.Auto;
+    /// <summary>Active signing provider. Default: software.</summary>
+    public Signing.SigningProviderKind SigningProvider { get; init; } =
+        Signing.SigningProviderKind.Software;
 
     /// <summary>PKCS#11 module path. Default probes common ETA token DLLs.</summary>
     public string? Pkcs11LibraryPath { get; init; }
@@ -56,14 +48,17 @@ public sealed class AgentSettings
         env ??= ProcessEnv();
         string? G(string k) => env.TryGetValue(k, out var v) ? v : null;
 
-        var source = SigningKeySource.Auto;
-        var raw = G("EINVOICE_SIGNING_KEY_SOURCE");
-        if (!string.IsNullOrWhiteSpace(raw) && Enum.TryParse<SigningKeySource>(raw, true, out var parsed))
-            source = parsed;
+        var provider = Signing.SigningProviderKind.Software;
+        var rawProvider = G("SIGNING_PROVIDER")
+            ?? G("EINVOICE_SIGNING_PROVIDER")
+            ?? G("EINVOICE_SIGNING_KEY_SOURCE");
+
+        if (Signing.SigningProviderKindExtensions.TryParse(rawProvider, out var parsed))
+            provider = parsed;
         else if (string.Equals(G("EINVOICE_HARDWARE_TOKEN"), "1", StringComparison.Ordinal))
-            source = SigningKeySource.Auto;
+            provider = Signing.SigningProviderKind.Pkcs11;
         else if (string.Equals(G("EINVOICE_USE_SOFTWARE_KEY"), "1", StringComparison.Ordinal))
-            source = SigningKeySource.Software;
+            provider = Signing.SigningProviderKind.Software;
 
         return new AgentSettings
         {
@@ -71,7 +66,7 @@ public sealed class AgentSettings
             ApiBaseUrl = G("EINVOICE_API_BASE_URL") ?? G("API_BASE_URL") ?? "http://localhost:3001",
             DeviceToken = G("EINVOICE_DEVICE_TOKEN"),
             DeviceLabel = G("EINVOICE_DEVICE_LABEL") ?? System.Environment.MachineName,
-            SigningKeySource = source,
+            SigningProvider = provider,
             Pkcs11LibraryPath = G("EINVOICE_PKCS11_LIBRARY"),
             CertificateSubjectFilter = G("EINVOICE_CERT_FILTER"),
             CertificateThumbprint = G("EINVOICE_CERT_THUMBPRINT"),
