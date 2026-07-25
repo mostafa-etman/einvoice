@@ -13,34 +13,42 @@
 ## Technical Context
 
 <!--
-  ACTION REQUIRED: Replace the content in this section with the technical details
-  for the project. The structure here is presented in advisory capacity to guide
-  the iteration process.
+  Defaults below match the eInvoice constitution Technology Baseline.
+  Replace only where the feature genuinely differs; justify deviations in
+  Complexity Tracking.
 -->
 
-**Language/Version**: [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]
+**Language/Version**: TypeScript (NestJS + Next.js 15); C# / .NET 8 (desktop agent)
 
-**Primary Dependencies**: [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]
+**Primary Dependencies**: NestJS, Prisma, BullMQ, Next.js 15, Tailwind, shadcn/ui, next-intl, TanStack Query, BouncyCastle, PKCS#11/CSP
 
-**Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
+**Storage**: PostgreSQL (Prisma + RLS), Redis, MinIO
 
-**Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]
+**Testing**: Automated unit/integration/contract tests required for user-visible changes; ETA canonical serialization parity tests when signing is touched
 
-**Target Platform**: [e.g., Linux server, iOS 15+, WASM or NEEDS CLARIFICATION]
+**Target Platform**: Linux VPS (Docker Compose + Traefik/TLS); Windows desktop signing agent
 
-**Project Type**: [e.g., library/cli/web-service/mobile-app/compiler/desktop-app or NEEDS CLARIFICATION]
+**Project Type**: Multi-tenant SaaS web application + desktop signing agent
 
-**Performance Goals**: [domain-specific, e.g., 1000 req/s, 10k lines/sec, 60 fps or NEEDS CLARIFICATION]
+**Performance Goals**: [domain-specific, e.g., p95 API latency targets, queue throughput or NEEDS CLARIFICATION]
 
-**Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]
+**Constraints**: Tenant RLS isolation; secrets encrypted at rest; TLS everywhere; ETA sandbox/preprod by default; no hardcoded ETA schemas/URLs/creds
 
-**Scale/Scope**: [domain-specific, e.g., 10k users, 1M LOC, 50 screens or NEEDS CLARIFICATION]
+**Scale/Scope**: [domain-specific, e.g., tenants, docs/day, concurrent signers or NEEDS CLARIFICATION]
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- **I. Reliability & Audit**: Acceptance criteria + automated tests planned for every user-visible change; audit events identified for security/business actions
+- **II. Security by Default**: Secrets/ETA creds encrypted at rest; least privilege; TLS; no secrets in repo/logs/clients
+- **III. Multi-Tenant Isolation**: Tenant-scoped data uses Postgres RLS; request/job tenant context defined; no cross-tenant paths
+- **IV. Serialization Parity**: If signing/serialization is in scope, shared test vectors and backend↔agent parity coverage planned
+- **V. Runtime ETA Config**: Document types/versions loaded from ETA (or ETA-refreshed cache); URLs/creds/certs are per-environment config only
+- **VI. Sandbox-First**: Feature targets ETA sandbox/preprod; production config remains separate
+- **VII. UX/i18n**: UI uses design system; ar/en + RTL; responsive behavior specified
+- **VIII. Phased Full-Stack DoD**: Phase ships Backend + Frontend (+ agent if signing) with tests; Definition of Done checklist acknowledged
+- **Stack**: Plan stays within Technology Baseline or records justified Complexity Tracking entries
 
 ## Project Structure
 
@@ -58,46 +66,36 @@ specs/[###-feature]/
 
 ### Source Code (repository root)
 <!--
-  ACTION REQUIRED: Replace the placeholder tree below with the concrete layout
-  for this feature. Delete unused options and expand the chosen structure with
-  real paths (e.g., apps/admin, packages/something). The delivered plan must
-  not include Option labels.
+  ACTION REQUIRED: Replace with the concrete layout for this feature.
+  Default multi-tenant SaaS layout below; remove unused trees and expand
+  real paths. The delivered plan must not include Option labels.
 -->
 
 ```text
-# [REMOVE IF UNUSED] Option 1: Single project (DEFAULT)
-src/
-├── models/
-├── services/
-├── cli/
-└── lib/
-
-tests/
-├── contract/
-├── integration/
-└── unit/
-
-# [REMOVE IF UNUSED] Option 2: Web application (when "frontend" + "backend" detected)
 backend/
 ├── src/
-│   ├── models/
-│   ├── services/
-│   └── api/
+│   ├── modules/
+│   ├── prisma/
+│   └── common/
 └── tests/
+    ├── unit/
+    ├── integration/
+    └── contract/
 
 frontend/
 ├── src/
+│   ├── app/
 │   ├── components/
-│   ├── pages/
-│   └── services/
+│   ├── messages/          # next-intl locales (ar/en)
+│   └── lib/
 └── tests/
 
-# [REMOVE IF UNUSED] Option 3: Mobile + API (when "iOS/Android" detected)
-api/
-└── [same as backend above]
+desktop-agent/             # .NET 8 signing agent (when in scope)
+├── src/
+└── tests/
+    └── vectors/           # shared ETA canonical serialization vectors
 
-ios/ or android/
-└── [platform-specific structure: feature modules, UI flows, platform tests]
+infra/                     # Docker Compose, Traefik, env templates
 ```
 
 **Structure Decision**: [Document the selected structure and reference the real

@@ -1,0 +1,242 @@
+openapi: 3.0.3
+info:
+  title: eInvoice ETA Integration Core API
+  version: 0.1.0
+  description: >
+    Connection status, real Test Connection (OAuth2 client-credentials),
+    and Document Types / Versions from ETA. Never returns access_token or
+    client secrets. Requires Bearer JWT and X-Tenant-Id.
+servers:
+  - url: https://api.localhost
+security:
+  - bearerAuth: []
+  - tenantHeader: []
+
+paths:
+  /settings/eta/connection:
+    get:
+      summary: ETA connection status (no raw token)
+      operationId: getEtaConnectionStatus
+      tags: [EtaConnection]
+      responses:
+        "200":
+          description: Status view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EtaConnectionStatus"
+        "403":
+          description: Missing settings.eta.view
+
+  /settings/eta-credentials/test-connection:
+    post:
+      summary: Real Test Connection (sandbox/preprod identity token request)
+      operationId: testEtaConnection
+      tags: [EtaConnection]
+      description: >
+        Replaces Phase 2 stub. Performs live client-credentials token request
+        using tenant credentials + ETA_IDENTITY_BASE_URL. On missing credentials
+        returns setup-required error without calling ETA.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                branchId:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Token acquired; status updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EtaConnectionStatus"
+        "400":
+          description: Setup required or validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EtaSetupError"
+        "401":
+          description: ETA rejected credentials (mapped)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EtaMappedError"
+        "403":
+          description: Missing settings.eta.manage
+        "502":
+          description: ETA upstream failure after retries
+
+  /settings/eta/document-types:
+    get:
+      summary: List document types (ETA-backed cache)
+      operationId: listEtaDocumentTypes
+      tags: [EtaDocumentTypes]
+      parameters:
+        - name: refresh
+          in: query
+          schema:
+            type: boolean
+          description: If true, bypass cache and refetch from ETA (requires manage)
+      responses:
+        "200":
+          description: Document types
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, fetchedAt, fromCache]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/EtaDocumentTypeSummary"
+                  fetchedAt:
+                    type: string
+                    format: date-time
+                  fromCache:
+                    type: boolean
+        "403":
+          description: Missing permission
+
+  /settings/eta/document-types/{typeId}/versions:
+    get:
+      summary: Document type versions for a type
+      operationId: getEtaDocumentTypeVersions
+      tags: [EtaDocumentTypes]
+      parameters:
+        - name: typeId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: refresh
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Versions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [documentTypeId, items, fetchedAt, fromCache]
+                properties:
+                  documentTypeId:
+                    type: string
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/EtaDocumentTypeVersionSummary"
+                  fetchedAt:
+                    type: string
+                    format: date-time
+                  fromCache:
+                    type: boolean
+        "404":
+          description: Type not found upstream or empty
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    tenantHeader:
+      type: apiKey
+      in: header
+      name: X-Tenant-Id
+
+  schemas:
+    EtaConnectionStatus:
+      type: object
+      required: [connected, setupRequired]
+      properties:
+        connected:
+          type: boolean
+        setupRequired:
+          type: boolean
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        scope:
+          type: string
+          nullable: true
+        environment:
+          type: string
+          description: e.g. sandbox, preprod, production
+          nullable: true
+        lastTestOutcome:
+          type: string
+          enum: [success, failure, never]
+        lastTestMessage:
+          type: string
+          nullable: true
+        settingsPath:
+          type: string
+          description: Relative web path to ETA credentials settings when setupRequired
+          example: /settings/eta-credentials
+      description: Never includes access_token or clientSecret
+
+    EtaSetupError:
+      type: object
+      required: [code, message, settingsPath]
+      properties:
+        code:
+          type: string
+          enum: [ETA_CREDENTIALS_SETUP_REQUIRED]
+        message:
+          type: string
+        settingsPath:
+          type: string
+          example: /settings/eta-credentials
+
+    EtaMappedError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Mapped from ETA OAuth/API errors (e.g. invalid_client)
+          example: invalid_client
+        message:
+          type: string
+          description: Safe operator-facing message (no secrets)
+
+    EtaDocumentTypeSummary:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        activeVersion:
+          type: string
+          nullable: true
+      additionalProperties: true
+      description: Subset of ETA document type fields; source is ETA JSON
+
+    EtaDocumentTypeVersionSummary:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+      additionalProperties: true
+      description: Subset of ETA version fields; schemas not hardcoded in product

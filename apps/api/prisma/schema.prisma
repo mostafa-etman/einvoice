@@ -1,0 +1,462 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ExchangeRateSource {
+  MANUAL
+}
+
+enum ItemCodeType {
+  EGS
+  GS1
+}
+
+enum DocumentKind {
+  INVOICE
+  CREDIT_NOTE
+  DEBIT_NOTE
+  EXPORT_INVOICE
+  EXPORT_CREDIT_NOTE
+  EXPORT_DEBIT_NOTE
+}
+
+enum DocumentStatus {
+  DRAFT
+  READY
+  SIGNED
+}
+
+enum PairingCodeStatus {
+  ACTIVE
+  CONSUMED
+  REVOKED
+  EXPIRED
+}
+
+enum DeviceStatus {
+  PAIRED
+  REVOKED
+}
+
+enum SignatureJobStatus {
+  PENDING
+  CLAIMED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  memberships     Membership[]
+  refreshSessions RefreshSession[]
+  auditLogs       AuditLog[]       @relation("AuditActor")
+
+  @@map("users")
+}
+
+model Tenant {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  branches             Branch[]
+  roles                Role[]
+  memberships          Membership[]
+  rolePermissions      RolePermission[]
+  auditLogs            AuditLog[]
+  tenantCurrencies     TenantCurrency[]
+  exchangeRates        ExchangeRate[]
+  tenantEtaCredentials TenantEtaCredential[]
+  itemCodes            ItemCode[]
+  documents            Document[]
+  pairingCodes         PairingCode[]
+  signingDevices       SigningDevice[]
+  signatureJobs        SignatureJob[]
+
+  @@map("tenants")
+}
+
+model Branch {
+  id                  String   @id @default(uuid()) @db.Uuid
+  tenantId            String   @map("tenant_id") @db.Uuid
+  name                String
+  isDefault           Boolean  @default(false) @map("is_default")
+  isActive            Boolean  @default(true) @map("is_active")
+  etaBranchCode       String?  @map("eta_branch_code")
+  activityCode        String?  @map("activity_code")
+  defaultCurrencyCode String?  @map("default_currency_code")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  defaultCurrency       Currency?              @relation(fields: [defaultCurrencyCode], references: [code])
+  tenantEtaCredentials  TenantEtaCredential[]
+  documents             Document[]
+
+  @@index([tenantId])
+  @@map("branches")
+}
+
+model Currency {
+  code      String   @id
+  nameEn    String   @map("name_en")
+  nameAr    String   @map("name_ar")
+  decimals  Int      @default(2)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  branches         Branch[]
+  tenantCurrencies TenantCurrency[]
+
+  @@map("currencies")
+}
+
+model TenantCurrency {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  currencyCode String   @map("currency_code")
+  isDefault    Boolean  @default(false) @map("is_default")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  currency Currency @relation(fields: [currencyCode], references: [code], onDelete: Restrict)
+
+  @@unique([tenantId, currencyCode])
+  @@index([tenantId])
+  @@map("tenant_currencies")
+}
+
+model ExchangeRate {
+  id                String             @id @default(uuid()) @db.Uuid
+  tenantId          String             @map("tenant_id") @db.Uuid
+  baseCurrencyCode  String             @map("base_currency_code")
+  quoteCurrencyCode String             @map("quote_currency_code")
+  rate              Decimal            @db.Decimal(18, 8)
+  source            ExchangeRateSource @default(MANUAL)
+  effectiveFrom     DateTime           @map("effective_from")
+  effectiveTo       DateTime?          @map("effective_to")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, baseCurrencyCode, quoteCurrencyCode])
+  @@map("exchange_rates")
+}
+
+model TenantEtaCredential {
+  id                           String   @id @default(uuid()) @db.Uuid
+  tenantId                     String   @map("tenant_id") @db.Uuid
+  branchId                     String?  @map("branch_id") @db.Uuid
+  clientId                     String   @map("client_id")
+  clientSecretCiphertext       Bytes    @map("client_secret_ciphertext")
+  clientSecretNonce            Bytes    @map("client_secret_nonce")
+  registrationNumber           String?  @map("registration_number")
+  activityCode                 String?  @map("activity_code")
+  isIntermediary               Boolean  @default(false) @map("is_intermediary")
+  onBehalfOfRegistrationNumber String?  @map("on_behalf_of_registration_number")
+  onBehalfOfName               String?  @map("on_behalf_of_name")
+  createdAt                    DateTime @default(now()) @map("created_at")
+  updatedAt                    DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch? @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, branchId])
+  @@map("tenant_eta_credentials")
+}
+
+model ItemCode {
+  id             String       @id @default(uuid()) @db.Uuid
+  tenantId       String       @map("tenant_id") @db.Uuid
+  type           ItemCodeType
+  code           String
+  description    String
+  isActive       Boolean      @default(true) @map("is_active")
+  lastSyncStatus String?      @map("last_sync_status")
+  lastSyncAt     DateTime?    @map("last_sync_at")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, type, code])
+  @@index([tenantId])
+  @@map("item_codes")
+}
+
+model Permission {
+  id          String @id @default(uuid()) @db.Uuid
+  code        String @unique
+  description String @default("")
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model Role {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  name      String
+  isSystem  Boolean  @default(false) @map("is_system")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  memberships     Membership[]
+  rolePermissions RolePermission[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("roles")
+}
+
+model RolePermission {
+  roleId       String @map("role_id") @db.Uuid
+  permissionId String @map("permission_id") @db.Uuid
+  tenantId     String @map("tenant_id") @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([tenantId])
+  @@map("role_permissions")
+}
+
+model Membership {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  roleId    String   @map("role_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, userId])
+  @@index([tenantId])
+  @@map("memberships")
+}
+
+model RefreshSession {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  tokenHash    String    @map("token_hash")
+  expiresAt    DateTime  @map("expires_at")
+  revokedAt    DateTime? @map("revoked_at")
+  replacedById String?   @map("replaced_by_id") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replacedBy RefreshSession?  @relation("RefreshRotation", fields: [replacedById], references: [id])
+  replaces   RefreshSession[] @relation("RefreshRotation")
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("refresh_sessions")
+}
+
+model AuditLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String?  @map("tenant_id") @db.Uuid
+  actorUserId  String?  @map("actor_user_id") @db.Uuid
+  action       String
+  resourceType String?  @map("resource_type")
+  resourceId   String?  @map("resource_id")
+  outcome      String
+  metadata     Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  actor  User?   @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@map("audit_logs")
+}
+
+model Document {
+  id                     String         @id @default(uuid()) @db.Uuid
+  tenantId               String         @map("tenant_id") @db.Uuid
+  kind                   DocumentKind
+  status                 DocumentStatus @default(DRAFT)
+  branchId               String         @map("branch_id") @db.Uuid
+  currencyCode           String         @map("currency_code")
+  exchangeRate           String?        @map("exchange_rate")
+  issueDateTime          DateTime       @map("issue_date_time")
+  internalId             String         @map("internal_id")
+  etaDocumentType        String         @map("eta_document_type")
+  etaDocumentTypeVersion String         @map("eta_document_type_version")
+  typeVersionFetchedAt   DateTime       @map("type_version_fetched_at")
+  receiverType           String?        @map("receiver_type")
+  receiverId             String?        @map("receiver_id")
+  receiverName           String?        @map("receiver_name")
+  receiverAddressJson    Json?          @map("receiver_address_json")
+  issuerSnapshotJson     Json           @map("issuer_snapshot_json")
+  referencesJson         Json?          @map("references_json")
+  extraDiscountAmount    String         @default("0.00") @map("extra_discount_amount")
+  totalSalesAmount       String         @default("0.00") @map("total_sales_amount")
+  totalDiscountAmount    String         @default("0.00") @map("total_discount_amount")
+  netAmount              String         @default("0.00") @map("net_amount")
+  totalAmount            String         @default("0.00") @map("total_amount")
+  totalItemsDiscountAmount String       @default("0.00") @map("total_items_discount_amount")
+  taxTotalsJson          Json           @default("[]") @map("tax_totals_json")
+  etaPayloadJson         Json           @map("eta_payload_json")
+  canonicalPreview       String?        @map("canonical_preview") @db.Text
+  signaturesJson         Json?          @map("signatures_json")
+  signedAt               DateTime?      @map("signed_at")
+  signedByDeviceId       String?        @map("signed_by_device_id") @db.Uuid
+  version                Int            @default(0)
+  createdAt              DateTime       @default(now()) @map("created_at")
+  updatedAt              DateTime       @updatedAt @map("updated_at")
+  createdByUserId        String?        @map("created_by_user_id") @db.Uuid
+  updatedByUserId        String?        @map("updated_by_user_id") @db.Uuid
+
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch          Branch         @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  lines           DocumentLine[]
+  signedByDevice  SigningDevice? @relation("DocumentSignedByDevice", fields: [signedByDeviceId], references: [id], onDelete: SetNull)
+  signatureJobs   SignatureJob[]
+
+  @@unique([tenantId, internalId])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@map("documents")
+}
+
+model PairingCode {
+  id                 String            @id @default(uuid()) @db.Uuid
+  tenantId           String            @map("tenant_id") @db.Uuid
+  codeHash           String            @map("code_hash")
+  codeHint           String?           @map("code_hint")
+  status             PairingCodeStatus @default(ACTIVE)
+  expiresAt          DateTime          @map("expires_at")
+  createdByUserId    String?           @map("created_by_user_id") @db.Uuid
+  consumedAt         DateTime?         @map("consumed_at")
+  consumedByDeviceId String?           @map("consumed_by_device_id") @db.Uuid
+  createdAt          DateTime          @default(now()) @map("created_at")
+  updatedAt          DateTime          @updatedAt @map("updated_at")
+
+  tenant           Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  consumedByDevice SigningDevice? @relation("PairingCodeConsumedDevice", fields: [consumedByDeviceId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([codeHash])
+  @@map("pairing_codes")
+}
+
+model SigningDevice {
+  id                 String       @id @default(uuid()) @db.Uuid
+  tenantId           String       @map("tenant_id") @db.Uuid
+  label              String
+  machineFingerprint String?      @map("machine_fingerprint")
+  status             DeviceStatus @default(PAIRED)
+  tokenHash          String       @map("token_hash")
+  tokenExpiresAt     DateTime?    @map("token_expires_at")
+  lastSeenAt         DateTime?    @map("last_seen_at")
+  lastReadyJson      Json?        @map("last_ready_json")
+  pairedAt           DateTime     @default(now()) @map("paired_at")
+  revokedAt          DateTime?    @map("revoked_at")
+  createdAt          DateTime     @default(now()) @map("created_at")
+  updatedAt          DateTime     @updatedAt @map("updated_at")
+
+  tenant             Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  pairingCodesClosed PairingCode[]  @relation("PairingCodeConsumedDevice")
+  signatureJobs      SignatureJob[]
+  signedDocuments     Document[]    @relation("DocumentSignedByDevice")
+
+  @@index([tenantId])
+  @@index([tokenHash])
+  @@map("signing_devices")
+}
+
+model SignatureJob {
+  id                String             @id @default(uuid()) @db.Uuid
+  tenantId          String             @map("tenant_id") @db.Uuid
+  documentId        String             @map("document_id") @db.Uuid
+  documentVersion   Int                @map("document_version")
+  status            SignatureJobStatus @default(PENDING)
+  claimedByDeviceId String?            @map("claimed_by_device_id") @db.Uuid
+  claimExpiresAt    DateTime?          @map("claim_expires_at")
+  failureCode       String?            @map("failure_code")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+  completedAt       DateTime?          @map("completed_at")
+
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  document        Document       @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  claimedByDevice SigningDevice? @relation(fields: [claimedByDeviceId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([documentId])
+  @@map("signature_jobs")
+}
+
+model DocumentLine {
+  id                   String   @id @default(uuid()) @db.Uuid
+  tenantId             String   @map("tenant_id") @db.Uuid
+  documentId           String   @map("document_id") @db.Uuid
+  lineNumber           Int      @map("line_number")
+  description          String
+  itemType             String   @map("item_type")
+  itemCode             String   @map("item_code")
+  unitType             String   @map("unit_type")
+  quantity             String
+  unitPrice            String   @map("unit_price")
+  currencySold         String?  @map("currency_sold")
+  amountSold           String?  @map("amount_sold")
+  amountEgp            String?  @map("amount_egp")
+  currencyExchangeRate String?  @map("currency_exchange_rate")
+  discountRate         String?  @map("discount_rate")
+  discountAmount       String   @default("0.00") @map("discount_amount")
+  salesTotal           String   @default("0.00") @map("sales_total")
+  netTotal             String   @default("0.00") @map("net_total")
+  total                String   @default("0.00")
+  valueDifference      String   @default("0.00") @map("value_difference")
+  totalTaxableFees     String   @default("0.00") @map("total_taxable_fees")
+  itemsDiscount        String   @default("0.00") @map("items_discount")
+  internalCode         String?  @map("internal_code")
+
+  document Document         @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  taxes    DocumentLineTax[]
+
+  @@unique([documentId, lineNumber])
+  @@index([tenantId])
+  @@map("document_lines")
+}
+
+model DocumentLineTax {
+  id             String @id @default(uuid()) @db.Uuid
+  tenantId       String @map("tenant_id") @db.Uuid
+  documentLineId String @map("document_line_id") @db.Uuid
+  taxType        String @map("tax_type")
+  subType        String @map("sub_type")
+  rate           String
+  amount         String
+
+  line DocumentLine @relation(fields: [documentLineId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("document_line_taxes")
+}

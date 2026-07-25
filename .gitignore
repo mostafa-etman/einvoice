@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Builds
+dist/
+build/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Certs (generated)
+infra/certs/*
+!infra/certs/README.md
+!infra/certs/.gitignore
+
+# .NET
+bin/
+obj/
+*.user
+*.suo
+
+# Logs & OS
+*.log
+.DS_Store
+Thumbs.db
+.tmp/
+*.swp
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Turbo
+.turbo/

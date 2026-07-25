@@ -1,0 +1,23 @@
+{
+  "invoiceLines": [
+    {
+      "description": "Item",
+      "quantity": "5",
+      "taxableItems": [
+        {
+          "taxType": "T1",
+          "amount": "10.00",
+          "subType": "V001",
+          "rate": "14.00"
+        },
+        {
+          "taxType": "T3",
+          "amount": "0.00",
+          "subType": "ST",
+          "rate": "0.00"
+        }
+      ]
+    }
+  ],
+  "totalAmount": "10.00"
+}

@@ -1,0 +1,153 @@
+openapi: 3.0.3
+info:
+  title: eInvoice Tenant Admin API
+  version: 0.1.0
+  description: >
+    Tenant onboarding, context switch, branches, members, roles.
+    All tenant-scoped routes require Bearer access token and X-Tenant-Id
+    (except create-tenant). Server sets SET LOCAL app.tenant_id in a transaction.
+servers:
+  - url: https://api.localhost
+security:
+  - bearerAuth: []
+paths:
+  /tenants:
+    post:
+      operationId: createTenant
+      summary: Create tenant; caller becomes Owner; seed roles + default branch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "201":
+          description: Tenant created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+    get:
+      operationId: listMyTenants
+      summary: List tenants the current user belongs to
+      responses:
+        "200":
+          description: Memberships
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TenantMembership"
+  /branches:
+    get:
+      operationId: listBranches
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+      responses:
+        "200":
+          description: Branches for active tenant
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Branch"
+  /members:
+    get:
+      operationId: listMembers
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+      responses:
+        "200":
+          description: Tenant members
+        "403":
+          description: Missing members.view
+    post:
+      operationId: addMember
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, roleId]
+              properties:
+                email: { type: string, format: email }
+                roleId: { type: string, format: uuid }
+      responses:
+        "201":
+          description: Membership created
+        "403":
+          description: Missing members.manage
+    patch:
+      operationId: updateMemberRole
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [membershipId, roleId]
+              properties:
+                membershipId: { type: string, format: uuid }
+                roleId: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Role updated
+        "403":
+          description: Missing members.manage
+  /roles:
+    get:
+      operationId: listRoles
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+      responses:
+        "200":
+          description: Roles including Owner, Admin, Accountant, Viewer
+        "403":
+          description: Missing roles.view
+components:
+  parameters:
+    TenantHeader:
+      name: X-Tenant-Id
+      in: header
+      required: true
+      schema: { type: string, format: uuid }
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Tenant:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+    TenantMembership:
+      type: object
+      required: [tenant, role]
+      properties:
+        tenant: { $ref: "#/components/schemas/Tenant" }
+        role:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+    Branch:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        isDefault: { type: boolean }

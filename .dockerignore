@@ -1,0 +1,10 @@
+node_modules
+.git
+.next
+dist
+coverage
+.env
+.env.*
+*.log
+infra/certs/*
+!infra/certs/README.md

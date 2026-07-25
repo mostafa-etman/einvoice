@@ -98,9 +98,25 @@
 - **FR-006**: System MUST authenticate users via [NEEDS CLARIFICATION: auth method not specified - email/password, SSO, OAuth?]
 - **FR-007**: System MUST retain user data for [NEEDS CLARIFICATION: retention period not specified]
 
+### Constitution Constraints *(mandatory — map applicable principles)*
+
+<!--
+  Every feature spec MUST acknowledge constitution gates. Mark N/A only when
+  truly out of scope, with a one-line justification.
+-->
+
+- **CC-001 Reliability/Audit**: [Acceptance criteria coverage + audit events for this feature, or N/A]
+- **CC-002 Security**: [Secrets, authZ, TLS, credential handling implications, or N/A]
+- **CC-003 Tenant Isolation**: [Tenant-scoped entities and RLS expectations, or N/A]
+- **CC-004 ETA Serialization**: [Signing/canonical serialization impact + test vectors, or N/A]
+- **CC-005 Runtime ETA Config**: [Document types/URLs/creds must remain runtime/env config, or N/A]
+- **CC-006 Sandbox-First**: [ETA calls use sandbox/preprod in non-prod, or N/A]
+- **CC-007 UX/i18n**: [ar/en + RTL + responsive/design-system expectations, or N/A]
+- **CC-008 Full-Stack Phase**: [Backend + Frontend (+ agent if needed) delivered together, or N/A]
+
 ### Key Entities *(include if feature involves data)*
 
-- **[Entity 1]**: [What it represents, key attributes without implementation]
+- **[Entity 1]**: [What it represents, key attributes without implementation; note tenant scope]
 - **[Entity 2]**: [What it represents, relationships to other entities]
 
 ## Success Criteria *(mandatory)*

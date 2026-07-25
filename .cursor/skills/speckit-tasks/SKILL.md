@@ -139,7 +139,10 @@ The tasks.md should be immediately executable - each task must be specific enoug
 
 **CRITICAL**: Tasks MUST be organized by user story to enable independent implementation and testing.
 
-**Tests are OPTIONAL**: Only generate test tasks if explicitly requested in the feature specification or if user requests TDD approach.
+**Tests are MANDATORY** (constitution Principle I): Generate automated test tasks
+for every user-visible change, mapped to acceptance criteria. Include ETA
+canonical serialization parity tests when signing/serialization is in scope.
+Only omit tests for pure docs/chore tasks with no user-visible or security impact.
 
 ### Checklist Format (REQUIRED)
 

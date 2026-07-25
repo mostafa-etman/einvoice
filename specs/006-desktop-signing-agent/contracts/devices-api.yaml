@@ -1,0 +1,237 @@
+openapi: 3.0.3
+info:
+  title: Devices & Signing API
+  version: 0.1.0
+  description: |
+    User JWT + X-Tenant-Id for admin Devices UI and send-for-signature.
+    Device token endpoints are documented in agent-channel.md (not duplicated here).
+servers:
+  - url: /api
+paths:
+  /devices/pairing-codes:
+    post:
+      summary: Create short-lived pairing code
+      operationId: createPairingCode
+      tags: [devices]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+      responses:
+        '201':
+          description: Code plaintext returned once
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, code, expiresAt]
+                properties:
+                  id: { type: string, format: uuid }
+                  code: { type: string }
+                  expiresAt: { type: string, format: date-time }
+        '403':
+          description: Missing devices.manage
+    get:
+      summary: List recent pairing codes (no plaintext)
+      operationId: listPairingCodes
+      tags: [devices]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+      responses:
+        '200':
+          description: Hints only
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PairingCodeSummary'
+
+  /devices/pairing-codes/{id}/revoke:
+    post:
+      summary: Revoke unused pairing code
+      operationId: revokePairingCode
+      tags: [devices]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204':
+          description: Revoked
+        '404':
+          description: Not found
+
+  /devices:
+    get:
+      summary: List signing devices
+      operationId: listDevices
+      tags: [devices]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+      responses:
+        '200':
+          description: Devices
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DeviceSummary'
+
+  /devices/{id}:
+    patch:
+      summary: Rename device label
+      operationId: updateDevice
+      tags: [devices]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label]
+              properties:
+                label: { type: string }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceSummary'
+
+  /devices/{id}/unpair:
+    post:
+      summary: Revoke device token immediately
+      operationId: unpairDevice
+      tags: [devices]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204':
+          description: Unpaired; subsequent agent calls fail
+        '404':
+          description: Not found
+
+  /documents/{id}/send-for-signature:
+    post:
+      summary: Enqueue READY document for issuer signature
+      operationId: sendDocumentForSignature
+      tags: [signing]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '202':
+          description: Signature job created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignatureJobSummary'
+        '400':
+          description: Not READY / validation failed
+        '403':
+          description: Missing documents.manage
+
+  /signing/jobs:
+    get:
+      summary: List signature jobs (admin visibility)
+      operationId: listSignatureJobs
+      tags: [signing]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, CLAIMED, COMPLETED, FAILED, CANCELLED]
+      responses:
+        '200':
+          description: Jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SignatureJobSummary'
+
+components:
+  parameters:
+    TenantHeader:
+      name: X-Tenant-Id
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    PairingCodeSummary:
+      type: object
+      required: [id, status, expiresAt, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [ACTIVE, CONSUMED, REVOKED, EXPIRED]
+        codeHint: { type: string, nullable: true }
+        expiresAt: { type: string, format: date-time }
+        consumedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    DeviceSummary:
+      type: object
+      required: [id, label, status, pairedAt]
+      properties:
+        id: { type: string, format: uuid }
+        label: { type: string }
+        status:
+          type: string
+          enum: [PAIRED, REVOKED]
+        lastSeenAt: { type: string, format: date-time, nullable: true }
+        pairedAt: { type: string, format: date-time }
+        revokedAt: { type: string, format: date-time, nullable: true }
+        ready:
+          type: object
+          nullable: true
+          additionalProperties: true
+
+    SignatureJobSummary:
+      type: object
+      required: [id, documentId, documentVersion, status]
+      properties:
+        id: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        documentVersion: { type: integer }
+        status:
+          type: string
+          enum: [PENDING, CLAIMED, COMPLETED, FAILED, CANCELLED]
+        claimedByDeviceId: { type: string, format: uuid, nullable: true }
+        failureCode: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }

@@ -1,0 +1,29 @@
+http:
+  routers:
+    web:
+      rule: "Host(`web.localhost`)"
+      entryPoints:
+        - websecure
+      service: web
+      tls: {}
+    api:
+      rule: "Host(`api.localhost`)"
+      entryPoints:
+        - websecure
+      service: api
+      tls: {}
+
+  services:
+    web:
+      loadBalancer:
+        servers:
+          - url: "http://host.docker.internal:3000"
+    api:
+      loadBalancer:
+        servers:
+          - url: "http://host.docker.internal:3001"
+
+tls:
+  certificates:
+    - certFile: /certs/localhost.pem
+      keyFile: /certs/localhost-key.pem

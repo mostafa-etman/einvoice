@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  quality:
+    name: lint-typecheck-test-build
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: einvoice
+          POSTGRES_PASSWORD: einvoice
+          POSTGRES_DB: einvoice
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U einvoice -d einvoice"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Create app DB role (no BYPASSRLS)
+        env:
+          PGPASSWORD: einvoice
+        run: psql -h localhost -U einvoice -d einvoice -f infra/postgres/init/01-app-role.sql
+
+      - name: Generate Prisma client
+        run: pnpm --filter @einvoice/api exec prisma generate
+        env:
+          DATABASE_URL: postgresql://einvoice:einvoice@localhost:5432/einvoice?schema=public
+
+      - name: Migrate database
+        run: pnpm --filter @einvoice/api prisma:migrate
+        env:
+          MIGRATE_DATABASE_URL: postgresql://einvoice:einvoice@localhost:5432/einvoice?schema=public
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test (JS workspaces)
+        run: pnpm exec turbo run test
+        env:
+          NODE_ENV: test
+          PORT: "3001"
+          DATABASE_URL: postgresql://einvoice_app:einvoice_app@localhost:5432/einvoice?schema=public
+          MIGRATE_DATABASE_URL: postgresql://einvoice:einvoice@localhost:5432/einvoice?schema=public
+          REDIS_URL: redis://localhost:6379
+          MINIO_ENDPOINT: localhost
+          MINIO_PORT: "9000"
+          MINIO_ACCESS_KEY: minioadmin
+          MINIO_SECRET_KEY: minioadmin
+          MINIO_USE_SSL: "false"
+          ETA_IDENTITY_BASE_URL: https://id.preprod.eta.gov.eg
+          ETA_API_BASE_URL: https://api.preprod.invoicing.eta.gov.eg
+          ETA_BASE_URL: https://api.preprod.invoicing.eta.gov.eg
+          JWT_ACCESS_SECRET: test-access-secret-min-16
+          JWT_ACCESS_TTL: 15m
+          REFRESH_COOKIE_NAME: refresh_token
+          REFRESH_TTL_DAYS: "14"
+          COOKIE_SECURE: "false"
+          SECRETS_MASTER_KEY: dGVzdC1zZWNyZXRzLW1hc3Rlci1rZXktMzJieXRlcyE=
+          NEXT_PUBLIC_API_URL: http://localhost:3001
+          NEXT_PUBLIC_DEFAULT_LOCALE: ar
+
+      - name: Build (JS workspaces)
+        run: pnpm exec turbo run build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:3001
+          NEXT_PUBLIC_DEFAULT_LOCALE: ar
+          DATABASE_URL: postgresql://einvoice_app:einvoice_app@localhost:5432/einvoice?schema=public
+
+      - name: Test & build agent core (includes CanonicalSerialize + CAdES gates)
+        run: |
+          dotnet restore apps/agent/src/Einvoice.Agent/Einvoice.Agent.csproj apps/agent/tests/Einvoice.Agent.Tests/Einvoice.Agent.Tests.csproj
+          dotnet test apps/agent/tests/Einvoice.Agent.Tests/Einvoice.Agent.Tests.csproj --no-restore --filter CanonicalSerialize
+          dotnet test apps/agent/tests/Einvoice.Agent.Tests/Einvoice.Agent.Tests.csproj --no-restore --filter "FullyQualifiedName~Cades|FullyQualifiedName~StripSignatures"
+          dotnet test apps/agent/tests/Einvoice.Agent.Tests/Einvoice.Agent.Tests.csproj --no-restore
+          dotnet build apps/agent/src/Einvoice.Agent/Einvoice.Agent.csproj --no-restore -c Release
+        # WPF Desktop (net8.0-windows) is built on developer machines; not on ubuntu CI.
+
+      - name: Cross-runtime canonical parity (constitution IV)
+        run: node tools/parity-canonical/run.mjs

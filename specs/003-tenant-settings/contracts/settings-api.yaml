@@ -1,0 +1,601 @@
+openapi: 3.0.3
+info:
+  title: eInvoice Tenant Settings API
+  version: 0.1.0
+  description: >
+    Branches, currencies, exchange rates, ETA credentials (masked secrets),
+    and item codes. All routes require Bearer JWT and X-Tenant-Id unless noted.
+servers:
+  - url: https://api.localhost
+security:
+  - bearerAuth: []
+  - tenantHeader: []
+
+paths:
+  /branches:
+    get:
+      summary: List branches
+      operationId: listBranches
+      tags: [Branches]
+      responses:
+        "200":
+          description: Branch list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Branch"
+    post:
+      summary: Create branch
+      operationId: createBranch
+      tags: [Branches]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BranchCreate"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branch"
+        "403":
+          description: Missing branches.manage
+
+  /branches/{id}:
+    patch:
+      summary: Update branch
+      operationId: updateBranch
+      tags: [Branches]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BranchUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branch"
+
+  /currencies/catalog:
+    get:
+      summary: Global currency catalog
+      operationId: listCurrencyCatalog
+      tags: [Currencies]
+      responses:
+        "200":
+          description: Catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Currency"
+
+  /currencies:
+    get:
+      summary: Tenant-enabled currencies
+      operationId: listTenantCurrencies
+      tags: [Currencies]
+      responses:
+        "200":
+          description: Enabled currencies
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TenantCurrency"
+    post:
+      summary: Enable currency for tenant
+      operationId: enableTenantCurrency
+      tags: [Currencies]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currencyCode]
+              properties:
+                currencyCode:
+                  type: string
+                isDefault:
+                  type: boolean
+      responses:
+        "201":
+          description: Enabled
+
+  /currencies/default:
+    put:
+      summary: Set tenant default currency
+      operationId: setTenantDefaultCurrency
+      tags: [Currencies]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currencyCode]
+              properties:
+                currencyCode:
+                  type: string
+      responses:
+        "200":
+          description: Updated
+
+  /exchange-rates:
+    get:
+      summary: List exchange rates
+      operationId: listExchangeRates
+      tags: [ExchangeRates]
+      parameters:
+        - name: base
+          in: query
+          schema:
+            type: string
+        - name: quote
+          in: query
+          schema:
+            type: string
+        - name: asOf
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Rates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ExchangeRate"
+    post:
+      summary: Create manual exchange rate
+      operationId: createExchangeRate
+      tags: [ExchangeRates]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExchangeRateCreate"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExchangeRate"
+
+  /exchange-rates/{id}:
+    patch:
+      summary: Update manual exchange rate
+      operationId: updateExchangeRate
+      tags: [ExchangeRates]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExchangeRateCreate"
+      responses:
+        "200":
+          description: Updated
+    delete:
+      summary: Delete exchange rate
+      operationId: deleteExchangeRate
+      tags: [ExchangeRates]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204":
+          description: Deleted
+
+  /settings/eta-credentials:
+    get:
+      summary: Get effective ETA credentials (masked secret)
+      operationId: getEtaCredentials
+      tags: [EtaCredentials]
+      parameters:
+        - name: branchId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: If set, resolve branch override then tenant fallback
+      responses:
+        "200":
+          description: Masked credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EtaCredentialsView"
+    put:
+      summary: Upsert tenant or branch ETA credentials
+      operationId: upsertEtaCredentials
+      tags: [EtaCredentials]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EtaCredentialsUpsert"
+      responses:
+        "200":
+          description: Saved (secret never echoed plaintext)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EtaCredentialsView"
+
+  /settings/eta-credentials/rotate-secret:
+    post:
+      summary: Rotate Client Secret
+      operationId: rotateEtaClientSecret
+      tags: [EtaCredentials]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientSecret]
+              properties:
+                clientSecret:
+                  type: string
+                  minLength: 1
+                branchId:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Rotated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EtaCredentialsView"
+
+  /settings/eta-credentials/test-connection:
+    post:
+      summary: Placeholder Test Connection (no live ETA)
+      operationId: testEtaConnection
+      tags: [EtaCredentials]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                branchId:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Stub result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, message]
+                properties:
+                  status:
+                    type: string
+                    enum: [stub, missing_config]
+                  message:
+                    type: string
+                  missingFields:
+                    type: array
+                    items:
+                      type: string
+
+  /item-codes:
+    get:
+      summary: List item codes
+      operationId: listItemCodes
+      tags: [ItemCodes]
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+        - name: type
+          in: query
+          schema:
+            $ref: "#/components/schemas/ItemCodeType"
+        - name: active
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Item codes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ItemCode"
+    post:
+      summary: Create item code
+      operationId: createItemCode
+      tags: [ItemCodes]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ItemCodeCreate"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemCode"
+
+  /item-codes/{id}:
+    patch:
+      summary: Update item code
+      operationId: updateItemCode
+      tags: [ItemCodes]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ItemCodeUpdate"
+      responses:
+        "200":
+          description: Updated
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    tenantHeader:
+      type: apiKey
+      in: header
+      name: X-Tenant-Id
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    ItemCodeType:
+      type: string
+      enum: [EGS, GS1]
+
+    Branch:
+      type: object
+      required: [id, name, isDefault, isActive]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        isDefault:
+          type: boolean
+        isActive:
+          type: boolean
+        etaBranchCode:
+          type: string
+          nullable: true
+        activityCode:
+          type: string
+          nullable: true
+        defaultCurrencyCode:
+          type: string
+          nullable: true
+
+    BranchCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        isDefault:
+          type: boolean
+        etaBranchCode:
+          type: string
+        activityCode:
+          type: string
+        defaultCurrencyCode:
+          type: string
+
+    BranchUpdate:
+      allOf:
+        - $ref: "#/components/schemas/BranchCreate"
+        - type: object
+          properties:
+            isActive:
+              type: boolean
+
+    Currency:
+      type: object
+      required: [code, nameEn, nameAr, decimals]
+      properties:
+        code:
+          type: string
+        nameEn:
+          type: string
+        nameAr:
+          type: string
+        decimals:
+          type: integer
+
+    TenantCurrency:
+      type: object
+      required: [currencyCode, isDefault]
+      properties:
+        currencyCode:
+          type: string
+        isDefault:
+          type: boolean
+        currency:
+          $ref: "#/components/schemas/Currency"
+
+    ExchangeRate:
+      type: object
+      required:
+        [id, baseCurrencyCode, quoteCurrencyCode, rate, source, effectiveFrom]
+      properties:
+        id:
+          type: string
+          format: uuid
+        baseCurrencyCode:
+          type: string
+        quoteCurrencyCode:
+          type: string
+        rate:
+          type: string
+          description: Decimal as string
+        source:
+          type: string
+          enum: [MANUAL]
+        effectiveFrom:
+          type: string
+          format: date-time
+        effectiveTo:
+          type: string
+          format: date-time
+          nullable: true
+
+    ExchangeRateCreate:
+      type: object
+      required: [baseCurrencyCode, quoteCurrencyCode, rate, effectiveFrom]
+      properties:
+        baseCurrencyCode:
+          type: string
+        quoteCurrencyCode:
+          type: string
+        rate:
+          type: string
+        effectiveFrom:
+          type: string
+          format: date-time
+        effectiveTo:
+          type: string
+          format: date-time
+          nullable: true
+
+    EtaCredentialsView:
+      type: object
+      required: [clientId, hasClientSecret, clientSecretMasked, isIntermediary]
+      properties:
+        id:
+          type: string
+          format: uuid
+        branchId:
+          type: string
+          format: uuid
+          nullable: true
+        clientId:
+          type: string
+        hasClientSecret:
+          type: boolean
+        clientSecretMasked:
+          type: string
+          example: "••••••••"
+        registrationNumber:
+          type: string
+          nullable: true
+        activityCode:
+          type: string
+          nullable: true
+        isIntermediary:
+          type: boolean
+        onBehalfOfRegistrationNumber:
+          type: string
+          nullable: true
+        onBehalfOfName:
+          type: string
+          nullable: true
+      description: Never includes plaintext clientSecret
+
+    EtaCredentialsUpsert:
+      type: object
+      required: [clientId]
+      properties:
+        branchId:
+          type: string
+          format: uuid
+          nullable: true
+        clientId:
+          type: string
+        clientSecret:
+          type: string
+          description: Omit or empty to keep existing secret
+        registrationNumber:
+          type: string
+        activityCode:
+          type: string
+        isIntermediary:
+          type: boolean
+        onBehalfOfRegistrationNumber:
+          type: string
+        onBehalfOfName:
+          type: string
+
+    ItemCode:
+      type: object
+      required: [id, type, code, description, isActive]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          $ref: "#/components/schemas/ItemCodeType"
+        code:
+          type: string
+        description:
+          type: string
+        isActive:
+          type: boolean
+
+    ItemCodeCreate:
+      type: object
+      required: [type, code, description]
+      properties:
+        type:
+          $ref: "#/components/schemas/ItemCodeType"
+        code:
+          type: string
+          minLength: 1
+        description:
+          type: string
+
+    ItemCodeUpdate:
+      type: object
+      properties:
+        description:
+          type: string
+        isActive:
+          type: boolean

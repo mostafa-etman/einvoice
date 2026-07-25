@@ -1,0 +1,118 @@
+openapi: 3.0.3
+info:
+  title: eInvoice Auth API
+  version: 0.1.0
+  description: Register, login, refresh (cookie), logout.
+servers:
+  - url: https://api.localhost
+paths:
+  /auth/register:
+    post:
+      operationId: register
+      summary: Register with email/password (argon2id stored server-side)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+                name: { type: string }
+      responses:
+        "201":
+          description: User created; access token issued; refresh Set-Cookie
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+              description: httpOnly Secure refresh cookie
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+        "409":
+          description: Email already registered (generic message ok)
+  /auth/login:
+    post:
+      operationId: login
+      summary: Login with email/password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        "200":
+          description: Authenticated; refresh Set-Cookie
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+        "401":
+          description: Invalid credentials
+  /auth/refresh:
+    post:
+      operationId: refresh
+      summary: Rotate refresh cookie and issue new access token
+      parameters:
+        - in: cookie
+          name: refresh_token
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: New access token; new refresh Set-Cookie (old invalid)
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessTokenResponse"
+        "401":
+          description: Missing, expired, revoked, or reused refresh token
+  /auth/logout:
+    post:
+      operationId: logout
+      summary: Revoke refresh session and clear cookie
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Logged out; refresh cookie cleared
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    AuthSession:
+      type: object
+      required: [accessToken, user]
+      properties:
+        accessToken: { type: string }
+        expiresIn: { type: integer }
+        user:
+          type: object
+          required: [id, email]
+          properties:
+            id: { type: string, format: uuid }
+            email: { type: string }
+            name: { type: string }
+    AccessTokenResponse:
+      type: object
+      required: [accessToken]
+      properties:
+        accessToken: { type: string }
+        expiresIn: { type: integer }

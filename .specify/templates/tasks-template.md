@@ -9,9 +9,13 @@ description: "Task list template for feature implementation"
 
 **Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
 
-**Tests**: The examples below include test tasks. Tests are OPTIONAL - only include them if explicitly requested in the feature specification.
+**Tests**: MANDATORY per constitution Principle I. Every user-visible change MUST
+include automated test tasks mapped to acceptance criteria. Include ETA
+canonical serialization parity tests when signing/serialization is in scope.
 
-**Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
+**Organization**: Tasks are grouped by user story to enable independent
+implementation and testing of each story. Each story/phase MUST cover Backend +
+Frontend (+ desktop agent when signing is touched) before the next phase.
 
 ## Format: `[ID] [P?] [Story] Description`
 
@@ -21,10 +25,11 @@ description: "Task list template for feature implementation"
 
 ## Path Conventions
 
-- **Single project**: `src/`, `tests/` at repository root
-- **Web app**: `backend/src/`, `frontend/src/`
-- **Mobile**: `api/src/`, `ios/src/` or `android/src/`
-- Paths shown below assume single project - adjust based on plan.md structure
+- **Backend**: `backend/src/`, `backend/tests/`
+- **Frontend**: `frontend/src/`, `frontend/tests/`
+- **Desktop agent**: `desktop-agent/src/`, `desktop-agent/tests/` (incl. shared vectors)
+- **Infra**: `infra/` (Compose, Traefik, env templates)
+- Paths shown below are illustrative — adjust to plan.md structure
 
 <!--
   ============================================================================
@@ -63,12 +68,13 @@ description: "Task list template for feature implementation"
 
 Examples of foundational tasks (adjust based on your project):
 
-- [ ] T004 Setup database schema and migrations framework
-- [ ] T005 [P] Implement authentication/authorization framework
-- [ ] T006 [P] Setup API routing and middleware structure
-- [ ] T007 Create base models/entities that all stories depend on
-- [ ] T008 Configure error handling and logging infrastructure
-- [ ] T009 Setup environment configuration management
+- [ ] T004 Setup PostgreSQL schema, Prisma migrations, and RLS policies
+- [ ] T005 [P] Implement authentication/authorization + tenant context
+- [ ] T006 [P] Setup API routing, TLS-terminated ingress assumptions, middleware
+- [ ] T007 Create base tenant-scoped models all stories depend on
+- [ ] T008 Configure structured logging, audit log pipeline, and error handling
+- [ ] T009 Setup per-environment config (sandbox ETA first; secrets encrypted at rest)
+- [ ] T010 [P] Frontend design system + next-intl (ar/en, RTL) scaffolding
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
@@ -80,23 +86,25 @@ Examples of foundational tasks (adjust based on your project):
 
 **Independent Test**: [How to verify this story works on its own]
 
-### Tests for User Story 1 (OPTIONAL - only if tests requested) ⚠️
+### Tests for User Story 1 (REQUIRED) ⚠️
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T010 [P] [US1] Contract test for [endpoint] in tests/contract/test_[name].py
-- [ ] T011 [P] [US1] Integration test for [user journey] in tests/integration/test_[name].py
+- [ ] T011 [P] [US1] Contract/API test for [endpoint] in backend/tests/contract/
+- [ ] T012 [P] [US1] Integration test for [user journey] in backend/tests/integration/
+- [ ] T013 [P] [US1] Frontend test for [UI flow] in frontend/tests/
+- [ ] T014 [P] [US1] (If signing) Serialization parity test vs shared vectors
 
 ### Implementation for User Story 1
 
-- [ ] T012 [P] [US1] Create [Entity1] model in src/models/[entity1].py
-- [ ] T013 [P] [US1] Create [Entity2] model in src/models/[entity2].py
-- [ ] T014 [US1] Implement [Service] in src/services/[service].py (depends on T012, T013)
-- [ ] T015 [US1] Implement [endpoint/feature] in src/[location]/[file].py
-- [ ] T016 [US1] Add validation and error handling
-- [ ] T017 [US1] Add logging for user story 1 operations
+- [ ] T015 [P] [US1] Backend: tenant-scoped model/migration + RLS policies
+- [ ] T016 [P] [US1] Backend: service/API for [capability]
+- [ ] T017 [US1] Backend: audit log events for [actions]
+- [ ] T018 [US1] Frontend: UI using design system + next-intl (ar/en, RTL)
+- [ ] T019 [US1] (If signing) Desktop agent changes + vector sync
+- [ ] T020 [US1] Validation, error handling, and tenant-context enforcement
 
-**Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
+**Checkpoint**: User Story 1 meets Definition of Done (BE + FE [+ agent] + tests)
 
 ---
 
@@ -106,19 +114,20 @@ Examples of foundational tasks (adjust based on your project):
 
 **Independent Test**: [How to verify this story works on its own]
 
-### Tests for User Story 2 (OPTIONAL - only if tests requested) ⚠️
+### Tests for User Story 2 (REQUIRED) ⚠️
 
-- [ ] T018 [P] [US2] Contract test for [endpoint] in tests/contract/test_[name].py
-- [ ] T019 [P] [US2] Integration test for [user journey] in tests/integration/test_[name].py
+- [ ] T021 [P] [US2] Contract/API test in backend/tests/contract/
+- [ ] T022 [P] [US2] Integration test in backend/tests/integration/
+- [ ] T023 [P] [US2] Frontend test in frontend/tests/
 
 ### Implementation for User Story 2
 
-- [ ] T020 [P] [US2] Create [Entity] model in src/models/[entity].py
-- [ ] T021 [US2] Implement [Service] in src/services/[service].py
-- [ ] T022 [US2] Implement [endpoint/feature] in src/[location]/[file].py
-- [ ] T023 [US2] Integrate with User Story 1 components (if needed)
+- [ ] T024 [P] [US2] Backend model/API (RLS-safe)
+- [ ] T025 [US2] Frontend UI (design system + i18n)
+- [ ] T026 [US2] Audit + validation
+- [ ] T027 [US2] Integrate with User Story 1 components (if needed)
 
-**Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
+**Checkpoint**: Stories 1 AND 2 each meet Definition of Done independently
 
 ---
 
@@ -128,18 +137,19 @@ Examples of foundational tasks (adjust based on your project):
 
 **Independent Test**: [How to verify this story works on its own]
 
-### Tests for User Story 3 (OPTIONAL - only if tests requested) ⚠️
+### Tests for User Story 3 (REQUIRED) ⚠️
 
-- [ ] T024 [P] [US3] Contract test for [endpoint] in tests/contract/test_[name].py
-- [ ] T025 [P] [US3] Integration test for [user journey] in tests/integration/test_[name].py
+- [ ] T028 [P] [US3] Contract/API test in backend/tests/contract/
+- [ ] T029 [P] [US3] Integration test in backend/tests/integration/
+- [ ] T030 [P] [US3] Frontend test in frontend/tests/
 
 ### Implementation for User Story 3
 
-- [ ] T026 [P] [US3] Create [Entity] model in src/models/[entity].py
-- [ ] T027 [US3] Implement [Service] in src/services/[service].py
-- [ ] T028 [US3] Implement [endpoint/feature] in src/[location]/[file].py
+- [ ] T031 [P] [US3] Backend model/API (RLS-safe)
+- [ ] T032 [US3] Frontend UI (design system + i18n)
+- [ ] T033 [US3] Audit + validation
 
-**Checkpoint**: All user stories should now be independently functional
+**Checkpoint**: All user stories independently meet Definition of Done
 
 ---
 
@@ -154,9 +164,11 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] TXXX [P] Documentation updates in docs/
 - [ ] TXXX Code cleanup and refactoring
 - [ ] TXXX Performance optimization across all stories
-- [ ] TXXX [P] Additional unit tests (if requested) in tests/unit/
-- [ ] TXXX Security hardening
+- [ ] TXXX [P] Additional unit/regression tests in backend/tests/unit/ and frontend/tests/
+- [ ] TXXX Security hardening (secrets, RLS review, audit coverage)
+- [ ] TXXX Confirm sandbox-first ETA config; no hardcoded schemas/URLs/creds
 - [ ] TXXX Run quickstart.md validation
+- [ ] TXXX Definition of Done review before next phase
 
 ---
 
@@ -179,11 +191,12 @@ Examples of foundational tasks (adjust based on your project):
 
 ### Within Each User Story
 
-- Tests (if included) MUST be written and FAIL before implementation
-- Models before services
+- Tests MUST be written and FAIL before implementation
+- Models/migrations (with RLS) before services
 - Services before endpoints
+- Backend and frontend for the story before claiming Done
 - Core implementation before integration
-- Story complete before moving to next priority
+- Story Definition of Done complete before next priority
 
 ### Parallel Opportunities
 
@@ -199,13 +212,14 @@ Examples of foundational tasks (adjust based on your project):
 ## Parallel Example: User Story 1
 
 ```bash
-# Launch all tests for User Story 1 together (if tests requested):
-Task: "Contract test for [endpoint] in tests/contract/test_[name].py"
-Task: "Integration test for [user journey] in tests/integration/test_[name].py"
+# Launch all tests for User Story 1 together:
+Task: "Contract/API test for [endpoint] in backend/tests/contract/"
+Task: "Integration test for [user journey] in backend/tests/integration/"
+Task: "Frontend test for [UI flow] in frontend/tests/"
 
-# Launch all models for User Story 1 together:
-Task: "Create [Entity1] model in src/models/[entity1].py"
-Task: "Create [Entity2] model in src/models/[entity2].py"
+# Launch backend + frontend scaffolding in parallel:
+Task: "Backend: tenant-scoped model/migration + RLS policies"
+Task: "Frontend: UI using design system + next-intl (ar/en, RTL)"
 ```
 
 ---

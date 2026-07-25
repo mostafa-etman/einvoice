@@ -1,0 +1,7 @@
+{
+  "payment": {
+    "bankName": "SomeValue",
+    "bankAccountIBAN": "",
+    "swiftCode": ""
+  }
+}

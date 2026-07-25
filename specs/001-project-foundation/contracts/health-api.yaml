@@ -1,0 +1,81 @@
+openapi: 3.0.3
+info:
+  title: eInvoice API Health (Foundation)
+  version: 0.1.0
+  description: >
+    Liveness and readiness contracts for the foundation skeleton.
+    No business endpoints in this feature.
+servers:
+  - url: https://api.localhost
+    description: Local Traefik HTTPS (example hostname)
+paths:
+  /health/live:
+    get:
+      operationId: getLiveness
+      summary: Process liveness
+      description: >
+        Returns success whenever the API process is running, even if
+        dependencies are down.
+      responses:
+        "200":
+          description: Process is up
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveResponse"
+              example:
+                status: ok
+  /health/ready:
+    get:
+      operationId: getReadiness
+      summary: Dependency readiness
+      description: >
+        Succeeds only when required dependencies are reachable.
+        PostgreSQL is always required. Redis and MinIO are included when
+        marked required by environment configuration.
+      responses:
+        "200":
+          description: All required dependencies reachable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyResponse"
+              example:
+                status: ready
+                checks:
+                  postgres: ok
+                  redis: ok
+                  minio: ok
+        "503":
+          description: One or more required dependencies unreachable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyResponse"
+              example:
+                status: not_ready
+                checks:
+                  postgres: fail
+                  redis: ok
+                  minio: ok
+components:
+  schemas:
+    LiveResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+    ReadyResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
+        checks:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [ok, fail, skipped]
