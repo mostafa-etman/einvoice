@@ -7,7 +7,15 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>Einvoice.Agent.Desktop</RootNamespace>
-    <ApplicationIcon />
+    <!-- AssemblyName must stay distinct from Einvoice.Agent library (NuGet ambiguity).
+         publish-win-x64.ps1 renames the output to Einvoice.Agent.exe for distribution. -->
+    <Product>eInvoice Signing Agent</Product>
+    <Company>Einvoice</Company>
+    <Version>0.1.0</Version>
+    <FileVersion>0.1.0.0</FileVersion>
+    <InformationalVersion>0.1.0</InformationalVersion>
+    <!-- Optional: drop agent.ico next to this csproj and set ApplicationIcon to agent.ico -->
+    <ApplicationIcon Condition="Exists('$(MSBuildProjectDirectory)\agent.ico')">agent.ico</ApplicationIcon>
     <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
   </PropertyGroup>
   <ItemGroup>

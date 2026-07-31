@@ -33,6 +33,27 @@ async function ownerCtx(app: INestApplication, suffix: string) {
     .set('X-Tenant-Id', tenantId)
     .expect(200);
 
+  // mark-ready runs full local ETA validation (issuer id/address + activity).
+  await request(app.getHttpServer())
+    .put('/settings/eta-credentials')
+    .set('Authorization', `Bearer ${token}`)
+    .set('X-Tenant-Id', tenantId)
+    .send({
+      clientId: `sign-client-${suffix}`,
+      clientSecret: `sign-secret-${suffix}`,
+      registrationNumber: '123456789',
+      activityCode: '6201',
+      isIntermediary: false,
+    })
+    .expect(200);
+
+  await request(app.getHttpServer())
+    .patch(`/branches/${branches.body[0].id}`)
+    .set('Authorization', `Bearer ${token}`)
+    .set('X-Tenant-Id', tenantId)
+    .send({ activityCode: '6201', etaBranchCode: '0' })
+    .expect(200);
+
   await request(app.getHttpServer())
     .post('/item-codes')
     .set('Authorization', `Bearer ${token}`)
@@ -51,7 +72,21 @@ function draftBody(branchId: string, internalId: string) {
     issueDateTime: new Date().toISOString(),
     internalId,
     version: 0,
-    receiver: { type: 'B', name: 'Buyer Co' },
+    taxpayerActivityCode: '6201',
+    issuer: {
+      type: 'B',
+      id: '123456789',
+      name: 'Seller Co',
+      address: {
+        branchId: '0',
+        country: 'EG',
+        governate: 'Cairo',
+        regionCity: 'Nasr City',
+        street: 'Test St',
+        buildingNumber: '1',
+      },
+    },
+    receiver: { type: 'B', id: '987654321', name: 'Buyer Co' },
     lines: [
       {
         description: 'Service',

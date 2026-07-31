@@ -1,5 +1,5 @@
 import { apiFetch } from './client';
-import { setAccessToken } from '@/lib/session';
+import { setAccessToken, setSessionHint } from '@/lib/session';
 
 export type AuthUser = {
   id: string;
@@ -24,6 +24,7 @@ export async function register(input: {
     skipAuth: true,
   });
   setAccessToken(session.accessToken);
+  setSessionHint(true);
   return session;
 }
 
@@ -37,6 +38,7 @@ export async function login(input: {
     skipAuth: true,
   });
   setAccessToken(session.accessToken);
+  setSessionHint(true);
   return session;
 }
 
@@ -52,6 +54,7 @@ export async function refresh(): Promise<AuthSession> {
         retry: false,
       });
       setAccessToken(session.accessToken);
+      setSessionHint(true);
       return session;
     })().finally(() => {
       refreshInFlight = null;
@@ -65,5 +68,6 @@ export async function logout(): Promise<void> {
     await apiFetch<void>('/auth/logout', { method: 'POST' });
   } finally {
     setAccessToken(null);
+    setSessionHint(false);
   }
 }

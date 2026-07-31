@@ -1,22 +1,12 @@
 <!--
 Sync Impact Report
-- Version change: (unfilled template) → 1.0.0
-- Modified principles: N/A (initial ratification from template placeholders)
-- Added sections:
-  - Core Principles I–VIII (Reliability & Audit, Security by Default,
-    Multi-Tenant Isolation, ETA Canonical Serialization Parity,
-    Runtime ETA Configuration, Sandbox-First Environments,
-    Unified UX & i18n, Phased Full-Stack Delivery)
-  - Technology Baseline
-  - Definition of Done
-  - Governance
-- Removed sections: template placeholder tokens only
-- Templates requiring updates:
-  - .specify/templates/plan-template.md ✅ updated
-  - .specify/templates/spec-template.md ✅ updated
-  - .specify/templates/tasks-template.md ✅ updated
-  - .specify/templates/checklist-template.md ✅ no change needed
-  - .cursor/skills/speckit-tasks/SKILL.md ✅ updated (tests mandatory)
+- Version change: 1.0.0 → 1.0.1
+- Modified principles: N/A
+- Added sections: N/A
+- Clarifications:
+  - Technology Baseline: Node.js 20 LTS or Node 24+ (engines >=20; CI on 20)
+- Removed sections: none
+- Templates requiring updates: none (PATCH clarification only)
 - Follow-up TODOs: none
 -->
 
@@ -114,6 +104,8 @@ too late for a regulated SaaS.
 
 The approved stack is normative unless Governance amends this constitution:
 
+- **Runtime**: Node.js **20 LTS or Node 24+** (`engines.node: ">=20"`; CI baseline
+  remains Node 20; local Node 24 is supported)
 - **Backend**: NestJS, PostgreSQL with Prisma and RLS, Redis/BullMQ, MinIO
 - **Frontend**: Next.js 15, Tailwind CSS, shadcn/ui, next-intl, TanStack Query
 - **Desktop signing agent**: .NET 8, BouncyCastle, PKCS#11/CSP
@@ -165,4 +157,4 @@ for user-facing and phased delivery work respectively.
 **Runtime guidance**: Prefer project specs under `specs/` and this
 constitution over informal chat instructions when they conflict.
 
-**Version**: 1.0.0 | **Ratified**: 2026-07-20 | **Last Amended**: 2026-07-20
+**Version**: 1.0.1 | **Ratified**: 2026-07-20 | **Last Amended**: 2026-07-31

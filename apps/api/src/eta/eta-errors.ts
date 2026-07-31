@@ -28,9 +28,26 @@ export function mapEtaOAuthError(
 }
 
 export function mapEtaHttpError(status: number, text: string): EtaMappedError {
+  let detail = text.slice(0, 500);
+  try {
+    const parsed = JSON.parse(text) as {
+      message?: string;
+      error?: string;
+      title?: string;
+      detail?: string;
+    };
+    detail =
+      parsed.message ||
+      parsed.detail ||
+      parsed.title ||
+      parsed.error ||
+      detail;
+  } catch {
+    /* keep raw slice */
+  }
   return {
     code: 'eta_upstream_error',
-    message: text.slice(0, 200) || `ETA returned HTTP ${status}`,
+    message: `ETA HTTP ${status}: ${detail}`.slice(0, 500),
     httpStatus: status >= 500 ? 502 : status,
   };
 }

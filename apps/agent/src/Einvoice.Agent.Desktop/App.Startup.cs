@@ -4,6 +4,7 @@ using System.Windows.Forms;
 using Einvoice.Agent.Channel;
 using Einvoice.Agent.Config;
 using Einvoice.Agent.Queue;
+using Einvoice.Agent.Security;
 using Einvoice.Agent.Signing;
 using Einvoice.Agent.Workers;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,6 +22,7 @@ public partial class App
     private NotifyIcon? _tray;
     private SigningWorker? _worker;
     private AgentSettings? _settings;
+    private LocalAgentConfig? _localConfig;
     private AgentApiClient? _api;
     private string? _sessionPin;
     private DateTimeOffset _pinExpires = DateTimeOffset.MinValue;
@@ -37,10 +39,20 @@ public partial class App
     {
         base.OnStartup(e);
 
+        _localConfig = LocalAgentConfig.Load();
         _settings = AgentSettings.FromEnvironment();
         var stored = DeviceTokenStore.Load(_settings.TokenStorePath);
         if (!string.IsNullOrWhiteSpace(stored))
             _settings.DeviceToken = stored;
+
+        // Prefer PKCS#11 when a known library is present (still software if none).
+        if (_settings.SigningProvider == SigningProviderKind.Software
+            && TokenAutoDetect.ScanLibraries().Count > 0)
+        {
+            _settings.SigningProvider = SigningProviderKind.Pkcs11;
+        }
+
+        ApplyAutoDetectIfNeeded();
 
         _host = Host.CreateDefaultBuilder()
             .ConfigureLogging(b =>
@@ -80,9 +92,61 @@ public partial class App
 
         if (string.IsNullOrWhiteSpace(_settings.DeviceToken))
         {
-            // Prompt to pair on first launch.
-            _ = Dispatcher.InvokeAsync(() => PairDevice());
+            _ = Dispatcher.InvokeAsync(() => RunFirstRunSetup());
         }
+    }
+
+    /// <summary>
+    /// Minimal install UX: pair → auto-detect token → PIN only when signing.
+    /// </summary>
+    private void RunFirstRunSetup()
+    {
+        MessageBox.Show(
+            "Welcome to the eInvoice Signing Agent.\n\n" +
+            "1. Plug in your USB eSeal token\n" +
+            "2. Pair with a code from the web app (Devices)\n" +
+            "3. Confirm the detected token/certificate\n" +
+            "4. Enter your PIN only when you sign (stays on this PC)\n",
+            "Setup",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
+
+        PairDevice();
+        ConfigureToken(showEvenIfConfigured: true);
+    }
+
+    private void ApplyAutoDetectIfNeeded()
+    {
+        if (_settings is null || _localConfig is null) return;
+        if (_localConfig.ManualTokenConfig) return;
+
+        var detection = TokenAutoDetect.Detect(_localConfig.Pkcs11LibraryPath ?? _settings.Pkcs11LibraryPath);
+        if (string.IsNullOrWhiteSpace(_localConfig.Pkcs11LibraryPath)
+            && !string.IsNullOrWhiteSpace(detection.PreferredLibraryPath))
+        {
+            _localConfig.Pkcs11LibraryPath = detection.PreferredLibraryPath;
+        }
+
+        if (string.IsNullOrWhiteSpace(_localConfig.CertificateThumbprint)
+            && detection.Certificates.Count > 0)
+        {
+            var preferred = TokenAutoDetect.PreferEsealCertificate(detection.Certificates);
+            if (preferred is not null)
+            {
+                _localConfig.CertificateThumbprint = preferred.Thumbprint;
+                _localConfig.CertificateSubjectDisplay = preferred.Subject;
+                _localConfig.CertificateIssuerFilter ??= ExtractCn(preferred.Issuer) ?? preferred.Issuer;
+            }
+            else if (detection.Certificates.Count > 1)
+            {
+                // Multiple certs and no clear eSeal heuristic — user must pick.
+                Dispatcher.Invoke(() => ConfigureToken(showEvenIfConfigured: true));
+                return;
+            }
+        }
+
+        _localConfig.Save();
+        _settings.ApplyLocalConfig(_localConfig);
     }
 
     private string? GetPinForSigning()
@@ -93,6 +157,19 @@ public partial class App
         if (!string.IsNullOrEmpty(_sessionPin) && DateTimeOffset.UtcNow < _pinExpires)
             return _sessionPin;
 
+        if (_localConfig?.RememberPinEnabled == true)
+        {
+            var cached = PinVault.TryLoad();
+            if (!string.IsNullOrEmpty(cached))
+            {
+                _sessionPin = cached;
+                _pinExpires = _localConfig.PinRememberMinutes <= 0
+                    ? DateTimeOffset.MaxValue
+                    : DateTimeOffset.UtcNow.AddMinutes(_localConfig.PinRememberMinutes);
+                return _sessionPin;
+            }
+        }
+
         string? pin = null;
         Dispatcher.Invoke(() =>
         {
@@ -100,14 +177,64 @@ public partial class App
             if (dlg.ShowDialog() == true)
             {
                 pin = dlg.Pin;
-                _sessionPin = pin;
-                _pinExpires = DateTimeOffset.UtcNow.AddMinutes(15);
+                StorePinSession(pin, dlg.RememberPin, dlg.RememberMinutes);
             }
         });
 
         if (string.IsNullOrEmpty(pin))
             throw new InvalidOperationException("PIN entry cancelled.");
         return pin;
+    }
+
+    private void StorePinSession(string pin, bool remember, int minutes)
+    {
+        _sessionPin = pin;
+        if (_localConfig is null)
+        {
+            _pinExpires = DateTimeOffset.UtcNow.AddMinutes(15);
+            return;
+        }
+
+        _localConfig.RememberPinEnabled = remember;
+        _localConfig.PinRememberMinutes = minutes;
+        _localConfig.Save();
+
+        if (remember)
+        {
+            var life = minutes <= 0 ? TimeSpan.Zero : TimeSpan.FromMinutes(minutes);
+            try
+            {
+                PinVault.Save(pin, life);
+            }
+            catch
+            {
+                // DPAPI unavailable — session memory only.
+            }
+
+            _pinExpires = minutes <= 0
+                ? DateTimeOffset.MaxValue
+                : DateTimeOffset.UtcNow.AddMinutes(minutes);
+        }
+        else
+        {
+            PinVault.Clear();
+            _pinExpires = DateTimeOffset.UtcNow.AddMinutes(15);
+        }
+
+        RefreshTrayText();
+    }
+
+    private void ClearPinEverywhere()
+    {
+        _sessionPin = null;
+        _pinExpires = DateTimeOffset.MinValue;
+        PinVault.Clear();
+        if (_localConfig is not null)
+        {
+            _localConfig.RememberPinEnabled = false;
+            _localConfig.Save();
+        }
+        RefreshTrayText();
     }
 
     private void BuildTray()
@@ -121,17 +248,37 @@ public partial class App
 
         var menu = new ContextMenuStrip();
         menu.Items.Add("Pair device…", null, (_, _) => PairDevice());
+        menu.Items.Add("Token / certificate…", null, (_, _) => ConfigureToken(showEvenIfConfigured: true));
         menu.Items.Add("Unlock token PIN…", null, (_, _) => UnlockPin());
-        menu.Items.Add("Clear PIN session", null, (_, _) =>
-        {
-            _sessionPin = null;
-            _pinExpires = DateTimeOffset.MinValue;
-            RefreshTrayText();
-        });
+        menu.Items.Add("Clear PIN (memory + remembered)", null, (_, _) => ClearPinEverywhere());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, async (_, _) => await ShutdownAsync());
         _tray.ContextMenuStrip = menu;
         _tray.DoubleClick += (_, _) => PairDevice();
+    }
+
+    private void ConfigureToken(bool showEvenIfConfigured)
+    {
+        if (_localConfig is null || _settings is null) return;
+        if (!showEvenIfConfigured
+            && !string.IsNullOrWhiteSpace(_localConfig.Pkcs11LibraryPath)
+            && !string.IsNullOrWhiteSpace(_localConfig.CertificateThumbprint))
+            return;
+
+        var dlg = new TokenConfigDialog(_localConfig);
+        if (dlg.ShowDialog() == true)
+        {
+            _localConfig = LocalAgentConfig.Load();
+            _settings.ApplyLocalConfig(_localConfig);
+            MessageBox.Show(
+                "Token settings saved on this PC only.\n" +
+                $"Library: {_localConfig.Pkcs11LibraryPath}\n" +
+                $"Cert: {_localConfig.CertificateSubjectDisplay ?? _localConfig.CertificateThumbprint}",
+                "Token setup",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            RefreshTrayText();
+        }
     }
 
     private void RefreshTrayText()
@@ -165,26 +312,29 @@ public partial class App
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
             RefreshTrayText();
+            ConfigureToken(showEvenIfConfigured: false);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Pairing failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(
+                PinGuard.Redact(ex.Message),
+                "Pairing failed",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
         }
     }
 
     private void UnlockPin()
     {
-        var dlg = new PinDialog("Enter eSeal PIN (kept in memory ~15 minutes; never sent to the cloud)");
+        var dlg = new PinDialog("Enter eSeal PIN (kept locally; never sent to the cloud)");
         if (dlg.ShowDialog() == true)
-        {
-            _sessionPin = dlg.Pin;
-            _pinExpires = DateTimeOffset.UtcNow.AddMinutes(15);
-            RefreshTrayText();
-        }
+            StorePinSession(dlg.Pin, dlg.RememberPin, dlg.RememberMinutes);
     }
 
     private async Task ShutdownAsync()
     {
+        // Session-only PIN dies with process; remembered DPAPI cache kept if user opted in.
+        _sessionPin = null;
         if (_host is not null)
             await _host.StopAsync(TimeSpan.FromSeconds(5));
         _tray!.Visible = false;
@@ -195,8 +345,20 @@ public partial class App
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _sessionPin = null;
         _tray?.Dispose();
         _host?.Dispose();
         base.OnExit(e);
+    }
+
+    private static string? ExtractCn(string dn)
+    {
+        foreach (var part in dn.Split(','))
+        {
+            var p = part.Trim();
+            if (p.StartsWith("CN=", StringComparison.OrdinalIgnoreCase))
+                return p[3..].Trim();
+        }
+        return null;
     }
 }

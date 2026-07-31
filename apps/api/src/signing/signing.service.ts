@@ -6,8 +6,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { Prisma, SignatureJob, SignatureJobStatus, SigningDevice } from '@prisma/client';
+import { parseEtaDocument } from '@einvoice/eta-core';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { SubmissionsService } from '../submissions/submissions.service';
 
 const CLAIM_LEASE_MINUTES = 5;
 
@@ -38,6 +40,7 @@ export class SigningService {
   constructor(
     private readonly tenantPrisma: TenantPrismaService,
     private readonly audit: AuditService,
+    private readonly submissions: SubmissionsService,
   ) {}
 
   async sendForSignature(tenantId: string, actorUserId: string, documentId: string) {
@@ -46,6 +49,13 @@ export class SigningService {
       if (!doc) throw new NotFoundException('Document not found');
       if (doc.status !== 'READY') {
         throw new BadRequestException('Document must be READY to send for signature');
+      }
+      // The signature covers the exact stored bytes; without them we would sign
+      // a key-reordered jsonb copy and ETA would reject the message-digest.
+      if (!doc.etaPayloadText) {
+        throw new BadRequestException(
+          'Document payload predates exact-bytes storage. Open the document, save it again, then send for signature.',
+        );
       }
       const active = await tx.signatureJob.findFirst({
         where: { tenantId, documentId, status: { in: ['PENDING', 'CLAIMED'] } },
@@ -134,11 +144,18 @@ export class SigningService {
       Promise.all(
         jobs.map(async (job) => {
           const doc = await tx.document.findFirst({ where: { id: job.documentId } });
+          // Field order is part of the ETA canonical string, so both shapes are
+          // derived from the stored bytes: etaPayloadText is exact, and
+          // etaPayload is re-parsed from it (order-preserving) so agents that
+          // read the object form still sign the same canonical string. The
+          // jsonb column is never used here — it reorders keys.
+          const payloadText = doc?.etaPayloadText ?? null;
           return {
             jobId: job.id,
             documentId: job.documentId,
             documentVersion: job.documentVersion,
-            etaPayload: doc?.etaPayloadJson ?? null,
+            etaPayloadText: payloadText,
+            etaPayload: payloadText ? parseEtaDocument(payloadText) : null,
           };
         }),
       ),
@@ -237,11 +254,27 @@ export class SigningService {
       },
     });
 
+    // FR-040: agent-signed documents auto-enqueue for ETA submission.
+    // Failures stay visible on the document; SIGNED is never rolled back.
+    let submission: Awaited<
+      ReturnType<SubmissionsService['enqueueAfterAgentSign']>
+    > = null;
+    if (!result.idempotent) {
+      submission = await this.submissions.enqueueAfterAgentSign(
+        device.tenantId,
+        result.doc.id,
+        result.doc.version,
+      );
+    }
+
     return {
       jobId: result.job.id,
       documentId: result.doc.id,
       status: result.job.status,
       documentStatus: result.doc.status,
+      submissionId: submission?.id ?? null,
+      submissionState: submission?.state ?? null,
+      etaSubmissionUuid: submission?.etaSubmissionUuid ?? null,
     };
   }
 

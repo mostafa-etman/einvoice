@@ -8,6 +8,20 @@ export type DocumentKind =
   | 'EXPORT_CREDIT_NOTE'
   | 'EXPORT_DEBIT_NOTE';
 
+export type AddressInput = {
+  branchId?: string;
+  country?: string;
+  governate?: string;
+  regionCity?: string;
+  street?: string;
+  buildingNumber?: string;
+  postalCode?: string;
+  floor?: string;
+  room?: string;
+  landmark?: string;
+  additionalInformation?: string;
+};
+
 export type DocumentUpsert = {
   kind: DocumentKind;
   branchId: string;
@@ -15,8 +29,44 @@ export type DocumentUpsert = {
   issueDateTime: string;
   internalId: string;
   version: number;
-  receiver?: { type?: string; id?: string; name?: string };
-  references?: Record<string, unknown> | null;
+  taxpayerActivityCode?: string;
+  purchaseOrderReference?: string;
+  purchaseOrderDescription?: string;
+  salesOrderReference?: string;
+  salesOrderDescription?: string;
+  proformaInvoiceNumber?: string;
+  serviceDeliveryDate?: string;
+  issuer?: {
+    type?: string;
+    id?: string;
+    name?: string;
+    address?: AddressInput;
+  };
+  receiver?: {
+    type?: string;
+    id?: string;
+    name?: string;
+    address?: AddressInput;
+  };
+  payment?: {
+    bankName?: string;
+    bankAddress?: string;
+    bankAccountNo?: string;
+    bankAccountIBAN?: string;
+    swiftCode?: string;
+    terms?: string;
+  } | null;
+  delivery?: {
+    approach?: string;
+    packaging?: string;
+    dateValidity?: string;
+    exportPort?: string;
+    countryOfOrigin?: string;
+    grossWeight?: string;
+    netWeight?: string;
+    terms?: string;
+  } | null;
+  references?: string[] | Record<string, unknown> | null;
   extraDiscountAmount?: string;
   lines: Array<{
     description: string;
@@ -26,6 +76,14 @@ export type DocumentUpsert = {
     quantity: string;
     unitPrice: string;
     discountAmount?: string;
+    discountRate?: string;
+    currencySold?: string;
+    amountEGP?: string;
+    amountSold?: string;
+    currencyExchangeRate?: string;
+    internalCode?: string;
+    weightUnitType?: string;
+    weightQuantity?: string;
     taxes?: Array<{ taxType: string; subType: string; rate: string }>;
   }>;
 };
@@ -81,7 +139,13 @@ export function previewDocument(body: DocumentUpsert) {
 export function validateDocument(id: string) {
   return apiFetch<{
     ok: boolean;
-    issues: Array<{ code: string; message: string }>;
+    issues: Array<{
+      code: string;
+      path?: string;
+      severity?: 'error' | 'warning';
+      message: string;
+      messageKey?: string;
+    }>;
   }>(`/documents/${id}/validate`, { method: 'POST', tenantScoped: true });
 }
 
@@ -94,6 +158,48 @@ export function markDocumentReady(id: string) {
 
 export function sendDocumentForSignature(id: string) {
   return apiFetch<Record<string, unknown>>(`/documents/${id}/send-for-signature`, {
+    method: 'POST',
+    tenantScoped: true,
+  });
+}
+
+export function submitDocumentToEta(id: string, idempotencyKey?: string) {
+  return apiFetch<{
+    id: string;
+    state: string;
+    etaSubmissionUuid: string | null;
+    acceptedCount: number;
+    refusedCount: number;
+    lastErrorCode: string | null;
+    lastErrorMessage: string | null;
+    nextAttemptAt: string | null;
+    isTransientCooldown: boolean;
+    etaRawResponse: unknown;
+    documents: Array<{
+      documentId: string;
+      internalId: string;
+      attemptOutcome: string;
+      etaUuid: string | null;
+      intakeError: unknown;
+      documentStatus: string;
+    }>;
+  }>(`/documents/${id}/submit`, {
+    method: 'POST',
+    tenantScoped: true,
+    headers: idempotencyKey
+      ? { 'Idempotency-Key': idempotencyKey }
+      : undefined,
+  });
+}
+export function resetDocumentSubmitCooldown(id: string) {
+  return apiFetch<{
+    documentId: string;
+    submitCooldownUntil: null;
+    submitInFlight: boolean;
+    submitAttemptCount: number;
+    submitAttemptLog: unknown;
+    message: string;
+  }>(`/documents/${id}/submit/reset-cooldown`, {
     method: 'POST',
     tenantScoped: true,
   });

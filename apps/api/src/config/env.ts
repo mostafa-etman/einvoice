@@ -29,6 +29,25 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((v) => v === 'true' || v === '1'),
+  PURCHASES_SYNC_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true' || v === '1'),
+  PURCHASES_SYNC_USE_RECENT: z
+    .string()
+    .optional()
+    .transform((v) => !(v === 'false' || v === '0')),
+  PURCHASES_SYNC_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(900_000),
+  IMPORT_MAX_BYTES: z.coerce.number().int().positive().default(25_000_000),
+  IMPORT_MAX_ROWS: z.coerce.number().int().positive().default(5000),
+  EXPORT_ARTIFACT_TTL_DAYS: z.coerce.number().int().positive().default(14),
+  PACKAGE_POLL_INITIAL_MS: z.coerce.number().int().positive().default(5000),
+  PACKAGE_POLL_MAX_MS: z.coerce.number().int().positive().default(120_000),
+  PACKAGE_STALL_HOURS: z.coerce.number().int().positive().default(24),
   JWT_ACCESS_SECRET: z.string().min(16),
   JWT_ACCESS_TTL: z.string().default('15m'),
   REFRESH_COOKIE_NAME: z.string().default('refresh_token'),
@@ -49,12 +68,19 @@ const envSchema = z.object({
 
 export type ApiEnv = Omit<
   z.infer<typeof envSchema>,
-  'SECRETS_MASTER_KEY' | 'ETA_IDENTITY_BASE_URL' | 'ETA_API_BASE_URL' | 'ETA_SANDBOX_INTEGRATION'
+  | 'SECRETS_MASTER_KEY'
+  | 'ETA_IDENTITY_BASE_URL'
+  | 'ETA_API_BASE_URL'
+  | 'ETA_SANDBOX_INTEGRATION'
+  | 'PURCHASES_SYNC_ENABLED'
+  | 'PURCHASES_SYNC_USE_RECENT'
 > & {
   SECRETS_MASTER_KEY: string;
   ETA_IDENTITY_BASE_URL: string;
   ETA_API_BASE_URL: string;
   ETA_SANDBOX_INTEGRATION: boolean;
+  PURCHASES_SYNC_ENABLED: boolean;
+  PURCHASES_SYNC_USE_RECENT: boolean;
 };
 
 const TEST_SECRETS_MASTER_KEY = Buffer.from(
@@ -129,6 +155,9 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): ApiEnv {
     ...urls,
     SECRETS_MASTER_KEY,
     ETA_SANDBOX_INTEGRATION: result.data.ETA_SANDBOX_INTEGRATION ?? false,
+    PURCHASES_SYNC_ENABLED: result.data.PURCHASES_SYNC_ENABLED ?? false,
+    PURCHASES_SYNC_USE_RECENT: result.data.PURCHASES_SYNC_USE_RECENT ?? true,
+    PURCHASES_SYNC_INTERVAL_MS: result.data.PURCHASES_SYNC_INTERVAL_MS ?? 900_000,
     COOKIE_SECURE: result.data.COOKIE_SECURE ?? false,
     COOKIE_PARTITIONED: result.data.COOKIE_PARTITIONED ?? false,
   };

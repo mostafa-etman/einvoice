@@ -15,7 +15,7 @@ Multi-tenant Egyptian Tax Authority (ETA) e-invoicing & e-receipts SaaS.
 
 ## Prerequisites
 
-- **Node.js 20 LTS** (required — see below)
+- **Node.js 20 LTS or Node 24** (supported — see below)
 - pnpm 11+
 - Docker Desktop + WSL2 (Windows)
 - .NET 8 SDK
@@ -23,15 +23,16 @@ Multi-tenant Egyptian Tax Authority (ETA) e-invoicing & e-receipts SaaS.
 
 ### Node.js version (Windows)
 
-This repo pins **Node 20 LTS** (`.nvmrc`, `"engines": { "node": ">=20 <21" }`).
-`engine-strict=true` in `.npmrc` blocks installs on other versions.
+This repo supports **Node 20 LTS and Node 24+** (`.nvmrc` recommends 20 for CI
+alignment; `"engines": { "node": ">=20" }` allows both).
+`engine-strict=true` in `.npmrc` still rejects Node &lt; 20.
 
 Using [nvm-windows](https://github.com/coreybutler/nvm-windows):
 
 ```powershell
-nvm install 20
-nvm use 20
-node -v   # expect v20.x.x
+nvm install 20   # or: nvm install 24
+nvm use 20       # or: nvm use 24
+node -v          # expect v20.x.x or v24.x.x
 ```
 
 Then install dependencies from the repo root:
@@ -87,12 +88,65 @@ pnpm dev:api
 pnpm dev:web
 ```
 
-`dev:api` / `dev:web` run `turbo run dev`, which:
+For a standalone database/client preflight, run `pnpm db:prepare`. It
+regenerates Prisma Client and applies committed migrations with
+`prisma migrate deploy` using `MIGRATE_DATABASE_URL` (**never**
+`migrate reset` — tenant data is preserved). `dev:api` runs this
+preflight automatically, so a local API cannot start against a known stale
+schema/client. Use the runtime `DATABASE_URL` only for application queries;
+the migration role must remain separate because `einvoice_app` has no schema
+DDL privileges. On Windows, stop a running API before a manual `db:prepare`
+because the process holds Prisma's query-engine DLL open.
+
+Postgres uses the Compose named volume `postgres_data` (`infra_postgres_data`).
+`pnpm infra:down` keeps that volume; only `docker compose … down -v` would wipe
+it — do not use `-v` for normal restarts.
+
+**Accounts persist across API restarts.** What you lose is the in-memory access
+JWT. Silent refresh restores the session from the HttpOnly refresh cookie when
+you use `https://web.localhost` (not `http://localhost:3000`). If you land on
+login after a restart, sign in again with the same credentials — do not register
+a new account.
+
+`dev:api` / `dev:web` then run `turbo run dev`, which:
 
 1. Builds workspace dependencies (`dependsOn: ["^build"]` in `turbo.json`)
 2. Starts `@einvoice/shared` in `tsc --watch` mode alongside the app
 
-### 5. Verify
+### 5. Seed a local test account
+
+```powershell
+pnpm db:seed
+```
+
+Idempotent (safe to re-run any time): upserts tenant `Test Company`, default branch
+`Main`, the four system roles, an Owner login `owner@test.local` /
+`Password123!`, **and** loads official ETA static code tables (tax types,
+subtypes, units, currencies, countries, activity codes, …) from
+`apps/api/data/eta-codes/`. The password is hashed with the same argon2id
+parameters as `PasswordService`. Re-running resets that password and never
+duplicates rows. Override with `SEED_TENANT_NAME`, `SEED_OWNER_EMAIL`,
+`SEED_OWNER_PASSWORD`, `SEED_BRANCH_NAME`.
+
+#### TEST ACCESS
+
+| | |
+|--|--|
+| Login URL | https://web.localhost/ar/login |
+| Email | `owner@test.local` |
+| Password | `Password123!` |
+| Tenant | Test Company |
+| Branch | Main |
+
+Refresh code tables from the public SDK `/files/` host (no credentials):
+
+```powershell
+pnpm eta:codes:refresh-sdk
+```
+
+**Dev only** — never run against a shared or production database.
+
+### 6. Verify
 
 - Liveness: `https://api.localhost/health/live`
 - Readiness: `https://api.localhost/health/ready`
@@ -101,7 +155,7 @@ pnpm dev:web
 Without Compose infra, the web app can still load, but API readiness fails
 until Postgres/Redis/MinIO are up.
 
-### 6. Quality gates (same as CI)
+### 7. Quality gates (same as CI)
 
 ```powershell
 pnpm lint

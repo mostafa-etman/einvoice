@@ -84,6 +84,13 @@ CREATE POLICY tenant_isolation_item_codes ON item_codes
   USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
   WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
 
+ALTER TABLE item_code_sync_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE item_code_sync_runs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_item_code_sync_runs ON item_code_sync_runs;
+CREATE POLICY tenant_isolation_item_code_sync_runs ON item_code_sync_runs
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
 ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE documents FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_documents ON documents;
@@ -123,5 +130,103 @@ ALTER TABLE signature_jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE signature_jobs FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_signature_jobs ON signature_jobs;
 CREATE POLICY tenant_isolation_signature_jobs ON signature_jobs
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE submissions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE submissions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_submissions ON submissions;
+CREATE POLICY tenant_isolation_submissions ON submissions
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE submission_documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE submission_documents FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_submission_documents ON submission_documents;
+CREATE POLICY tenant_isolation_submission_documents ON submission_documents
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE document_filing_locks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE document_filing_locks FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_document_filing_locks ON document_filing_locks;
+CREATE POLICY tenant_isolation_document_filing_locks ON document_filing_locks
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE document_status_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE document_status_events FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_document_status_events ON document_status_events;
+CREATE POLICY tenant_isolation_document_status_events ON document_status_events
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE authority_notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE authority_notifications FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_authority_notifications ON authority_notifications;
+CREATE POLICY tenant_isolation_authority_notifications ON authority_notifications
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE document_artifacts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE document_artifacts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_document_artifacts ON document_artifacts;
+CREATE POLICY tenant_isolation_document_artifacts ON document_artifacts
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE submission_trigger_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE submission_trigger_settings FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_submission_trigger_settings ON submission_trigger_settings;
+CREATE POLICY tenant_isolation_submission_trigger_settings ON submission_trigger_settings
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE received_documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE received_documents FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_received_documents ON received_documents;
+CREATE POLICY tenant_isolation_received_documents ON received_documents
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE received_document_lines ENABLE ROW LEVEL SECURITY;
+ALTER TABLE received_document_lines FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_received_document_lines ON received_document_lines;
+CREATE POLICY tenant_isolation_received_document_lines ON received_document_lines
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE received_document_sync_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE received_document_sync_runs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_received_document_sync_runs ON received_document_sync_runs;
+CREATE POLICY tenant_isolation_received_document_sync_runs ON received_document_sync_runs
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE import_jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE import_jobs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_import_jobs ON import_jobs;
+CREATE POLICY tenant_isolation_import_jobs ON import_jobs
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE import_row_results ENABLE ROW LEVEL SECURITY;
+ALTER TABLE import_row_results FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_import_row_results ON import_row_results;
+CREATE POLICY tenant_isolation_import_row_results ON import_row_results
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE export_jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE export_jobs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_export_jobs ON export_jobs;
+CREATE POLICY tenant_isolation_export_jobs ON export_jobs
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE eta_package_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE eta_package_requests FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_eta_package_requests ON eta_package_requests;
+CREATE POLICY tenant_isolation_eta_package_requests ON eta_package_requests
   USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
   WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));

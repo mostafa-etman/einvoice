@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Text;
+using Einvoice.Agent.Security;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -48,6 +49,8 @@ public sealed class AgentApiClient : IDisposable
         if (machineFingerprint is not null)
             body["machineFingerprint"] = machineFingerprint;
 
+        PinGuard.AssertNoPinInPayload(body);
+
         var previous = _http.DefaultRequestHeaders.Authorization;
         _http.DefaultRequestHeaders.Authorization = null;
         try
@@ -69,6 +72,7 @@ public sealed class AgentApiClient : IDisposable
         var body = new JObject();
         if (ready is not null)
             body["ready"] = ready is JToken jt ? jt : JToken.FromObject(ready);
+        PinGuard.AssertNoPinInPayload(body);
         return PostAsync("agent/heartbeat", body, cancellationToken);
     }
 
@@ -79,6 +83,7 @@ public sealed class AgentApiClient : IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
         var body = submitBody is JToken jt ? jt : JToken.FromObject(submitBody);
+        PinGuard.AssertNoPinInPayload(body);
         return PostAsync($"agent/jobs/{Uri.EscapeDataString(jobId)}/submit", body, cancellationToken);
     }
 
@@ -89,14 +94,21 @@ public sealed class AgentApiClient : IDisposable
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
+        var body = new JObject
+        {
+            ["code"] = code,
+            ["message"] = PinGuard.Redact(message),
+        };
+        PinGuard.AssertNoPinInPayload(body);
         return PostAsync(
             $"agent/jobs/{Uri.EscapeDataString(jobId)}/fail",
-            new JObject { ["code"] = code, ["message"] = message },
+            body,
             cancellationToken);
     }
 
     private async Task<JObject> PostAsync(string path, JToken body, CancellationToken cancellationToken)
     {
+        PinGuard.AssertNoPinInPayload(body);
         using var request = new HttpRequestMessage(HttpMethod.Post, path)
         {
             Content = JsonContent(body),

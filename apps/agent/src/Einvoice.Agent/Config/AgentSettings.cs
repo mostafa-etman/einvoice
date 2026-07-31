@@ -1,9 +1,10 @@
+using Einvoice.Agent.Signing;
+
 namespace Einvoice.Agent.Config;
 
 /// <summary>
-/// Preferred config: <c>SIGNING_PROVIDER=software|pkcs11</c>
-/// (aliases: <c>EINVOICE_SIGNING_PROVIDER</c>, legacy <c>EINVOICE_SIGNING_KEY_SOURCE</c>).
-/// Default is <see cref="Signing.SigningProviderKind.Software"/> so progress is not blocked without a token.
+/// Process settings. Env vars provide defaults; <see cref="LocalAgentConfig"/> overlays
+/// non-secret token preferences. The eSeal PIN is never part of this type.
 /// </summary>
 public sealed class AgentSettings
 {
@@ -13,17 +14,19 @@ public sealed class AgentSettings
     public string DeviceLabel { get; init; } = System.Environment.MachineName;
 
     /// <summary>Active signing provider. Default: software.</summary>
-    public Signing.SigningProviderKind SigningProvider { get; init; } =
-        Signing.SigningProviderKind.Software;
+    public SigningProviderKind SigningProvider { get; set; } = SigningProviderKind.Software;
 
     /// <summary>PKCS#11 module path. Default probes common ETA token DLLs.</summary>
-    public string? Pkcs11LibraryPath { get; init; }
+    public string? Pkcs11LibraryPath { get; set; }
 
     /// <summary>Optional substring filter on certificate subject/issuer (e.g. Egypt Trust).</summary>
-    public string? CertificateSubjectFilter { get; init; }
+    public string? CertificateSubjectFilter { get; set; }
+
+    /// <summary>Optional filter matching certificate Issuer DN.</summary>
+    public string? CertificateIssuerFilter { get; set; }
 
     /// <summary>Optional certificate thumbprint (SHA-1 hex) to select a specific eSeal cert.</summary>
-    public string? CertificateThumbprint { get; init; }
+    public string? CertificateThumbprint { get; set; }
 
     public string? SoftwareKeyPemPath { get; init; }
     public string? SoftwareCertPemPath { get; init; }
@@ -40,27 +43,44 @@ public sealed class AgentSettings
             "Einvoice.Agent",
             "device.token");
 
+    public string LocalConfigPath { get; init; } = LocalAgentConfig.DefaultPath;
+
     public int PollIntervalSeconds { get; init; } = 5;
     public int LocalStatusPort { get; init; } = 17865;
+
+    /// <summary>Apply non-secret local config (never contains PIN).</summary>
+    public void ApplyLocalConfig(LocalAgentConfig local)
+    {
+        if (!string.IsNullOrWhiteSpace(local.Pkcs11LibraryPath))
+            Pkcs11LibraryPath = local.Pkcs11LibraryPath;
+        if (!string.IsNullOrWhiteSpace(local.CertificateThumbprint))
+            CertificateThumbprint = local.CertificateThumbprint;
+        if (!string.IsNullOrWhiteSpace(local.CertificateIssuerFilter))
+            CertificateIssuerFilter = local.CertificateIssuerFilter;
+        if (!string.IsNullOrWhiteSpace(local.CertificateSubjectFilter))
+            CertificateSubjectFilter = local.CertificateSubjectFilter;
+        else if (!string.IsNullOrWhiteSpace(local.CertificateIssuerFilter))
+            CertificateSubjectFilter = local.CertificateIssuerFilter;
+    }
 
     public static AgentSettings FromEnvironment(IDictionary<string, string?>? env = null)
     {
         env ??= ProcessEnv();
         string? G(string k) => env.TryGetValue(k, out var v) ? v : null;
 
-        var provider = Signing.SigningProviderKind.Software;
+        var provider = SigningProviderKind.Software;
         var rawProvider = G("SIGNING_PROVIDER")
             ?? G("EINVOICE_SIGNING_PROVIDER")
             ?? G("EINVOICE_SIGNING_KEY_SOURCE");
 
-        if (Signing.SigningProviderKindExtensions.TryParse(rawProvider, out var parsed))
+        if (SigningProviderKindExtensions.TryParse(rawProvider, out var parsed))
             provider = parsed;
         else if (string.Equals(G("EINVOICE_HARDWARE_TOKEN"), "1", StringComparison.Ordinal))
-            provider = Signing.SigningProviderKind.Pkcs11;
+            provider = SigningProviderKind.Pkcs11;
         else if (string.Equals(G("EINVOICE_USE_SOFTWARE_KEY"), "1", StringComparison.Ordinal))
-            provider = Signing.SigningProviderKind.Software;
+            provider = SigningProviderKind.Software;
 
-        return new AgentSettings
+        var settings = new AgentSettings
         {
             Environment = G("AGENT_ENVIRONMENT") ?? "Development",
             ApiBaseUrl = G("EINVOICE_API_BASE_URL") ?? G("API_BASE_URL") ?? "http://localhost:3001",
@@ -69,12 +89,17 @@ public sealed class AgentSettings
             SigningProvider = provider,
             Pkcs11LibraryPath = G("EINVOICE_PKCS11_LIBRARY"),
             CertificateSubjectFilter = G("EINVOICE_CERT_FILTER"),
+            CertificateIssuerFilter = G("EINVOICE_CERT_ISSUER"),
             CertificateThumbprint = G("EINVOICE_CERT_THUMBPRINT"),
             SoftwareKeyPemPath = G("EINVOICE_SOFTWARE_KEY_PEM"),
             SoftwareCertPemPath = G("EINVOICE_SOFTWARE_CERT_PEM"),
             PollIntervalSeconds = int.TryParse(G("EINVOICE_POLL_INTERVAL_SECONDS"), out var p) ? p : 5,
             LocalStatusPort = int.TryParse(G("EINVOICE_LOCAL_STATUS_PORT"), out var port) ? port : 17865,
         };
+
+        var local = LocalAgentConfig.Load(settings.LocalConfigPath);
+        settings.ApplyLocalConfig(local);
+        return settings;
     }
 
     private static IDictionary<string, string?> ProcessEnv()

@@ -11,7 +11,12 @@ import {
 } from 'react';
 import * as authApi from '@/lib/api/auth';
 import type { AuthUser } from '@/lib/api/auth';
-import { getAccessToken, setAccessToken } from '@/lib/session';
+import {
+  getAccessToken,
+  getSessionHint,
+  setAccessToken,
+  setSessionHint,
+} from '@/lib/session';
 
 type AuthContextValue = {
   user: AuthUser | null;
@@ -31,6 +36,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     (async () => {
+      // HttpOnly refresh cookie is not visible to JS. Only call /auth/refresh when
+      // a prior login/register left a session hint — otherwise cold open always
+      // produces 401 {"message":"Missing refresh token"} in the Network tab.
+      if (!getSessionHint()) {
+        if (!cancelled) {
+          setUser(null);
+          setReady(true);
+        }
+        return;
+      }
+
       try {
         const session = await authApi.refresh();
         if (!cancelled) {
@@ -38,6 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       } catch {
         if (!cancelled) {
+          setSessionHint(false);
           setAccessToken(null);
           setUser(null);
         }

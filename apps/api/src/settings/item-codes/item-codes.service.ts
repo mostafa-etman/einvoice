@@ -66,6 +66,7 @@ export class ItemCodesService {
           type: input.type as ItemCodeType,
           code,
           description: input.description,
+          source: 'LOCAL',
         },
       }),
     );

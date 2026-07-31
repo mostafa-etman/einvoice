@@ -47,6 +47,9 @@ public sealed class Pkcs11KeyProvider : ITokenKeyProvider
         _thumbprint = NormalizeThumb(thumbprint);
     }
 
+    /// <summary>Optional issuer DN substring (preferred over broad subject filter when set).</summary>
+    public string? IssuerFilter { get; init; }
+
     public object LoadSigningKey() =>
         throw new InvalidOperationException("Use Acquire(pin) for PKCS#11 signing contexts.");
 
@@ -184,6 +187,12 @@ public sealed class Pkcs11KeyProvider : ITokenKeyProvider
         if (!string.IsNullOrWhiteSpace(_thumbprint))
             return string.Equals(NormalizeThumb(cert.Thumbprint), _thumbprint, StringComparison.OrdinalIgnoreCase);
 
+        if (!string.IsNullOrWhiteSpace(IssuerFilter))
+        {
+            if (!cert.Issuer.Contains(IssuerFilter, StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+
         if (string.IsNullOrWhiteSpace(_subjectFilter))
             return true;
 
@@ -195,25 +204,6 @@ public sealed class Pkcs11KeyProvider : ITokenKeyProvider
         string.IsNullOrWhiteSpace(t) ? null : t.Replace(" ", "", StringComparison.Ordinal).ToUpperInvariant();
 
     /// <summary>Probe well-known ETA token PKCS#11 module paths on Windows.</summary>
-    public static string? ProbeDefaultLibraryPath()
-    {
-        var candidates = new[]
-        {
-            Environment.GetEnvironmentVariable("EINVOICE_PKCS11_LIBRARY"),
-            Path.Combine(Environment.SystemDirectory, "eps2003csp11.dll"),
-            Path.Combine(Environment.SystemDirectory, "SignatureP11.dll"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "eps2003csp11.dll"),
-            @"C:\Windows\System32\eps2003csp11.dll",
-            @"C:\Windows\System32\SignatureP11.dll",
-            @"C:\Windows\SysWOW64\eps2003csp11.dll",
-        };
-
-        foreach (var c in candidates)
-        {
-            if (!string.IsNullOrWhiteSpace(c) && File.Exists(c))
-                return c;
-        }
-
-        return null;
-    }
+    public static string? ProbeDefaultLibraryPath() =>
+        TokenAutoDetect.ScanLibraries().FirstOrDefault()?.Path;
 }

@@ -42,6 +42,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
+          # CI baseline stays on Node 20 LTS. Local Node 24+ is supported via
+          # package.json engines ">=20" (do not treat 24 as forbidden).
           node-version: 20
           cache: pnpm
 
@@ -100,6 +102,32 @@ jobs:
           SECRETS_MASTER_KEY: dGVzdC1zZWNyZXRzLW1hc3Rlci1rZXktMzJieXRlcyE=
           NEXT_PUBLIC_API_URL: http://localhost:3001
           NEXT_PUBLIC_DEFAULT_LOCALE: ar
+
+      # Deliberately bypass Turbo's test cache for the auth smoke test. This
+      # proves register/login/refresh against this job's freshly migrated DB.
+      - name: Verify auth against migrated database
+        run: |
+          DATABASE_URL="$MIGRATE_DATABASE_URL" pnpm --filter @einvoice/api exec prisma migrate status
+          pnpm --filter @einvoice/api test -- --runInBand test/auth.e2e.spec.ts
+        env:
+          NODE_ENV: test
+          PORT: "3001"
+          DATABASE_URL: postgresql://einvoice_app:einvoice_app@localhost:5432/einvoice?schema=public
+          MIGRATE_DATABASE_URL: postgresql://einvoice:einvoice@localhost:5432/einvoice?schema=public
+          REDIS_URL: redis://localhost:6379
+          MINIO_ENDPOINT: localhost
+          MINIO_PORT: "9000"
+          MINIO_ACCESS_KEY: minioadmin
+          MINIO_SECRET_KEY: minioadmin
+          MINIO_USE_SSL: "false"
+          ETA_IDENTITY_BASE_URL: https://id.preprod.eta.gov.eg
+          ETA_API_BASE_URL: https://api.preprod.invoicing.eta.gov.eg
+          JWT_ACCESS_SECRET: test-access-secret-min-16
+          JWT_ACCESS_TTL: 15m
+          REFRESH_COOKIE_NAME: refresh_token
+          REFRESH_TTL_DAYS: "14"
+          COOKIE_SECURE: "false"
+          SECRETS_MASTER_KEY: dGVzdC1zZWNyZXRzLW1hc3Rlci1rZXktMzJieXRlcyE=
 
       - name: Build (JS workspaces)
         run: pnpm exec turbo run build

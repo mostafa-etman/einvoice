@@ -4,6 +4,7 @@ import {
   type LineInput,
 } from '../calculate-totals.js';
 import type { JsonObject } from '../canonical-serialize.js';
+import { formatEtaDateTimeIssued, toEtaDecimalNumber } from '../eta-formats.js';
 
 export type DocumentKind =
   | 'INVOICE'
@@ -31,8 +32,17 @@ export type BuildContext = {
   receiver: JsonObject;
   lines: LineInput[];
   extraDiscountAmount?: string;
-  references?: JsonObject | null;
+  /** ETA references: UUID string[] for C/D/EC/ED */
+  references?: string[] | JsonObject | null;
   taxpayerActivityCode?: string;
+  purchaseOrderReference?: string;
+  purchaseOrderDescription?: string;
+  salesOrderReference?: string;
+  salesOrderDescription?: string;
+  proformaInvoiceNumber?: string;
+  serviceDeliveryDate?: string;
+  payment?: JsonObject | null;
+  delivery?: JsonObject | null;
   /** Optional FX / export extras preserved in order after core fields */
   extras?: JsonObject;
 };
@@ -43,37 +53,65 @@ export type BuiltDocument = {
   totals: ReturnType<typeof calculateDocumentTotals>;
 };
 
+function compactObject(obj: JsonObject | null | undefined): JsonObject | undefined {
+  if (!obj) return undefined;
+  const out: JsonObject = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === undefined || v === null || v === '') continue;
+    out[k] = v;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function n(value: string | number): number {
+  return toEtaDecimalNumber(value);
+}
+
 function buildLines(lines: LineInput[]) {
-  return lines.map((line, idx) => {
+  return lines.map((line) => {
     const c = calculateLine(line);
+    const currencySold = line.currencySold || 'EGP';
+    const amountEGP = line.amountEGP ?? line.unitPrice;
+    const unitValue: JsonObject = {
+      currencySold,
+      amountEGP: n(amountEGP),
+    };
+    if (currencySold !== 'EGP') {
+      if (line.amountSold != null && line.amountSold !== '') {
+        unitValue.amountSold = n(line.amountSold);
+      }
+      if (line.currencyExchangeRate != null && line.currencyExchangeRate !== '') {
+        unitValue.currencyExchangeRate = n(line.currencyExchangeRate);
+      }
+    }
+
     const obj: JsonObject = {
       description: line.description,
       itemType: line.itemType,
       itemCode: line.itemCode,
       unitType: line.unitType,
-      quantity: line.quantity,
-      unitValue: {
-        currencySold: 'EGP',
-        amountEGP: line.unitPrice,
-      },
-      salesTotal: c.salesTotal,
-      total: c.total,
-      valueDifference: c.valueDifference,
-      totalTaxableFees: c.totalTaxableFees,
-      netTotal: c.netTotal,
-      itemsDiscount: c.itemsDiscount,
+      quantity: n(line.quantity),
+      unitValue,
+      salesTotal: n(c.salesTotal),
+      total: n(c.total),
+      valueDifference: n(c.valueDifference),
+      totalTaxableFees: n(c.totalTaxableFees),
+      netTotal: n(c.netTotal),
+      itemsDiscount: n(c.itemsDiscount),
       discount: {
-        rate: line.discountRate ?? '0',
-        amount: c.discount,
+        rate: n(line.discountRate ?? '0'),
+        amount: n(c.discount),
       },
       taxableItems: c.taxAmounts.map((t) => ({
         taxType: t.taxType,
-        amount: t.amount,
+        amount: n(t.amount),
         subType: t.subType,
-        rate: t.rate,
+        rate: n(t.rate),
       })),
     };
-    void idx;
+    if (line.internalCode) obj.internalCode = line.internalCode;
+    if (line.weightUnitType) obj.weightUnitType = line.weightUnitType;
+    if (line.weightQuantity) obj.weightQuantity = n(line.weightQuantity);
     return { computed: c, payload: obj };
   });
 }
@@ -88,25 +126,66 @@ export function buildDocumentPayload(ctx: BuildContext): BuiltDocument {
     receiver: ctx.receiver,
     documentType: KIND_TO_ETA_TYPE[ctx.kind],
     documentTypeVersion: ctx.documentTypeVersion,
-    dateTimeIssued: ctx.dateTimeIssued,
+    dateTimeIssued: formatEtaDateTimeIssued(ctx.dateTimeIssued),
     taxpayerActivityCode: ctx.taxpayerActivityCode ?? '',
     internalID: ctx.internalID,
-    invoiceLines: builtLines.map((b) => b.payload),
-    totalDiscountAmount: totals.totalDiscountAmount,
-    totalSalesAmount: totals.totalSalesAmount,
-    netAmount: totals.netAmount,
-    taxTotals: totals.taxTotals.map((t) => ({
-      taxType: t.taxType,
-      amount: t.amount,
-    })),
-    totalAmount: totals.totalAmount,
-    extraDiscountAmount: totals.extraDiscountAmount,
-    totalItemsDiscountAmount: totals.totalItemsDiscountAmount,
   };
 
-  if (ctx.references) {
-    etaPayload.references = ctx.references;
+  if (ctx.purchaseOrderReference) {
+    etaPayload.purchaseOrderReference = ctx.purchaseOrderReference;
   }
+  if (ctx.purchaseOrderDescription) {
+    etaPayload.purchaseOrderDescription = ctx.purchaseOrderDescription;
+  }
+  if (ctx.salesOrderReference) {
+    etaPayload.salesOrderReference = ctx.salesOrderReference;
+  }
+  if (ctx.salesOrderDescription) {
+    etaPayload.salesOrderDescription = ctx.salesOrderDescription;
+  }
+  if (ctx.proformaInvoiceNumber) {
+    etaPayload.proformaInvoiceNumber = ctx.proformaInvoiceNumber;
+  }
+  if (ctx.serviceDeliveryDate) {
+    etaPayload.serviceDeliveryDate = ctx.serviceDeliveryDate;
+  }
+
+  const payment = compactObject(ctx.payment ?? undefined);
+  if (payment) etaPayload.payment = payment;
+  const delivery = compactObject(ctx.delivery ?? undefined);
+  if (delivery) {
+    if (typeof delivery.grossWeight === 'string') {
+      delivery.grossWeight = n(delivery.grossWeight);
+    }
+    if (typeof delivery.netWeight === 'string') {
+      delivery.netWeight = n(delivery.netWeight);
+    }
+    if (typeof delivery.dateValidity === 'string' && delivery.dateValidity) {
+      try {
+        delivery.dateValidity = formatEtaDateTimeIssued(delivery.dateValidity);
+      } catch {
+        /* leave as-is; validator will catch */
+      }
+    }
+    etaPayload.delivery = delivery;
+  }
+
+  if (ctx.references != null) {
+    etaPayload.references = ctx.references as JsonObject | string[];
+  }
+
+  etaPayload.invoiceLines = builtLines.map((b) => b.payload);
+  etaPayload.totalDiscountAmount = n(totals.totalDiscountAmount);
+  etaPayload.totalSalesAmount = n(totals.totalSalesAmount);
+  etaPayload.netAmount = n(totals.netAmount);
+  etaPayload.taxTotals = totals.taxTotals.map((t) => ({
+    taxType: t.taxType,
+    amount: n(t.amount),
+  }));
+  etaPayload.totalAmount = n(totals.totalAmount);
+  etaPayload.extraDiscountAmount = n(totals.extraDiscountAmount);
+  etaPayload.totalItemsDiscountAmount = n(totals.totalItemsDiscountAmount);
+
   if (ctx.extras) {
     for (const [k, v] of Object.entries(ctx.extras)) {
       etaPayload[k] = v;

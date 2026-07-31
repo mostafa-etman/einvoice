@@ -108,10 +108,14 @@ public sealed class Pkcs11TokenSigningProvider : ISigningProvider
 
     private SigningOutcome SignViaPkcs11(byte[] contentUtf8, string pin, string libraryPath)
     {
+        var filter = _settings.CertificateSubjectFilter ?? _settings.CertificateIssuerFilter;
         var provider = new Pkcs11KeyProvider(
             libraryPath,
-            _settings.CertificateSubjectFilter,
-            _settings.CertificateThumbprint);
+            filter,
+            _settings.CertificateThumbprint)
+        {
+            IssuerFilter = _settings.CertificateIssuerFilter,
+        };
         using var ctx = provider.Acquire(pin);
         var der = SigningMaterialResolver.SignContent(ctx, contentUtf8);
         var cert = new System.Security.Cryptography.X509Certificates.X509Certificate2(ctx.Certificate.RawData);

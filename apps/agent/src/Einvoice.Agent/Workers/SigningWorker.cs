@@ -1,6 +1,7 @@
 using Einvoice.Agent.Channel;
 using Einvoice.Agent.Config;
 using Einvoice.Agent.Queue;
+using Einvoice.Agent.Security;
 using Einvoice.Agent.Signing;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -122,9 +123,13 @@ public sealed class SigningWorker : BackgroundService
             var jobId = job.Value<string>("jobId") ?? job.Value<string>("id");
             var documentId = job.Value<string>("documentId");
             var version = job.Value<int?>("documentVersion") ?? job.Value<int?>("version") ?? 0;
-            var payload = job["etaPayload"]?.ToString(Formatting.None)
+            // etaPayloadText carries the cloud's exact document bytes. Field order
+            // is part of the ETA canonical string, so re-serializing an object
+            // (etaPayload) can change what we sign. Prefer the raw text.
+            var payload = job.Value<string>("etaPayloadText")
+                ?? job["etaPayload"]?.ToString(Formatting.None)
                 ?? job["payload"]?.ToString(Formatting.None);
-            if (jobId is null || documentId is null || payload is null) continue;
+            if (jobId is null || documentId is null || string.IsNullOrWhiteSpace(payload)) continue;
 
             _queue.Enqueue(jobId, documentId, version, payload);
             _log.LogInformation("Enqueued job {JobId} for document {DocumentId}", jobId, documentId);
@@ -161,10 +166,11 @@ public sealed class SigningWorker : BackgroundService
             catch (Exception ex)
             {
                 _log.LogError(ex, "Sign failed for job {JobId}", item.JobId);
-                _queue.MarkAttemptFailed(item.Id, ex.Message, dead: false);
+                var safeMessage = PinGuard.Redact(ex.Message);
+                _queue.MarkAttemptFailed(item.Id, safeMessage, dead: false);
                 try
                 {
-                    _ = _api.FailAsync(item.JobId, "SIGN_FAILED", ex.Message, ct);
+                    _ = _api.FailAsync(item.JobId, "SIGN_FAILED", safeMessage, ct);
                 }
                 catch (Exception failEx)
                 {

@@ -2,6 +2,7 @@ import {
   getAccessToken,
   getActiveTenantId,
   setAccessToken,
+  setSessionHint,
 } from '@/lib/session';
 
 export class ApiError extends Error {
@@ -41,6 +42,7 @@ type RequestOptions = {
   tenantScoped?: boolean;
   skipAuth?: boolean;
   retry?: boolean;
+  headers?: Record<string, string>;
 };
 
 let refreshPromise: Promise<string | null> | null = null;
@@ -54,6 +56,7 @@ async function refreshAccessToken(): Promise<string | null> {
       });
       if (!res.ok) {
         setAccessToken(null);
+        setSessionHint(false);
         return null;
       }
       const data = (await res.json()) as { accessToken: string };
@@ -73,6 +76,7 @@ async function refreshAccessToken(): Promise<string | null> {
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = {
     Accept: 'application/json',
+    ...(options.headers ?? {}),
   };
   if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json';

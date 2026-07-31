@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { TenantModule } from '../tenant/tenant.module';
+import { EtaModule } from '../eta/eta.module';
 import { SecretsEncryptionService } from '../crypto/secrets-encryption.service';
 import { BranchesController } from './branches/branches.controller';
 import { BranchesSettingsService } from './branches/branches.service';
@@ -14,9 +15,10 @@ import { EtaCredentialsController } from './eta-credentials/eta-credentials.cont
 import { EtaCredentialsService } from './eta-credentials/eta-credentials.service';
 import { ItemCodesController } from './item-codes/item-codes.controller';
 import { ItemCodesService } from './item-codes/item-codes.service';
+import { ItemCodesSyncService } from './item-codes/item-codes-sync.service';
 
 @Module({
-  imports: [PrismaModule, AuditModule, TenantModule],
+  imports: [PrismaModule, AuditModule, TenantModule, EtaModule],
   controllers: [
     BranchesController,
     CurrenciesController,
@@ -32,6 +34,7 @@ import { ItemCodesService } from './item-codes/item-codes.service';
     NoopExchangeRateProvider,
     EtaCredentialsService,
     ItemCodesService,
+    ItemCodesSyncService,
   ],
   exports: [SecretsEncryptionService],
 })

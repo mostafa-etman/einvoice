@@ -1,0 +1,47 @@
+[
+  {
+    "code": "GRM",
+    "desc_en": "Gram ( g )",
+    "desc_ar": "Gram ( g )"
+  },
+  {
+    "code": "KGM",
+    "desc_en": "Kilogram ( KG )",
+    "desc_ar": "Kilogram ( KG )"
+  },
+  {
+    "code": "LB",
+    "desc_en": "pounds",
+    "desc_ar": "pounds"
+  },
+  {
+    "code": "MGM",
+    "desc_en": "Milligram ( mg )",
+    "desc_ar": "Milligram ( mg )"
+  },
+  {
+    "code": "ONZ",
+    "desc_en": "Ounce ( oz )",
+    "desc_ar": "Ounce ( oz )"
+  },
+  {
+    "code": "ST",
+    "desc_en": "Ton (short,2000 lb)",
+    "desc_ar": "Ton (short,2000 lb)"
+  },
+  {
+    "code": "TNE",
+    "desc_en": "Tonne ( t )",
+    "desc_ar": "Tonne ( t )"
+  },
+  {
+    "code": "TON",
+    "desc_en": "Ton (metric)",
+    "desc_ar": "Ton (metric)"
+  },
+  {
+    "code": "KG",
+    "desc_en": "Keg",
+    "desc_ar": ""
+  }
+]

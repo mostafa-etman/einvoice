@@ -16,6 +16,18 @@ enum ItemCodeType {
   GS1
 }
 
+enum ItemCodeSource {
+  LOCAL
+  ETA
+}
+
+enum ItemCodeSyncRunStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
 enum DocumentKind {
   INVOICE
   CREDIT_NOTE
@@ -28,7 +40,132 @@ enum DocumentKind {
 enum DocumentStatus {
   DRAFT
   READY
+  PENDING_SIGNATURE
   SIGNED
+  SUBMITTED
+  VALID
+  INVALID
+  CANCELLED
+  REJECTED
+}
+
+enum SubmissionState {
+  ASSEMBLING
+  SENT
+  PARTIALLY_ACCEPTED
+  RESOLVED
+  NEEDS_ATTENTION
+  /// Transient ETA DuplicateSubmission window — not an error / not FR-004d.
+  WAITING_COOLDOWN
+}
+
+enum SubmissionDocumentAttemptOutcome {
+  PENDING
+  ACCEPTED
+  REFUSED_AT_INTAKE
+  VALID
+  INVALID
+  CANCELLED
+  REJECTED
+}
+
+enum ReceivedDocumentKind {
+  PURCHASE_INVOICE
+  PURCHASE_RETURN
+  OTHER_RECEIVED
+}
+
+enum ReceivedBuyerDecision {
+  NONE
+  ACCEPTED
+  REJECTED
+  DECLINED_CANCELATION
+  NEEDS_ATTENTION
+}
+
+enum ReceivedReconciliationStatus {
+  PENDING_REVIEW
+  RECONCILED
+  DISPUTED
+}
+
+enum ReceivedSyncTrigger {
+  CRON
+  MANUAL
+}
+
+enum ReceivedSyncRunStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum ImportJobStatus {
+  UPLOADED
+  MAPPING
+  VALIDATING
+  VALIDATED
+  RUNNING
+  SUCCEEDED
+  PARTIAL
+  FAILED
+}
+
+enum ImportRowStatus {
+  VALID
+  INVALID
+  CREATED
+  SIGN_ENQUEUED
+  FAILED
+}
+
+enum ImportRunMode {
+  CREATE_ONLY
+  CREATE_SIGN_SUBMIT
+}
+
+enum ExportJobKind {
+  LOCAL
+  ETA_PACKAGE
+}
+
+enum ExportJobStatus {
+  QUEUED
+  RUNNING
+  READY
+  FAILED
+  EXPIRED
+}
+
+enum EtaPackageLocalStatus {
+  REQUESTED
+  IN_PROGRESS
+  READY
+  ERROR
+  DELETED
+  STALLED
+}
+
+enum StatusEventSource {
+  system
+  eta
+  user
+}
+
+/// Global ETA code catalogs (seeded offline from SDK /files/; refreshable later).
+enum EtaCodeCatalogKind {
+  TAX_TYPE
+  TAX_SUBTYPE
+  UNIT_TYPE
+  WEIGHT_UNIT_TYPE
+  CURRENCY
+  COUNTRY
+  ACTIVITY_CODE
+  RECEIVER_TYPE
+  ITEM_CODE_TYPE
+  RETURN_REASON
+  DOCUMENT_TYPE
 }
 
 enum PairingCodeStatus {
@@ -81,10 +218,25 @@ model Tenant {
   exchangeRates        ExchangeRate[]
   tenantEtaCredentials TenantEtaCredential[]
   itemCodes            ItemCode[]
+  itemCodeSyncRuns     ItemCodeSyncRun[]
   documents            Document[]
   pairingCodes         PairingCode[]
   signingDevices       SigningDevice[]
   signatureJobs        SignatureJob[]
+  submissions          Submission[]
+  submissionDocuments  SubmissionDocument[]
+  documentFilingLocks  DocumentFilingLock[]
+  documentStatusEvents DocumentStatusEvent[]
+  authorityNotifications AuthorityNotification[]
+  documentArtifacts    DocumentArtifact[]
+  submissionTriggerSettings SubmissionTriggerSetting[]
+  receivedDocuments    ReceivedDocument[]
+  receivedDocumentLines ReceivedDocumentLine[]
+  receivedDocumentSyncRuns ReceivedDocumentSyncRun[]
+  importJobs           ImportJob[]
+  importRowResults     ImportRowResult[]
+  exportJobs           ExportJob[]
+  etaPackageRequests   EtaPackageRequest[]
 
   @@map("tenants")
 }
@@ -105,6 +257,7 @@ model Branch {
   defaultCurrency       Currency?              @relation(fields: [defaultCurrencyCode], references: [code])
   tenantEtaCredentials  TenantEtaCredential[]
   documents             Document[]
+  receivedDocuments     ReceivedDocument[]
 
   @@index([tenantId])
   @@map("branches")
@@ -123,6 +276,48 @@ model Currency {
   tenantCurrencies TenantCurrency[]
 
   @@map("currencies")
+}
+
+/// One row per ETA code catalog (tax types, UOM, countries, …). Global — no RLS.
+model EtaCodeCatalog {
+  id           String             @id @default(uuid()) @db.Uuid
+  kind         EtaCodeCatalogKind @unique
+  sourceUrl    String             @map("source_url")
+  sourceFile   String?            @map("source_file")
+  contentHash  String             @map("content_hash")
+  entryCount   Int                @default(0) @map("entry_count")
+  lastSeededAt DateTime?          @map("last_seeded_at")
+  lastSyncedAt DateTime?          @map("last_synced_at")
+  /// seeded | synced | drift | error
+  syncStatus   String             @default("seeded") @map("sync_status")
+  syncNotes    String?            @map("sync_notes")
+  createdAt    DateTime           @default(now()) @map("created_at")
+  updatedAt    DateTime           @updatedAt @map("updated_at")
+
+  entries EtaCodeEntry[]
+
+  @@map("eta_code_catalogs")
+}
+
+model EtaCodeEntry {
+  id         String             @id @default(uuid()) @db.Uuid
+  catalogKind EtaCodeCatalogKind @map("catalog_kind")
+  code       String
+  nameEn     String             @map("name_en")
+  nameAr     String?            @map("name_ar")
+  /// e.g. tax subtype → parent tax type code
+  parentCode String?            @map("parent_code")
+  meta       Json?
+  isActive   Boolean            @default(true) @map("is_active")
+  createdAt  DateTime           @default(now()) @map("created_at")
+  updatedAt  DateTime           @updatedAt @map("updated_at")
+
+  catalog EtaCodeCatalog @relation(fields: [catalogKind], references: [kind], onDelete: Cascade)
+
+  @@unique([catalogKind, code])
+  @@index([catalogKind])
+  @@index([catalogKind, parentCode])
+  @@map("eta_code_entries")
 }
 
 model TenantCurrency {
@@ -183,22 +378,44 @@ model TenantEtaCredential {
 }
 
 model ItemCode {
-  id             String       @id @default(uuid()) @db.Uuid
-  tenantId       String       @map("tenant_id") @db.Uuid
+  id             String         @id @default(uuid()) @db.Uuid
+  tenantId       String         @map("tenant_id") @db.Uuid
   type           ItemCodeType
   code           String
   description    String
-  isActive       Boolean      @default(true) @map("is_active")
-  lastSyncStatus String?      @map("last_sync_status")
-  lastSyncAt     DateTime?    @map("last_sync_at")
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
+  isActive       Boolean        @default(true) @map("is_active")
+  source         ItemCodeSource @default(LOCAL)
+  lastSyncStatus String?        @map("last_sync_status")
+  lastSyncAt     DateTime?      @map("last_sync_at")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, type, code])
   @@index([tenantId])
   @@map("item_codes")
+}
+
+model ItemCodeSyncRun {
+  id                String                 @id @default(uuid()) @db.Uuid
+  tenantId          String                 @map("tenant_id") @db.Uuid
+  status            ItemCodeSyncRunStatus  @default(PENDING)
+  startedAt         DateTime?              @map("started_at")
+  finishedAt        DateTime?              @map("finished_at")
+  addedCount        Int                    @default(0) @map("added_count")
+  updatedCount      Int                    @default(0) @map("updated_count")
+  unchangedCount    Int                    @default(0) @map("unchanged_count")
+  errorsJson        Json?                  @map("errors_json")
+  triggeredByUserId String?                @map("triggered_by_user_id") @db.Uuid
+  createdAt         DateTime               @default(now()) @map("created_at")
+  updatedAt         DateTime               @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, createdAt])
+  @@map("item_code_sync_runs")
 }
 
 model Permission {
@@ -322,10 +539,38 @@ model Document {
   totalItemsDiscountAmount String       @default("0.00") @map("total_items_discount_amount")
   taxTotalsJson          Json           @default("[]") @map("tax_totals_json")
   etaPayloadJson         Json           @map("eta_payload_json")
+  /// Exact ETA document bytes (field order preserved) — the ONLY thing signed and submitted.
+  /// jsonb cannot be used for this: it reorders object keys and invalidates the signature.
+  etaPayloadText         String?        @map("eta_payload_text") @db.Text
   canonicalPreview       String?        @map("canonical_preview") @db.Text
   signaturesJson         Json?          @map("signatures_json")
   signedAt               DateTime?      @map("signed_at")
   signedByDeviceId       String?        @map("signed_by_device_id") @db.Uuid
+  needsAttention         Boolean        @default(false) @map("needs_attention")
+  needsAttentionReason   String?        @map("needs_attention_reason")
+  etaStatus              String?        @map("eta_status")
+  etaUuid                String?        @map("eta_uuid")
+  etaLongId              String?        @map("eta_long_id")
+  submissionUuid         String?        @map("submission_uuid")
+  etaStatusRaw           Json?          @map("eta_status_raw")
+  etaStatusUpdatedAt     DateTime?      @map("eta_status_updated_at")
+  /// ETA DuplicateSubmission window — blocks POST until this instant.
+  /// Always scoped: it applies only to submitCooldownPayloadHash and auto-expires.
+  submitCooldownUntil    DateTime?      @map("submit_cooldown_until")
+  /// Canonical digest of the payload ETA flagged as duplicate. A cooldown never
+  /// blocks a different document, or the same document after its bytes change.
+  submitCooldownPayloadHash String?     @map("submit_cooldown_payload_hash")
+  /// Mutual exclusion: only one ETA POST per document at a time.
+  submitInFlight         Boolean        @default(false) @map("submit_in_flight")
+  /// When the current in-flight lock was taken, so a crashed run can be recovered.
+  submitInFlightSince    DateTime?      @map("submit_in_flight_since")
+  submitAttemptCount     Int            @default(0) @map("submit_attempt_count")
+  submitDuplicateRetryCount Int         @default(0) @map("submit_duplicate_retry_count")
+  /// [{ at, outcome, httpStatus?, code?, message?, triggerSource? }]
+  submitAttemptLog       Json?          @map("submit_attempt_log")
+  submitPendingRetrySubmissionId String? @map("submit_pending_retry_submission_id") @db.Uuid
+  importJobId            String?        @map("import_job_id") @db.Uuid
+  importRowNumber        Int?           @map("import_row_number")
   version                Int            @default(0)
   createdAt              DateTime       @default(now()) @map("created_at")
   updatedAt              DateTime       @updatedAt @map("updated_at")
@@ -337,11 +582,174 @@ model Document {
   lines           DocumentLine[]
   signedByDevice  SigningDevice? @relation("DocumentSignedByDevice", fields: [signedByDeviceId], references: [id], onDelete: SetNull)
   signatureJobs   SignatureJob[]
+  submissionDocuments SubmissionDocument[]
+  documentStatusEvents DocumentStatusEvent[]
+  documentArtifacts DocumentArtifact[]
+  filingLocks     DocumentFilingLock[]
+  importJob       ImportJob?     @relation(fields: [importJobId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, internalId])
   @@index([tenantId])
   @@index([tenantId, status])
+  @@index([tenantId, importJobId])
   @@map("documents")
+}
+
+model Submission {
+  id                    String          @id @default(uuid()) @db.Uuid
+  tenantId              String          @map("tenant_id") @db.Uuid
+  batchIdempotencyKey   String          @map("batch_idempotency_key")
+  parentSubmissionId    String?         @map("parent_submission_id") @db.Uuid
+  attemptNumber         Int             @default(1) @map("attempt_number")
+  state                 SubmissionState @default(ASSEMBLING)
+  etaSubmissionUuid     String?         @map("eta_submission_uuid")
+  documentCount         Int             @default(0) @map("document_count")
+  acceptedCount         Int             @default(0) @map("accepted_count")
+  refusedCount          Int             @default(0) @map("refused_count")
+  effectiveMaxDocs      Int?            @map("effective_max_docs")
+  effectiveMaxBytes     Int?            @map("effective_max_bytes")
+  lastErrorCode         String?         @map("last_error_code")
+  lastErrorMessage      String?         @map("last_error_message")
+  /// Last raw ETA HTTP body (202 or 422) for diagnostics — never tokens.
+  etaRawResponseJson    Json?           @map("eta_raw_response_json")
+  nextAttemptAt         DateTime?       @map("next_attempt_at")
+  createdByUserId       String?         @map("created_by_user_id") @db.Uuid
+  triggerSource         String          @default("user") @map("trigger_source")
+  createdAt             DateTime        @default(now()) @map("created_at")
+  updatedAt             DateTime        @updatedAt @map("updated_at")
+
+  tenant    Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parent    Submission?          @relation("SubmissionSplits", fields: [parentSubmissionId], references: [id], onDelete: SetNull)
+  children  Submission[]         @relation("SubmissionSplits")
+  documents SubmissionDocument[]
+
+  @@unique([tenantId, batchIdempotencyKey])
+  @@index([tenantId])
+  @@index([tenantId, state])
+  @@index([tenantId, createdAt])
+  @@map("submissions")
+}
+
+model SubmissionDocument {
+  id               String                           @id @default(uuid()) @db.Uuid
+  tenantId         String                           @map("tenant_id") @db.Uuid
+  submissionId     String                           @map("submission_id") @db.Uuid
+  documentId       String                           @map("document_id") @db.Uuid
+  documentVersion  Int                              @map("document_version")
+  attemptOutcome   SubmissionDocumentAttemptOutcome @default(PENDING) @map("attempt_outcome")
+  internalId       String                           @map("internal_id")
+  etaUuid          String?                          @map("eta_uuid")
+  etaLongId        String?                          @map("eta_long_id")
+  intakeErrorJson  Json?                            @map("intake_error_json")
+  validationErrorsJson Json?                        @map("validation_errors_json")
+  lastPolledAt     DateTime?                        @map("last_polled_at")
+  createdAt        DateTime                         @default(now()) @map("created_at")
+  updatedAt        DateTime                         @updatedAt @map("updated_at")
+
+  tenant     Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  submission Submission           @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  document   Document             @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  filingLock DocumentFilingLock?
+
+  @@index([tenantId])
+  @@index([submissionId])
+  @@index([tenantId, internalId])
+  @@index([documentId])
+  @@map("submission_documents")
+}
+
+model DocumentFilingLock {
+  tenantId             String   @map("tenant_id") @db.Uuid
+  documentId           String   @map("document_id") @db.Uuid
+  documentVersion      Int      @map("document_version")
+  submissionDocumentId String   @unique @map("submission_document_id") @db.Uuid
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  tenant             Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  document           Document           @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  submissionDocument SubmissionDocument @relation(fields: [submissionDocumentId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, documentId, documentVersion])
+  @@map("document_filing_locks")
+}
+
+model DocumentStatusEvent {
+  id                   String            @id @default(uuid()) @db.Uuid
+  tenantId             String            @map("tenant_id") @db.Uuid
+  documentId           String            @map("document_id") @db.Uuid
+  fromStatus           DocumentStatus    @map("from_status")
+  toStatus             DocumentStatus    @map("to_status")
+  source               StatusEventSource
+  etaStatusRawSnapshot Json?             @map("eta_status_raw_snapshot")
+  actorUserId          String?           @map("actor_user_id") @db.Uuid
+  reason               String?
+  createdAt            DateTime          @default(now()) @map("created_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([documentId, createdAt])
+  @@map("document_status_events")
+}
+
+model AuthorityNotification {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  deliveryId String   @map("delivery_id")
+  kind       String
+  type       String?
+  payloadJson Json    @map("payload_json")
+  verified   Boolean  @default(false)
+  processed  Boolean  @default(false)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, deliveryId])
+  @@index([tenantId])
+  @@map("authority_notifications")
+}
+
+model DocumentArtifact {
+  id                 String   @id @default(uuid()) @db.Uuid
+  tenantId           String   @map("tenant_id") @db.Uuid
+  documentId         String?  @map("document_id") @db.Uuid
+  receivedDocumentId String?  @map("received_document_id") @db.Uuid
+  kind               String
+  etaUuid            String?  @map("eta_uuid")
+  packageId          String?  @map("package_id")
+  minioBucket        String   @map("minio_bucket")
+  minioKey           String   @map("minio_key")
+  contentType        String   @map("content_type")
+  byteSize           Int      @map("byte_size")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  document         Document?         @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  receivedDocument ReceivedDocument? @relation(fields: [receivedDocumentId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([documentId])
+  @@index([receivedDocumentId])
+  @@map("document_artifacts")
+}
+
+model SubmissionTriggerSetting {
+  id                 String   @id @default(uuid()) @db.Uuid
+  tenantId           String   @map("tenant_id") @db.Uuid
+  branchId           String?  @map("branch_id") @db.Uuid
+  autoSubmitOnCreate Boolean  @default(false) @map("auto_submit_on_create")
+  maxDocsOverride    Int?     @map("max_docs_override")
+  maxBytesOverride   Int?     @map("max_bytes_override")
+  updatedByUserId    String?  @map("updated_by_user_id") @db.Uuid
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, branchId])
+  @@index([tenantId])
+  @@map("submission_trigger_settings")
 }
 
 model PairingCode {
@@ -459,4 +867,208 @@ model DocumentLineTax {
 
   @@index([tenantId])
   @@map("document_line_taxes")
+}
+
+model ReceivedDocument {
+  id                       String                        @id @default(uuid()) @db.Uuid
+  tenantId                 String                        @map("tenant_id") @db.Uuid
+  documentUuid             String                        @map("document_uuid")
+  etaLongId                String?                       @map("eta_long_id")
+  internalId               String?                       @map("internal_id")
+  etaDocumentType          String                        @map("eta_document_type")
+  etaDocumentTypeVersion   String?                       @map("eta_document_type_version")
+  kind                     ReceivedDocumentKind
+  etaStatus                String?                       @map("eta_status")
+  dateTimeIssued           DateTime?                     @map("date_time_issued")
+  issuerType               String?                       @map("issuer_type")
+  issuerId                 String?                       @map("issuer_id")
+  issuerName               String?                       @map("issuer_name")
+  issuerJson               Json?                         @map("issuer_json")
+  receiverJson             Json?                         @map("receiver_json")
+  currency                 String?
+  totalAmount              String?                       @map("total_amount")
+  netAmount                String?                       @map("net_amount")
+  rawSummaryJson           Json                          @default("{}") @map("raw_summary_json")
+  rawDetailsJson           Json?                         @map("raw_details_json")
+  buyerDecision            ReceivedBuyerDecision         @default(NONE) @map("buyer_decision")
+  buyerDecisionReason      String?                       @map("buyer_decision_reason")
+  buyerDecisionAt          DateTime?                     @map("buyer_decision_at")
+  buyerDecisionByUserId    String?                       @map("buyer_decision_by_user_id") @db.Uuid
+  reconciliationStatus     ReceivedReconciliationStatus  @default(PENDING_REVIEW) @map("reconciliation_status")
+  reconciliationNote       String?                       @map("reconciliation_note")
+  purchaseOrderLinkId      String?                       @map("purchase_order_link_id") @db.Uuid
+  reconciliationExternalRef String?                      @map("reconciliation_external_ref")
+  branchId                 String?                       @map("branch_id") @db.Uuid
+  needsAttention           Boolean                       @default(false) @map("needs_attention")
+  needsAttentionReason     String?                       @map("needs_attention_reason")
+  lastSyncedAt             DateTime                      @map("last_synced_at")
+  createdAt                DateTime                      @default(now()) @map("created_at")
+  updatedAt                DateTime                      @updatedAt @map("updated_at")
+
+  tenant    Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch    Branch?                @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  lines     ReceivedDocumentLine[]
+  artifacts DocumentArtifact[]
+
+  @@unique([tenantId, documentUuid])
+  @@index([tenantId])
+  @@index([tenantId, dateTimeIssued])
+  @@index([tenantId, kind])
+  @@index([tenantId, buyerDecision])
+  @@index([tenantId, reconciliationStatus])
+  @@index([tenantId, branchId])
+  @@map("received_documents")
+}
+
+model ReceivedDocumentLine {
+  id                 String  @id @default(uuid()) @db.Uuid
+  tenantId           String  @map("tenant_id") @db.Uuid
+  receivedDocumentId String  @map("received_document_id") @db.Uuid
+  lineNumber         Int?    @map("line_number")
+  description        String?
+  itemCode           String? @map("item_code")
+  itemType           String? @map("item_type")
+  unitType           String? @map("unit_type")
+  quantity           String?
+  unitPrice          String? @map("unit_price")
+  netTotal           String? @map("net_total")
+  total              String?
+  taxesJson          Json    @default("[]") @map("taxes_json")
+  rawJson            Json?   @map("raw_json")
+
+  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  receivedDocument ReceivedDocument @relation(fields: [receivedDocumentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([receivedDocumentId])
+  @@map("received_document_lines")
+}
+
+model ReceivedDocumentSyncRun {
+  id                 String                 @id @default(uuid()) @db.Uuid
+  tenantId           String                 @map("tenant_id") @db.Uuid
+  trigger            ReceivedSyncTrigger
+  status             ReceivedSyncRunStatus  @default(PENDING)
+  fetchedCount       Int                    @default(0) @map("fetched_count")
+  newCount           Int                    @default(0) @map("new_count")
+  updatedCount       Int                    @default(0) @map("updated_count")
+  skippedCount       Int                    @default(0) @map("skipped_count")
+  failedCount        Int                    @default(0) @map("failed_count")
+  errorSummary       String?                @map("error_summary")
+  startedAt          DateTime?              @map("started_at")
+  finishedAt         DateTime?              @map("finished_at")
+  triggeredByUserId  String?                @map("triggered_by_user_id") @db.Uuid
+  createdAt          DateTime               @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, createdAt])
+  @@map("received_document_sync_runs")
+}
+
+model ImportJob {
+  id                   String          @id @default(uuid()) @db.Uuid
+  tenantId             String          @map("tenant_id") @db.Uuid
+  createdByUserId      String?         @map("created_by_user_id") @db.Uuid
+  documentType         String          @map("document_type")
+  documentTypeVersion  String?         @map("document_type_version")
+  branchId             String?         @map("branch_id") @db.Uuid
+  status               ImportJobStatus @default(UPLOADED)
+  runMode              ImportRunMode?  @map("run_mode")
+  sourceFileName       String          @map("source_file_name")
+  sourceContentType    String          @map("source_content_type")
+  sourceByteSize       Int             @map("source_byte_size")
+  sourceChecksum       String          @map("source_checksum")
+  sourceObjectKey      String          @map("source_object_key")
+  mappingJson          Json?           @map("mapping_json")
+  totalRows            Int             @default(0) @map("total_rows")
+  validRows            Int             @default(0) @map("valid_rows")
+  invalidRows          Int             @default(0) @map("invalid_rows")
+  createdDocs          Int             @default(0) @map("created_docs")
+  signEnqueued         Int             @default(0) @map("sign_enqueued")
+  failedRows           Int             @default(0) @map("failed_rows")
+  processedRows        Int             @default(0) @map("processed_rows")
+  errorReportObjectKey String?         @map("error_report_object_key")
+  errorSummary         String?         @map("error_summary")
+  startedAt            DateTime?       @map("started_at")
+  finishedAt           DateTime?       @map("finished_at")
+  createdAt            DateTime        @default(now()) @map("created_at")
+  updatedAt            DateTime        @updatedAt @map("updated_at")
+
+  tenant Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  rows   ImportRowResult[]
+  documents Document[]
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, status])
+  @@map("import_jobs")
+}
+
+model ImportRowResult {
+  id           String          @id @default(uuid()) @db.Uuid
+  tenantId     String          @map("tenant_id") @db.Uuid
+  importJobId  String          @map("import_job_id") @db.Uuid
+  rowNumber    Int             @map("row_number")
+  businessKey  String?         @map("business_key")
+  status       ImportRowStatus
+  errorsJson   Json            @default("[]") @map("errors_json")
+  documentId   String?         @map("document_id") @db.Uuid
+  createdAt    DateTime        @default(now()) @map("created_at")
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  importJob ImportJob @relation(fields: [importJobId], references: [id], onDelete: Cascade)
+
+  @@unique([importJobId, rowNumber])
+  @@index([tenantId, importJobId, status])
+  @@map("import_row_results")
+}
+
+model ExportJob {
+  id                     String          @id @default(uuid()) @db.Uuid
+  tenantId               String          @map("tenant_id") @db.Uuid
+  createdByUserId        String?         @map("created_by_user_id") @db.Uuid
+  kind                   ExportJobKind
+  status                 ExportJobStatus @default(QUEUED)
+  filtersJson            Json            @map("filters_json")
+  formatsJson            Json            @default("[]") @map("formats_json")
+  artifactObjectKeysJson Json?           @map("artifact_object_keys_json")
+  expiresAt              DateTime?       @map("expires_at")
+  errorSummary           String?         @map("error_summary")
+  startedAt              DateTime?       @map("started_at")
+  finishedAt             DateTime?       @map("finished_at")
+  createdAt              DateTime        @default(now()) @map("created_at")
+  updatedAt              DateTime        @updatedAt @map("updated_at")
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  etaPackageRequest EtaPackageRequest?
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, kind, status])
+  @@map("export_jobs")
+}
+
+model EtaPackageRequest {
+  id                         String                @id @default(uuid()) @db.Uuid
+  tenantId                   String                @map("tenant_id") @db.Uuid
+  exportJobId                String                @unique @map("export_job_id") @db.Uuid
+  etaRequestId               String                @map("eta_request_id")
+  localStatus                EtaPackageLocalStatus @default(REQUESTED) @map("local_status")
+  etaStatusRaw               Int?                  @map("eta_status_raw")
+  requestPayloadJson         Json                  @map("request_payload_json")
+  packageObjectKey           String?               @map("package_object_key")
+  packageByteSize            Int?                  @map("package_byte_size")
+  lastPolledAt               DateTime?             @map("last_polled_at")
+  readyAt                    DateTime?             @map("ready_at")
+  errorSummary               String?               @map("error_summary")
+  notificationAcceleratedAt  DateTime?             @map("notification_accelerated_at")
+  createdAt                  DateTime              @default(now()) @map("created_at")
+  updatedAt                  DateTime              @updatedAt @map("updated_at")
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  exportJob ExportJob @relation(fields: [exportJobId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, etaRequestId])
+  @@index([tenantId, localStatus])
+  @@map("eta_package_requests")
 }

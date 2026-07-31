@@ -1,4 +1,5 @@
 import { add, formatMoney, mul, sub, type DecimalInput } from './money.js';
+import { findDuplicateTaxTypes } from './tax-modes.js';
 
 export type LineTaxInput = {
   taxType: string;
@@ -19,6 +20,13 @@ export type LineInput = {
   itemsDiscount?: string;
   valueDifference?: string;
   totalTaxableFees?: string;
+  currencySold?: string;
+  amountEGP?: string;
+  amountSold?: string;
+  currencyExchangeRate?: string;
+  internalCode?: string;
+  weightUnitType?: string;
+  weightQuantity?: string;
 };
 
 export type LineComputed = {
@@ -53,6 +61,14 @@ function lineDiscount(input: LineInput, salesTotal: string): string {
 }
 
 export function calculateLine(input: LineInput): LineComputed {
+  const taxes = input.taxes ?? [];
+  const dupes = findDuplicateTaxTypes(taxes);
+  if (dupes.length) {
+    throw new Error(
+      `Duplicate TaxType on invoice line (must be unique): ${dupes.join(', ')}`,
+    );
+  }
+
   const salesTotal = mul(input.quantity, input.unitPrice);
   const discount = lineDiscount(input, salesTotal);
   const itemsDiscount = formatMoney(input.itemsDiscount ?? '0.00');
@@ -61,7 +77,8 @@ export function calculateLine(input: LineInput): LineComputed {
   const netTotal = sub(salesTotal, discount);
   const taxableBase = add(add(netTotal, totalTaxableFees), valueDifference);
 
-  const taxAmounts = (input.taxes ?? []).map((t) => {
+  // Empty taxes → taxableItems: [] and no contribution to taxTotals / totalAmount.
+  const taxAmounts = taxes.map((t) => {
     const rateFraction = (Number(t.rate) / 100).toString();
     const amount = mul(taxableBase, rateFraction);
     return {

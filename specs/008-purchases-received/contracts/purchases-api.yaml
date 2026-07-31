@@ -1,0 +1,307 @@
+openapi: 3.0.3
+info:
+  title: eInvoice Purchases (Received Documents) API
+  version: 0.1.0
+  description: >
+    List/sync/detail/accept/reject/decline/printout for inbound ETA documents.
+    JWT + X-Tenant-Id. Never returns ETA access tokens. Dedupe key is document uuid.
+servers:
+  - url: https://api.localhost
+security:
+  - bearerAuth: []
+  - tenantHeader: []
+
+paths:
+  /purchases:
+    get:
+      summary: List received purchases / purchase returns
+      operationId: listPurchases
+      tags: [Purchases]
+      parameters:
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+        - name: branchId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: unassignedBranch
+          in: query
+          schema: { type: boolean }
+        - name: kind
+          in: query
+          description: PURCHASE_INVOICE | PURCHASE_RETURN | OTHER_RECEIVED
+          schema: { type: string }
+        - name: buyerDecision
+          in: query
+          schema: { type: string }
+        - name: reconciliationStatus
+          in: query
+          schema: { type: string }
+        - name: q
+          in: query
+          description: Search internal id / issuer name / uuid
+          schema: { type: string }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 100 }
+      responses:
+        "200":
+          description: Page of received documents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseList"
+        "403":
+          description: Missing documents.view
+
+  /purchases/sync:
+    post:
+      summary: Start on-demand received-document sync (Sync now)
+      operationId: syncPurchases
+      tags: [Purchases]
+      responses:
+        "202":
+          description: Sync started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncRun"
+        "403":
+          description: Missing documents.manage
+        "409":
+          description: Sync already in progress for tenant
+
+  /purchases/sync/latest:
+    get:
+      summary: Latest sync run summary for tenant
+      operationId: getLatestPurchaseSync
+      tags: [Purchases]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncRun"
+        "404":
+          description: No sync runs yet
+
+  /purchases/{id}:
+    get:
+      summary: Received document detail
+      operationId: getPurchase
+      tags: [Purchases]
+      parameters:
+        - $ref: "#/components/parameters/PurchaseId"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseDetail"
+        "404":
+          description: Not found in tenant
+
+    patch:
+      summary: Update branch assignment and/or reconciliation
+      operationId: patchPurchase
+      tags: [Purchases]
+      parameters:
+        - $ref: "#/components/parameters/PurchaseId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchPurchaseRequest"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseDetail"
+        "403":
+          description: Missing documents.manage
+
+  /purchases/{id}/accept:
+    post:
+      summary: Buyer accept (local; may decline pending cancelation at ETA)
+      operationId: acceptPurchase
+      tags: [Purchases]
+      parameters:
+        - $ref: "#/components/parameters/PurchaseId"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseDetail"
+        "409":
+          description: Terminal decision already recorded
+
+  /purchases/{id}/reject:
+    post:
+      summary: Buyer reject at ETA (Phase 6 state endpoint)
+      operationId: rejectPurchase
+      tags: [Purchases]
+      parameters:
+        - $ref: "#/components/parameters/PurchaseId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseDetail"
+        "400":
+          description: Missing reason
+        "409":
+          description: Not actionable / already decided
+
+  /purchases/{id}/decline-cancelation:
+    post:
+      summary: Decline issuer cancelation (Phase 6 decline/cancelation)
+      operationId: declinePurchaseCancelation
+      tags: [Purchases]
+      parameters:
+        - $ref: "#/components/parameters/PurchaseId"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseDetail"
+        "409":
+          description: Not eligible
+
+  /purchases/{id}/printout:
+    get:
+      summary: Download ETA PDF printout (cached in MinIO)
+      operationId: getPurchasePrintout
+      tags: [Purchases]
+      parameters:
+        - $ref: "#/components/parameters/PurchaseId"
+      responses:
+        "200":
+          description: application/pdf
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Document or PDF unavailable
+        "502":
+          description: ETA printout failed
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    tenantHeader:
+      type: apiKey
+      in: header
+      name: X-Tenant-Id
+
+  parameters:
+    PurchaseId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  schemas:
+    PurchaseList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PurchaseSummary"
+        nextCursor: { type: string, nullable: true }
+
+    PurchaseSummary:
+      type: object
+      required: [id, documentUuid, kind, buyerDecision, reconciliationStatus]
+      properties:
+        id: { type: string, format: uuid }
+        documentUuid: { type: string }
+        etaLongId: { type: string, nullable: true }
+        internalId: { type: string, nullable: true }
+        kind:
+          type: string
+          enum: [PURCHASE_INVOICE, PURCHASE_RETURN, OTHER_RECEIVED]
+        etaDocumentType: { type: string }
+        etaStatus: { type: string, nullable: true }
+        dateTimeIssued: { type: string, format: date-time, nullable: true }
+        issuerName: { type: string, nullable: true }
+        totalAmount: { type: string, nullable: true }
+        currency: { type: string, nullable: true }
+        buyerDecision: { type: string }
+        reconciliationStatus: { type: string }
+        branchId: { type: string, format: uuid, nullable: true }
+        needsAttention: { type: boolean }
+        lastSyncedAt: { type: string, format: date-time }
+
+    PurchaseDetail:
+      allOf:
+        - $ref: "#/components/schemas/PurchaseSummary"
+        - type: object
+          properties:
+            issuerJson: { type: object, additionalProperties: true }
+            receiverJson: { type: object, additionalProperties: true }
+            lines:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+            buyerDecisionReason: { type: string, nullable: true }
+            reconciliationNote: { type: string, nullable: true }
+            purchaseOrderLinkId:
+              type: string
+              format: uuid
+              nullable: true
+              description: Reserved hook; unused in this release
+            rawDetailsJson: { type: object, additionalProperties: true, nullable: true }
+            printoutAvailable: { type: boolean }
+
+    PatchPurchaseRequest:
+      type: object
+      properties:
+        branchId: { type: string, format: uuid, nullable: true }
+        reconciliationStatus:
+          type: string
+          enum: [PENDING_REVIEW, RECONCILED, DISPUTED]
+        reconciliationNote: { type: string, nullable: true }
+
+    SyncRun:
+      type: object
+      required: [id, status, trigger]
+      properties:
+        id: { type: string, format: uuid }
+        trigger: { type: string, enum: [CRON, MANUAL] }
+        status: { type: string, enum: [PENDING, RUNNING, SUCCEEDED, FAILED] }
+        fetchedCount: { type: integer }
+        newCount: { type: integer }
+        updatedCount: { type: integer }
+        skippedCount: { type: integer }
+        failedCount: { type: integer }
+        errorSummary: { type: string, nullable: true }
+        startedAt: { type: string, format: date-time, nullable: true }
+        finishedAt: { type: string, format: date-time, nullable: true }

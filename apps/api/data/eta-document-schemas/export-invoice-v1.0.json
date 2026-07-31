@@ -1,0 +1,43 @@
+{
+  "kind": "EXPORT_INVOICE",
+  "documentType": "EI",
+  "documentTypeVersion": "1.0",
+  "source": "https://sdk.invoicing.eta.gov.eg/documents/export-invoice-v1-0/",
+  "extends": "_shared-v1.0.json",
+  "basedOn": "invoice-v1.0.json",
+  "coreFields": [
+    { "name": "issuer", "type": "issuer", "required": true },
+    { "name": "receiver", "type": "receiver", "required": true },
+    { "name": "documentType", "type": "const", "value": "EI", "required": true },
+    { "name": "documentTypeVersion", "type": "const", "value": "1.0", "required": true },
+    { "name": "dateTimeIssued", "type": "datetime", "required": true },
+    { "name": "serviceDeliveryDate", "type": "date", "required": true, "notes": "yyyy-MM-dd CLT; required on export invoice" },
+    { "name": "taxpayerActivityCode", "type": "string", "required": true, "codeTable": "ACTIVITY_CODE" },
+    { "name": "internalID", "type": "string", "required": true },
+    { "name": "purchaseOrderReference", "type": "string", "required": false },
+    { "name": "purchaseOrderDescription", "type": "string", "required": false },
+    { "name": "salesOrderReference", "type": "string", "required": false },
+    { "name": "salesOrderDescription", "type": "string", "required": false },
+    { "name": "proformaInvoiceNumber", "type": "string", "required": false, "maxLength": 50 },
+    { "name": "payment", "type": "payment", "required": false },
+    { "name": "delivery", "type": "delivery", "required": false },
+    { "name": "invoiceLines", "type": "exportInvoiceLine[]", "required": true, "minItems": 1 },
+    { "name": "signatures", "type": "signature[]", "required": true, "minItems": 1 }
+  ],
+  "exportInvoiceLine": {
+    "extends": "invoiceLine",
+    "extraFields": [
+      { "name": "weightUnitType", "type": "string", "required": false, "codeTable": "WEIGHT_UNIT_TYPE" },
+      { "name": "weightQuantity", "type": "number", "required": false, "minExclusive": 0 }
+    ]
+  },
+  "receiverRules": {
+    "allowedTypes": ["F"],
+    "countryMustNotBe": "EG",
+    "notes": "Export receiver must be foreigner (F) with non-EG country"
+  },
+  "issuerRules": {
+    "allowedTypes": ["B"],
+    "countryMustBe": "EG"
+  }
+}

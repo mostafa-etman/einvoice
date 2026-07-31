@@ -16,11 +16,15 @@ import { CurrentUser, type AuthUser } from '../../auth/current-user.decorator';
 import { PermissionsGuard, RequirePermissions } from '../../rbac/permissions.guard';
 import { requireTenant } from '../require-tenant';
 import { ItemCodesService } from './item-codes.service';
+import { ItemCodesSyncService } from './item-codes-sync.service';
 
 @Controller('item-codes')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class ItemCodesController {
-  constructor(private readonly items: ItemCodesService) {}
+  constructor(
+    private readonly items: ItemCodesService,
+    private readonly sync: ItemCodesSyncService,
+  ) {}
 
   @Get()
   @RequirePermissions(PERMISSIONS.SETTINGS_ITEM_CODES_VIEW)
@@ -38,6 +42,22 @@ export class ItemCodesController {
           ? undefined
           : active === 'true' || active === '1',
     });
+  }
+
+  @Post('sync')
+  @HttpCode(202)
+  @RequirePermissions(PERMISSIONS.SETTINGS_ITEM_CODES_MANAGE)
+  startSync(
+    @Headers('x-tenant-id') tenantHeader: string | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.sync.startSync(requireTenant(tenantHeader), user.userId);
+  }
+
+  @Get('sync/latest')
+  @RequirePermissions(PERMISSIONS.SETTINGS_ITEM_CODES_VIEW)
+  latestSync(@Headers('x-tenant-id') tenantHeader: string | undefined) {
+    return this.sync.latestSync(requireTenant(tenantHeader));
   }
 
   @Post()

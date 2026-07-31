@@ -11,6 +11,14 @@ import { EtaModule } from './eta/eta.module';
 import { DocumentsModule } from './documents/documents.module';
 import { DevicesModule } from './devices/devices.module';
 import { SigningModule } from './signing/signing.module';
+import { EtaCodesModule } from './eta-codes/eta-codes.module';
+import { SubmissionsModule } from './submissions/submissions.module';
+import { PurchasesModule } from './purchases/purchases.module';
+import { ImportsModule } from './imports/imports.module';
+import { ExportsModule } from './exports/exports.module';
+import { QueuesModule } from './queues/queues.module';
+import { StorageModule } from './storage/storage.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
 
 @Module({
   imports: [
@@ -24,6 +32,14 @@ import { SigningModule } from './signing/signing.module';
     DocumentsModule,
     DevicesModule,
     SigningModule,
+    SubmissionsModule,
+    EtaCodesModule,
+    PurchasesModule,
+    StorageModule,
+    QueuesModule,
+    ImportsModule,
+    ExportsModule,
+    WebhooksModule,
   ],
   providers: [
     {

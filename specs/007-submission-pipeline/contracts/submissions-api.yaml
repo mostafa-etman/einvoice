@@ -1,0 +1,399 @@
+openapi: 3.0.3
+info:
+  title: eInvoice Submission Pipeline API
+  version: 0.1.0
+  description: >
+    Batch submit signed documents to ETA, poll/async results, retry, issuer
+    cancel/reject, PDF printout. JWT + X-Tenant-Id. Never returns ETA access
+    tokens or webhook PSKs.
+servers:
+  - url: https://api.localhost
+security:
+  - bearerAuth: []
+  - tenantHeader: []
+
+paths:
+  /submissions:
+    get:
+      summary: List submissions (dashboard)
+      operationId: listSubmissions
+      tags: [Submissions]
+      parameters:
+        - name: state
+          in: query
+          schema: { type: string }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+        - name: branchId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 100 }
+      responses:
+        "200":
+          description: Page of submissions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionList"
+        "403":
+          description: Missing documents.view
+
+    post:
+      summary: Submit one or more signed documents (batch)
+      operationId: createSubmission
+      tags: [Submissions]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 8, maxLength: 128 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSubmissionRequest"
+      responses:
+        "202":
+          description: Accepted for async processing (or idempotent replay)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionDetail"
+        "400":
+          description: Validation / unsigned / mixed eligibility
+        "403":
+          description: Missing documents.manage
+        "409":
+          description: Conflict resolved by returning original (optional; prefer 202 replay)
+
+  /submissions/{id}:
+    get:
+      summary: Submission detail with per-document outcomes
+      operationId: getSubmission
+      tags: [Submissions]
+      parameters:
+        - $ref: "#/components/parameters/SubmissionId"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionDetail"
+        "404":
+          description: Not found in tenant
+
+  /submissions/{id}/retry:
+    post:
+      summary: Retry unresolved documents in a submission
+      operationId: retrySubmission
+      tags: [Submissions]
+      parameters:
+        - $ref: "#/components/parameters/SubmissionId"
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string }
+      responses:
+        "202":
+          description: New or continued attempt enqueued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionDetail"
+        "403":
+          description: Missing documents.manage
+
+  /documents:
+    get:
+      summary: Document list with submission filters (dashboard)
+      operationId: listDocumentsForSubmission
+      tags: [Documents]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum:
+              [SIGNED, SUBMITTED, VALID, INVALID, CANCELLED, REJECTED]
+        - name: needsAttention
+          in: query
+          schema: { type: boolean }
+        - name: intakeRefused
+          in: query
+          schema: { type: boolean }
+        - name: branchId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: kind
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Filtered documents
+        "403":
+          description: Missing documents.view
+
+  /documents/{id}/submit:
+    post:
+      summary: Submit a single signed document
+      operationId: submitDocument
+      tags: [Documents]
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string }
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionDetail"
+        "400":
+          description: Not SIGNED or already filed
+
+  /documents/{id}/cancel:
+    post:
+      summary: Cancel a VALID issued document (issuer)
+      operationId: cancelDocument
+      tags: [Documents]
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LifecycleReasonRequest"
+      responses:
+        "200":
+          description: Cancel accepted or pending confirmation
+        "400":
+          description: Outside window / invalid state
+        "403":
+          description: Missing documents.manage
+
+  /documents/{id}/reject:
+    post:
+      summary: Reject an issued document (issuer lifecycle)
+      operationId: rejectDocument
+      tags: [Documents]
+      description: >
+        Issuer-side reject for outgoing documents. Receiver decline/reject of
+        inbound documents is out of scope (Purchases).
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LifecycleReasonRequest"
+      responses:
+        "200":
+          description: Reject accepted or pending confirmation
+        "400":
+          description: Invalid state / ETA refused
+        "403":
+          description: Missing documents.manage
+
+  /documents/{id}/printout:
+    get:
+      summary: Download ETA PDF printout (cached in MinIO)
+      operationId: getDocumentPrintout
+      tags: [Documents]
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+      responses:
+        "200":
+          description: application/pdf
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Not VALID / NotReady
+        "403":
+          description: Missing documents.view
+        "404":
+          description: Not found
+
+  /documents/{id}/status-events:
+    get:
+      summary: Status event trail for a document
+      operationId: listDocumentStatusEvents
+      tags: [Documents]
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/StatusEvent"
+
+  /settings/submission:
+    get:
+      summary: Submission trigger / batch override settings
+      operationId: getSubmissionSettings
+      tags: [Settings]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionSettings"
+    put:
+      summary: Update submission settings
+      operationId: putSubmissionSettings
+      tags: [Settings]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmissionSettings"
+      responses:
+        "200":
+          description: Updated
+        "403":
+          description: Missing documents.manage or settings permission
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    tenantHeader:
+      type: apiKey
+      in: header
+      name: X-Tenant-Id
+
+  parameters:
+    SubmissionId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    DocumentId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  schemas:
+    CreateSubmissionRequest:
+      type: object
+      required: [documentIds]
+      properties:
+        documentIds:
+          type: array
+          minItems: 1
+          items: { type: string, format: uuid }
+        branchId:
+          type: string
+          format: uuid
+
+    LifecycleReasonRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    SubmissionList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SubmissionSummary"
+        nextCursor:
+          type: string
+
+    SubmissionSummary:
+      type: object
+      required: [id, state, documentCount, acceptedCount, refusedCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        state: { type: string }
+        etaSubmissionUuid: { type: string, nullable: true }
+        documentCount: { type: integer }
+        acceptedCount: { type: integer }
+        refusedCount: { type: integer }
+        needsAttention: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    SubmissionDetail:
+      allOf:
+        - $ref: "#/components/schemas/SubmissionSummary"
+        - type: object
+          properties:
+            documents:
+              type: array
+              items:
+                $ref: "#/components/schemas/SubmissionDocumentRow"
+
+    SubmissionDocumentRow:
+      type: object
+      required: [documentId, documentVersion, attemptOutcome, internalId]
+      properties:
+        documentId: { type: string, format: uuid }
+        documentVersion: { type: integer }
+        internalId: { type: string }
+        attemptOutcome: { type: string }
+        localStatus: { type: string }
+        etaUuid: { type: string, nullable: true }
+        etaLongId: { type: string, nullable: true }
+        intakeError:
+          $ref: "#/components/schemas/EtaError"
+        validationErrors:
+          type: array
+          items:
+            $ref: "#/components/schemas/EtaError"
+
+    EtaError:
+      type: object
+      properties:
+        code: { type: string }
+        message: { type: string }
+        target: { type: string, nullable: true }
+
+    StatusEvent:
+      type: object
+      required: [fromStatus, toStatus, source, createdAt]
+      properties:
+        fromStatus: { type: string }
+        toStatus: { type: string }
+        source: { type: string, enum: [system, eta, user] }
+        reason: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    SubmissionSettings:
+      type: object
+      properties:
+        autoSubmitOnCreate: { type: boolean, default: false }
+        maxDocsOverride: { type: integer, nullable: true }
+        maxBytesOverride: { type: integer, nullable: true }
+        branchId: { type: string, format: uuid, nullable: true }

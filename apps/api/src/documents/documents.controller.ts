@@ -36,6 +36,7 @@ export class DocumentsController {
   }
 
   @Post('preview')
+  @HttpCode(200)
   @RequirePermissions(PERMISSIONS.DOCUMENTS_VIEW)
   previewUnsaved(
     @Headers('x-tenant-id') tenantHeader: string | undefined,
@@ -86,6 +87,7 @@ export class DocumentsController {
   }
 
   @Post(':id/preview')
+  @HttpCode(200)
   @RequirePermissions(PERMISSIONS.DOCUMENTS_VIEW)
   previewById(
     @Headers('x-tenant-id') tenantHeader: string | undefined,
@@ -96,6 +98,7 @@ export class DocumentsController {
   }
 
   @Post(':id/validate')
+  @HttpCode(200)
   @RequirePermissions(PERMISSIONS.DOCUMENTS_MANAGE)
   validate(
     @Headers('x-tenant-id') tenantHeader: string | undefined,
@@ -106,6 +109,7 @@ export class DocumentsController {
   }
 
   @Post(':id/mark-ready')
+  @HttpCode(201)
   @RequirePermissions(PERMISSIONS.DOCUMENTS_MANAGE)
   markReady(
     @Headers('x-tenant-id') tenantHeader: string | undefined,

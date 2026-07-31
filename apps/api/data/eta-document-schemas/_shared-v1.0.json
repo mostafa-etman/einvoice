@@ -1,0 +1,140 @@
+{
+  "schemaVersion": "1.0",
+  "etaDocumentTypeVersion": "1.0",
+  "source": "https://sdk.invoicing.eta.gov.eg/documents/invoice-v1-0/",
+  "codeTables": {
+    "taxType": "TAX_TYPE",
+    "taxSubtype": "TAX_SUBTYPE",
+    "unitType": "UNIT_TYPE",
+    "weightUnitType": "WEIGHT_UNIT_TYPE",
+    "currency": "CURRENCY",
+    "country": "COUNTRY",
+    "activityCode": "ACTIVITY_CODE",
+    "receiverType": "RECEIVER_TYPE",
+    "itemType": "ITEM_CODE_TYPE"
+  },
+  "address": {
+    "fields": [
+      { "name": "country", "type": "string", "required": true, "codeTable": "COUNTRY", "notes": "ISO-3166 alpha-2; EG for domestic business" },
+      { "name": "governate", "type": "string", "required": true, "notes": "Free text — ETA publishes no governorate code table" },
+      { "name": "regionCity", "type": "string", "required": true },
+      { "name": "street", "type": "string", "required": true },
+      { "name": "buildingNumber", "type": "string", "required": true },
+      { "name": "postalCode", "type": "string", "required": false },
+      { "name": "floor", "type": "string", "required": false },
+      { "name": "room", "type": "string", "required": false },
+      { "name": "landmark", "type": "string", "required": false },
+      { "name": "additionalInformation", "type": "string", "required": false }
+    ]
+  },
+  "issuerAddress": {
+    "extends": "address",
+    "extraFields": [
+      { "name": "branchId", "type": "string", "requiredWhenIssuerType": "B", "notes": "ETA-registered branch code" }
+    ]
+  },
+  "issuer": {
+    "fields": [
+      { "name": "type", "type": "enum", "required": true, "values": ["B", "P", "F"], "codeTable": "RECEIVER_TYPE", "notes": "Domestic issuer is B; P/F reserved for future on issuer" },
+      { "name": "id", "type": "string", "required": true, "notes": "Registration number for B" },
+      { "name": "name", "type": "string", "required": true },
+      { "name": "address", "type": "issuerAddress", "required": true }
+    ]
+  },
+  "receiver": {
+    "fields": [
+      { "name": "type", "type": "enum", "required": true, "values": ["B", "P", "F"], "codeTable": "RECEIVER_TYPE" },
+      { "name": "id", "type": "string", "required": "conditional", "notes": "Optional for person buyer under threshold; national ID for P; VAT ID for F; registration for B" },
+      { "name": "name", "type": "string", "required": "conditional" },
+      { "name": "address", "type": "address", "required": "conditional" }
+    ]
+  },
+  "payment": {
+    "required": false,
+    "fields": [
+      { "name": "bankName", "type": "string", "required": false },
+      { "name": "bankAddress", "type": "string", "required": false },
+      { "name": "bankAccountNo", "type": "string", "required": false },
+      { "name": "bankAccountIBAN", "type": "string", "required": false },
+      { "name": "swiftCode", "type": "string", "required": false },
+      { "name": "terms", "type": "string", "required": false }
+    ]
+  },
+  "delivery": {
+    "required": false,
+    "fields": [
+      { "name": "approach", "type": "string", "required": false },
+      { "name": "packaging", "type": "string", "required": false },
+      { "name": "dateValidity", "type": "datetime", "required": false },
+      { "name": "exportPort", "type": "string", "required": false },
+      { "name": "countryOfOrigin", "type": "string", "required": false, "codeTable": "COUNTRY" },
+      { "name": "grossWeight", "type": "decimal", "required": false, "precision": 5 },
+      { "name": "netWeight", "type": "decimal", "required": false, "precision": 5 },
+      { "name": "terms", "type": "string", "required": false }
+    ]
+  },
+  "unitValue": {
+    "fields": [
+      { "name": "currencySold", "type": "string", "required": true, "codeTable": "CURRENCY" },
+      { "name": "amountEGP", "type": "decimal", "required": true, "precision": 5 },
+      { "name": "amountSold", "type": "decimal", "required": "when currencySold != EGP", "precision": 5 },
+      { "name": "currencyExchangeRate", "type": "decimal", "required": "when currencySold != EGP", "precision": 5 }
+    ]
+  },
+  "discount": {
+    "required": false,
+    "fields": [
+      { "name": "rate", "type": "decimal", "required": false, "min": 0, "max": 100 },
+      { "name": "amount", "type": "decimal", "required": false, "precision": 5 }
+    ]
+  },
+  "taxableItem": {
+    "fields": [
+      { "name": "taxType", "type": "string", "required": true, "codeTable": "TAX_TYPE", "notes": "Unique per line" },
+      { "name": "amount", "type": "decimal", "required": true, "precision": 5 },
+      { "name": "subType", "type": "string", "required": false, "codeTable": "TAX_SUBTYPE", "notes": "Must match TaxtypeReference parent" },
+      { "name": "rate", "type": "decimal", "required": false, "min": 0, "max": 999 }
+    ]
+  },
+  "invoiceLine": {
+    "minItems": 1,
+    "fields": [
+      { "name": "description", "type": "string", "required": true },
+      { "name": "itemType", "type": "enum", "required": true, "values": ["EGS", "GS1"], "codeTable": "ITEM_CODE_TYPE" },
+      { "name": "itemCode", "type": "string", "required": true, "notes": "Tenant-registered EGS/GS1 code; live catalog search needs ETA later" },
+      { "name": "unitType", "type": "string", "required": true, "codeTable": "UNIT_TYPE" },
+      { "name": "quantity", "type": "decimal", "required": true, "minExclusive": 0 },
+      { "name": "unitValue", "type": "unitValue", "required": true },
+      { "name": "salesTotal", "type": "decimal", "required": true, "computed": true, "precision": 5 },
+      { "name": "total", "type": "decimal", "required": true, "computed": true, "precision": 5 },
+      { "name": "valueDifference", "type": "decimal", "required": true, "computed": true, "precision": 5 },
+      { "name": "totalTaxableFees", "type": "decimal", "required": true, "computed": true, "precision": 5 },
+      { "name": "netTotal", "type": "decimal", "required": true, "computed": true, "precision": 5 },
+      { "name": "itemsDiscount", "type": "decimal", "required": true, "computed": true, "precision": 5 },
+      { "name": "discount", "type": "discount", "required": false },
+      { "name": "taxableItems", "type": "taxableItem[]", "required": false },
+      { "name": "internalCode", "type": "string", "required": false }
+    ]
+  },
+  "taxTotal": {
+    "fields": [
+      { "name": "taxType", "type": "string", "required": true, "codeTable": "TAX_TYPE" },
+      { "name": "amount", "type": "decimal", "required": true, "precision": 5, "computed": true }
+    ]
+  },
+  "signature": {
+    "fields": [
+      { "name": "type", "type": "enum", "required": true, "values": ["I", "S"] },
+      { "name": "value", "type": "string", "required": true, "notes": "Base64 CAdES-BES" }
+    ]
+  },
+  "documentTotals": [
+    { "name": "totalSalesAmount", "type": "decimal", "required": true, "computed": true, "precision": 5 },
+    { "name": "totalDiscountAmount", "type": "decimal", "required": true, "computed": true, "precision": 5 },
+    { "name": "netAmount", "type": "decimal", "required": true, "computed": true, "precision": 5 },
+    { "name": "taxTotals", "type": "taxTotal[]", "required": true, "computed": true },
+    { "name": "extraDiscountAmount", "type": "decimal", "required": true, "precision": 5 },
+    { "name": "totalItemsDiscountAmount", "type": "decimal", "required": true, "computed": true, "precision": 5 },
+    { "name": "totalAmount", "type": "decimal", "required": true, "computed": true, "precision": 5 }
+  ]
+}

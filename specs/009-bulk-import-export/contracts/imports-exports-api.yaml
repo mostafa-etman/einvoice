@@ -1,0 +1,487 @@
+openapi: 3.0.3
+info:
+  title: eInvoice Bulk Import / Export API
+  version: 0.1.0
+  description: >
+    Import Wizard (CSV/XLSX templates, mapping, validate, run) and Export Center
+    (local CSV/XLSX/PDF/JSON + ETA document packages). JWT + X-Tenant-Id.
+    Never returns ETA access tokens. Bad rows are reported; valid rows still import.
+servers:
+  - url: https://api.localhost
+security:
+  - bearerAuth: []
+  - tenantHeader: []
+
+paths:
+  /imports/templates/{documentType}:
+    get:
+      summary: Download CSV or XLSX import template
+      operationId: downloadImportTemplate
+      tags: [Imports]
+      parameters:
+        - name: documentType
+          in: path
+          required: true
+          schema: { type: string, example: I }
+        - name: format
+          in: query
+          required: true
+          schema: { type: string, enum: [csv, xlsx] }
+      responses:
+        "200":
+          description: Template file
+          content:
+            text/csv: { schema: { type: string, format: binary } }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        "403":
+          description: Missing documents.manage
+
+  /imports/jobs:
+    get:
+      summary: List import jobs
+      operationId: listImportJobs
+      tags: [Imports]
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 100 }
+      responses:
+        "200":
+          description: Page of import jobs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportJobList"
+        "403":
+          description: Missing documents.view
+
+    post:
+      summary: Create import job (upload file)
+      operationId: createImportJob
+      tags: [Imports]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, documentType]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: CSV or XLSX only
+                documentType:
+                  type: string
+                branchId:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Job created (UPLOADED)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportJob"
+        "400":
+          description: Unsupported format, over size/row limit, or empty file
+        "403":
+          description: Missing documents.manage
+
+  /imports/jobs/{jobId}:
+    get:
+      summary: Get import job detail + counts
+      operationId: getImportJob
+      tags: [Imports]
+      parameters:
+        - $ref: "#/components/parameters/jobId"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportJobDetail"
+        "404":
+          description: Not found in tenant
+
+  /imports/jobs/{jobId}/mapping:
+    put:
+      summary: Save column mapping snapshot
+      operationId: putImportMapping
+      tags: [Imports]
+      parameters:
+        - $ref: "#/components/parameters/jobId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ColumnMapping"
+      responses:
+        "200":
+          description: Mapping saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportJob"
+        "400":
+          description: Required fields unmapped
+
+  /imports/jobs/{jobId}/validate:
+    post:
+      summary: Stream-parse and validate all rows
+      operationId: validateImportJob
+      tags: [Imports]
+      parameters:
+        - $ref: "#/components/parameters/jobId"
+      responses:
+        "202":
+          description: Validation queued / started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportJob"
+        "409":
+          description: Mapping incomplete or job not in uploadable state
+
+  /imports/jobs/{jobId}/rows:
+    get:
+      summary: List row results (filter by status)
+      operationId: listImportRows
+      tags: [Imports]
+      parameters:
+        - $ref: "#/components/parameters/jobId"
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100, maximum: 500 }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportRowList"
+
+  /imports/jobs/{jobId}/error-report:
+    get:
+      summary: Download per-row error report (CSV)
+      operationId: downloadImportErrorReport
+      tags: [Imports]
+      parameters:
+        - $ref: "#/components/parameters/jobId"
+      responses:
+        "200":
+          content:
+            text/csv:
+              schema: { type: string, format: binary }
+        "404":
+          description: Report not ready
+
+  /imports/jobs/{jobId}/run:
+    post:
+      summary: Create documents from valid rows (optionally sign+submit)
+      operationId: runImportJob
+      tags: [Imports]
+      parameters:
+        - $ref: "#/components/parameters/jobId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [runMode]
+              properties:
+                runMode:
+                  type: string
+                  enum: [CREATE_ONLY, CREATE_SIGN_SUBMIT]
+      responses:
+        "202":
+          description: Run queued; invalid rows never block valid creates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportJob"
+        "409":
+          description: Not VALIDATED or no valid rows
+
+  /exports/jobs:
+    get:
+      summary: List export / package jobs
+      operationId: listExportJobs
+      tags: [Exports]
+      parameters:
+        - name: kind
+          in: query
+          schema: { type: string, enum: [LOCAL, ETA_PACKAGE] }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 100 }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportJobList"
+        "403":
+          description: Missing documents.view
+
+  /exports/local:
+    post:
+      summary: Create local multi-format export job
+      operationId: createLocalExport
+      tags: [Exports]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LocalExportRequest"
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportJob"
+        "403":
+          description: Missing documents.manage
+
+  /exports/packages:
+    post:
+      summary: Request ETA document package (tracked via Get Package Requests)
+      operationId: createEtaPackageExport
+      tags: [Exports]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EtaPackageRequestBody"
+      responses:
+        "202":
+          description: Package requested; polling Get Package Requests until ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportJob"
+        "400":
+          description: Invalid filters / missing identity
+        "403":
+          description: Missing documents.manage
+
+  /exports/jobs/{jobId}:
+    get:
+      summary: Export job detail (incl. ETA package status)
+      operationId: getExportJob
+      tags: [Exports]
+      parameters:
+        - $ref: "#/components/parameters/jobId"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportJobDetail"
+        "404":
+          description: Not found in tenant
+
+  /exports/jobs/{jobId}/download:
+    get:
+      summary: Download artifact (format query for LOCAL; zip for ETA package)
+      operationId: downloadExportArtifact
+      tags: [Exports]
+      parameters:
+        - $ref: "#/components/parameters/jobId"
+        - name: format
+          in: query
+          description: Required for LOCAL multi-format jobs
+          schema: { type: string, enum: [csv, xlsx, pdf, json] }
+      responses:
+        "200":
+          description: File bytes
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "410":
+          description: Artifact expired
+        "409":
+          description: Not READY
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    tenantHeader:
+      type: apiKey
+      in: header
+      name: X-Tenant-Id
+
+  parameters:
+    jobId:
+      name: jobId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  schemas:
+    ColumnMapping:
+      type: object
+      required: [fields]
+      properties:
+        fields:
+          type: object
+          additionalProperties:
+            type: string
+            description: Source column header → target field key
+          example:
+            internalID: Invoice Number
+            dateTimeIssued: Issue Date
+
+    ImportJob:
+      type: object
+      required: [id, status, documentType, totalRows, validRows, invalidRows]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string }
+        documentType: { type: string }
+        runMode: { type: string, nullable: true }
+        totalRows: { type: integer }
+        validRows: { type: integer }
+        invalidRows: { type: integer }
+        createdDocs: { type: integer }
+        sourceFileName: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    ImportJobDetail:
+      allOf:
+        - $ref: "#/components/schemas/ImportJob"
+        - type: object
+          properties:
+            mapping: { $ref: "#/components/schemas/ColumnMapping" }
+            errorReportAvailable: { type: boolean }
+            errorSummary: { type: string, nullable: true }
+
+    ImportJobList:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ImportJob" }
+        nextCursor: { type: string, nullable: true }
+
+    ImportRow:
+      type: object
+      properties:
+        rowNumber: { type: integer }
+        businessKey: { type: string, nullable: true }
+        status: { type: string }
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              code: { type: string }
+              message: { type: string }
+        documentId: { type: string, format: uuid, nullable: true }
+
+    ImportRowList:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ImportRow" }
+        nextCursor: { type: string, nullable: true }
+
+    LocalExportRequest:
+      type: object
+      required: [formats, filters]
+      properties:
+        formats:
+          type: array
+          minItems: 1
+          items: { type: string, enum: [CSV, XLSX, PDF, JSON] }
+        filters:
+          type: object
+          properties:
+            from: { type: string, format: date-time }
+            to: { type: string, format: date-time }
+            documentTypes:
+              type: array
+              items: { type: string }
+            statuses:
+              type: array
+              items: { type: string }
+            branchId: { type: string, format: uuid }
+
+    EtaPackageRequestBody:
+      type: object
+      required: [dateFrom, dateTo]
+      properties:
+        dateFrom: { type: string, format: date-time }
+        dateTo: { type: string, format: date-time }
+        documentTypeNames:
+          type: array
+          items: { type: string }
+        statuses:
+          type: array
+          items: { type: string }
+        type:
+          type: string
+          enum: [full, summary]
+          default: full
+        format:
+          type: string
+          enum: [JSON, XML, CSV]
+          default: JSON
+
+    ExportJob:
+      type: object
+      required: [id, kind, status]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [LOCAL, ETA_PACKAGE] }
+        status: { type: string }
+        formats:
+          type: array
+          items: { type: string }
+        expiresAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    ExportJobDetail:
+      allOf:
+        - $ref: "#/components/schemas/ExportJob"
+        - type: object
+          properties:
+            filters: { type: object }
+            errorSummary: { type: string, nullable: true }
+            etaPackage:
+              type: object
+              nullable: true
+              properties:
+                etaRequestId: { type: string }
+                localStatus: { type: string }
+                etaStatusRaw: { type: integer, nullable: true }
+                readyAt: { type: string, format: date-time, nullable: true }
+
+    ExportJobList:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ExportJob" }
+        nextCursor: { type: string, nullable: true }

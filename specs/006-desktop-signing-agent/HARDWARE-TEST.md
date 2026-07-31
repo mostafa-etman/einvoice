@@ -13,6 +13,21 @@ Skipped CI tests (never counted as passed):
 
 ---
 
+## Client install (non-technical)
+
+See also [`apps/agent/AGENT-CREDENTIALS.md`](../../apps/agent/AGENT-CREDENTIALS.md)
+for the cloud vs agent trust boundary.
+
+1. Install the desktop agent on the PC that will hold the USB token.
+2. Plug in the eSeal token (CA middleware already installed).
+3. Web app → **Devices** → create a pairing code.
+4. Agent tray → **Pair device…** → paste the code.
+5. Confirm auto-detected PKCS#11 library + certificate (or set manually in the agent).
+6. When a document is sent for signature, enter the PIN in the agent (optional
+   “Remember PIN” uses Windows DPAPI on this PC only — never the cloud).
+
+---
+
 ## Provider switch
 
 | Config | Provider | When |

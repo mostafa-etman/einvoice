@@ -1,0 +1,30 @@
+{
+  "kind": "INVOICE",
+  "documentType": "I",
+  "documentTypeVersion": "1.0",
+  "source": "https://sdk.invoicing.eta.gov.eg/documents/invoice-v1-0/",
+  "extends": "_shared-v1.0.json",
+  "coreFields": [
+    { "name": "issuer", "type": "issuer", "required": true },
+    { "name": "receiver", "type": "receiver", "required": true },
+    { "name": "documentType", "type": "const", "value": "I", "required": true },
+    { "name": "documentTypeVersion", "type": "const", "value": "1.0", "required": true },
+    { "name": "dateTimeIssued", "type": "datetime", "required": true, "notes": "UTC, not in the future" },
+    { "name": "taxpayerActivityCode", "type": "string", "required": true, "codeTable": "ACTIVITY_CODE" },
+    { "name": "internalID", "type": "string", "required": true, "notes": "ETA docs say internalId; JSON payload commonly uses internalID" },
+    { "name": "purchaseOrderReference", "type": "string", "required": false },
+    { "name": "purchaseOrderDescription", "type": "string", "required": false },
+    { "name": "salesOrderReference", "type": "string", "required": false },
+    { "name": "salesOrderDescription", "type": "string", "required": false },
+    { "name": "proformaInvoiceNumber", "type": "string", "required": false, "maxLength": 50 },
+    { "name": "payment", "type": "payment", "required": false },
+    { "name": "delivery", "type": "delivery", "required": false },
+    { "name": "invoiceLines", "type": "invoiceLine[]", "required": true, "minItems": 1 },
+    { "name": "serviceDeliveryDate", "type": "date", "required": false },
+    { "name": "signatures", "type": "signature[]", "required": true, "minItems": 1, "notes": "At least Issuer (I); required before submit, not while drafting" }
+  ],
+  "receiverRules": {
+    "allowedTypes": ["B", "P", "F"],
+    "notes": "Domestic B/P/F; person threshold rules apply for optional id/name/address"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "source": "Derived from ETA SDK document structure pages (not /files/ JSON).",
+  "pages": [
+    "https://sdk.invoicing.eta.gov.eg/documents/invoice-v1-0/",
+    "https://sdk.invoicing.eta.gov.eg/documents/export-invoice-v1-0/",
+    "https://sdk.invoicing.eta.gov.eg/types/"
+  ],
+  "receiverTypes": [
+    { "code": "B", "nameEn": "Business in Egypt", "nameAr": "شركة داخل مصر" },
+    { "code": "P", "nameEn": "Natural person", "nameAr": "شخص طبيعي" },
+    { "code": "F", "nameEn": "Foreigner", "nameAr": "أجنبي" }
+  ],
+  "itemCodeTypes": [
+    { "code": "EGS", "nameEn": "Egyptian Goods and Services code", "nameAr": "كود السلع والخدمات المصري" },
+    { "code": "GS1", "nameEn": "GS1 / GTIN code", "nameAr": "كود GS1" }
+  ],
+  "documentTypes": [
+    { "code": "I", "kind": "INVOICE", "nameEn": "Invoice", "version": "1.0" },
+    { "code": "C", "kind": "CREDIT_NOTE", "nameEn": "Credit Note", "version": "1.0" },
+    { "code": "D", "kind": "DEBIT_NOTE", "nameEn": "Debit Note", "version": "1.0" },
+    { "code": "EI", "kind": "EXPORT_INVOICE", "nameEn": "Export Invoice", "version": "1.0" },
+    { "code": "EC", "kind": "EXPORT_CREDIT_NOTE", "nameEn": "Export Credit Note", "version": "1.0" },
+    { "code": "ED", "kind": "EXPORT_DEBIT_NOTE", "nameEn": "Export Debit Note", "version": "1.0" }
+  ],
+  "notes": [
+    "Official ETA SDK currently publishes document type version 1.0 for Invoice, Credit Note, Debit Note, and Export variants — there is no published Invoice v2.0 on sdk.invoicing.eta.gov.eg/types/ as of 2026-07-25.",
+    "Issuer type P and F are reserved for future use on domestic invoices; export receiver must be F."
+  ]
+}

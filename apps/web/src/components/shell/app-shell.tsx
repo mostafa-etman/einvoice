@@ -22,6 +22,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const nav = [
     { href: `/${locale}`, label: t('nav.home') },
     { href: `/${locale}/documents`, label: t('nav.documents') },
+    { href: `/${locale}/purchases`, label: t('nav.purchases') },
+    { href: `/${locale}/imports`, label: t('nav.imports') },
+    { href: `/${locale}/exports`, label: t('nav.exports') },
     { href: `/${locale}/devices`, label: t('nav.devices') },
     { href: `/${locale}/users`, label: t('nav.users') },
     { href: `/${locale}/roles`, label: t('nav.roles') },

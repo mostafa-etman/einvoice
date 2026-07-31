@@ -2,10 +2,16 @@
 
 import { useTranslations } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { createItemCode, listItemCodes } from '@/lib/api/item-codes';
+import {
+  createItemCode,
+  getLatestItemCodeSync,
+  listItemCodes,
+  startItemCodeSync,
+} from '@/lib/api/item-codes';
 import { useTenant } from '@/lib/tenant-provider';
 
 const schema = z.object({
@@ -26,6 +32,16 @@ export default function ItemCodesPage() {
     enabled: !!tenantId,
   });
 
+  const syncQuery = useQuery({
+    queryKey: ['item-codes-sync', tenantId],
+    queryFn: getLatestItemCodeSync,
+    enabled: !!tenantId,
+    refetchInterval: (q) => {
+      const status = q.state.data?.status;
+      return status === 'PENDING' || status === 'RUNNING' ? 2000 : false;
+    },
+  });
+
   const {
     register,
     handleSubmit,
@@ -44,17 +60,53 @@ export default function ItemCodesPage() {
     },
   });
 
+  const sync = useMutation({
+    mutationFn: startItemCodeSync,
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['item-codes-sync', tenantId] });
+    },
+  });
+
+  const syncStatus = syncQuery.data?.status;
+  const syncRunning =
+    sync.isPending || syncStatus === 'PENDING' || syncStatus === 'RUNNING';
+
+  useEffect(() => {
+    if (syncStatus === 'SUCCEEDED') {
+      void qc.invalidateQueries({ queryKey: ['item-codes', tenantId] });
+    }
+  }, [syncStatus, qc, tenantId]);
+
   return (
     <section>
       <h1 className="font-display text-token-xl">{t('title')}</h1>
-      <button
-        type="button"
-        disabled
-        title={t('syncDisabled')}
-        className="mt-token-sm cursor-not-allowed rounded border border-border px-token-md py-token-sm text-token-sm opacity-50"
-      >
-        {t('syncEta')}
-      </button>
+      <div className="mt-token-sm flex flex-wrap items-center gap-token-md">
+        <button
+          type="button"
+          disabled={syncRunning}
+          onClick={() => sync.mutate()}
+          className="rounded border border-border bg-surface px-token-md py-token-sm text-token-sm disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {syncRunning ? t('syncRunning') : t('syncEta')}
+        </button>
+        {syncQuery.data?.lastSyncAt ? (
+          <p className="text-token-sm text-foreground/70">
+            {t('lastSync', {
+              at: new Date(syncQuery.data.lastSyncAt).toLocaleString(),
+              added: syncQuery.data.added,
+              updated: syncQuery.data.updated,
+              unchanged: syncQuery.data.unchanged,
+            })}
+          </p>
+        ) : (
+          <p className="text-token-sm text-foreground/60">{t('neverSynced')}</p>
+        )}
+        {sync.error ? (
+          <p className="text-token-sm text-danger">
+            {sync.error instanceof Error ? sync.error.message : t('syncFailed')}
+          </p>
+        ) : null}
+      </div>
 
       <form
         className="mt-token-lg flex flex-wrap items-end gap-token-md"
@@ -95,9 +147,23 @@ export default function ItemCodesPage() {
 
       <ul className="mt-token-xl space-y-token-sm text-token-sm">
         {(query.data ?? []).map((i) => (
-          <li key={i.id} className="border-b border-border py-token-sm">
-            [{i.type}] {i.code} — {i.description}
-            {!i.isActive ? ' (inactive)' : ''}
+          <li
+            key={i.id}
+            className="flex flex-wrap items-center gap-token-sm border-b border-border py-token-sm"
+          >
+            <span>
+              [{i.type}] {i.code} — {i.description}
+              {!i.isActive ? ` (${t('inactive')})` : ''}
+            </span>
+            <span
+              className={
+                i.source === 'ETA'
+                  ? 'rounded bg-brand/10 px-token-xs text-token-xs text-brand'
+                  : 'rounded bg-foreground/10 px-token-xs text-token-xs'
+              }
+            >
+              {i.source === 'ETA' ? t('sourceEta') : t('sourceLocal')}
+            </span>
           </li>
         ))}
         {!query.data?.length ? (
