@@ -54,7 +54,6 @@ function TenantDetailPanel({
     onSuccess: (s) => {
       setError(null);
       setSession(s);
-      // eslint-disable-next-line no-console
       console.info('Impersonation access token (dev only):', s.accessToken);
     },
     onError: (e) => setError(e instanceof Error ? e.message : t('error')),

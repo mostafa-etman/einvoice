@@ -142,7 +142,6 @@ export default function CompanySettingsPage() {
           <p className="mt-token-xs text-token-sm text-foreground/70">{t('logoHelp')}</p>
 
           {logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element -- blob URL from authenticated fetch
             <img
               src={logoUrl}
               alt={t('logoPreviewAlt')}

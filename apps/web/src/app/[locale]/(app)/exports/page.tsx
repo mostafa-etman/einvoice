@@ -126,7 +126,7 @@ export default function ExportsPage() {
       const job = await createEtaPackageExport({
         dateFrom: new Date(from).toISOString(),
         dateTo: new Date(`${to}T23:59:59`).toISOString(),
-        type: 'Full',
+        type: 'full',
         format: 'JSON',
       });
       const finished = await pollUntilReady(job.id);
