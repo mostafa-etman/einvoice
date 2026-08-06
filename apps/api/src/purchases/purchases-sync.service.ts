@@ -6,7 +6,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import type { Prisma, ReceivedSyncTrigger } from '@prisma/client';
-import { loadEnv } from '../config/env';
+import { loadEnv, shouldRunInProcessCrons } from '../config/env';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -61,6 +61,10 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit() {
     if (!this.syncEnabled) return;
+    if (!shouldRunInProcessCrons()) {
+      this.logger.log('Purchases cron skipped (APP_ROLE=api; worker owns crons)');
+      return;
+    }
     this.logger.log(
       `Purchases cron sync enabled every ${this.intervalMs}ms`,
     );

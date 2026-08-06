@@ -1,7 +1,7 @@
 import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Job, Queue } from 'bullmq';
-import { loadEnv } from '../config/env';
+import { loadEnv, shouldRunInProcessCrons } from '../config/env';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
@@ -94,6 +94,10 @@ export class BillingPastDueScheduler implements OnModuleInit {
     // Avoid Redis schedulers / open handles that hang Jest teardown.
     if (env.NODE_ENV === 'test') {
       this.log.log('Skipping billing-past-due scheduler in test env');
+      return;
+    }
+    if (!shouldRunInProcessCrons(env)) {
+      this.log.log('Skipping billing-past-due scheduler (APP_ROLE=api)');
       return;
     }
     const every = Math.max(60_000, env.BILLING_PAST_DUE_SWEEP_INTERVAL_MS);

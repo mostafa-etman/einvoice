@@ -1,0 +1,245 @@
+# Production stack for Hostinger VPS (2 vCPU / 8GB RAM).
+# Usage:
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+# Does NOT replace infra/docker-compose.yml (local dev).
+
+name: einvoice-prod
+
+services:
+  traefik:
+    image: traefik:v3.2
+    platform: linux/amd64
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=einvoice-prod
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.web.http.redirections.entryPoint.to=websecure
+      - --entrypoints.web.http.redirections.entryPoint.scheme=https
+      - --certificatesresolvers.le.acme.httpchallenge=true
+      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.le.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      - --log.level=INFO
+      - --accesslog=true
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_acme:/letsencrypt
+    networks:
+      - einvoice-prod
+    mem_limit: 256m
+    depends_on:
+      - web
+      - api
+
+  postgres:
+    image: postgres:16-alpine
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-einvoice_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init-prod:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - einvoice-prod
+    mem_limit: 1024m
+    # Not published to host — only reachable on the Docker network.
+
+  redis:
+    image: redis:7-alpine
+    platform: linux/amd64
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks:
+      - einvoice-prod
+    mem_limit: 384m
+
+  minio:
+    image: minio/minio:latest
+    platform: linux/amd64
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - einvoice-prod
+    mem_limit: 512m
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      platforms:
+        - linux/amd64
+    image: einvoice-api:prod
+    platform: linux/amd64
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      APP_ROLE: api
+      DATABASE_URL: ${DATABASE_URL}
+      MIGRATE_DATABASE_URL: ${MIGRATE_DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_USE_SSL: "false"
+      MINIO_BUCKET: ${MINIO_BUCKET:-einvoice}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=einvoice-prod
+      - traefik.http.routers.einvoice-api.rule=Host(`${API_HOST}`)
+      - traefik.http.routers.einvoice-api.entrypoints=websecure
+      - traefik.http.routers.einvoice-api.tls=true
+      - traefik.http.routers.einvoice-api.tls.certresolver=le
+      - traefik.http.services.einvoice-api.loadbalancer.server.port=3001
+    networks:
+      - einvoice-prod
+    mem_limit: 1536m
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3001/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      platforms:
+        - linux/amd64
+    image: einvoice-api:prod
+    platform: linux/amd64
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      APP_ROLE: worker
+      DATABASE_URL: ${DATABASE_URL}
+      MIGRATE_DATABASE_URL: ${MIGRATE_DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_USE_SSL: "false"
+      MINIO_BUCKET: ${MINIO_BUCKET:-einvoice}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      api:
+        condition: service_started
+    networks:
+      - einvoice-prod
+    mem_limit: 1536m
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3001/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      platforms:
+        - linux/amd64
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_DEFAULT_LOCALE: ${NEXT_PUBLIC_DEFAULT_LOCALE:-ar}
+    image: einvoice-web:prod
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    depends_on:
+      - api
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=einvoice-prod
+      - traefik.http.routers.einvoice-web.rule=Host(`${WEB_HOST}`)
+      - traefik.http.routers.einvoice-web.entrypoints=websecure
+      - traefik.http.routers.einvoice-web.tls=true
+      - traefik.http.routers.einvoice-web.tls.certresolver=le
+      - traefik.http.services.einvoice-web.loadbalancer.server.port=3000
+    networks:
+      - einvoice-prod
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+networks:
+  einvoice-prod:
+    name: einvoice-prod
+    driver: bridge
+
+volumes:
+  postgres_data:
+    name: einvoice_prod_postgres
+  minio_data:
+    name: einvoice_prod_minio
+  redis_data:
+    name: einvoice_prod_redis
+  traefik_acme:
+    name: einvoice_prod_traefik_acme

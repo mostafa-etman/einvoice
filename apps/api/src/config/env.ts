@@ -84,6 +84,13 @@ const envSchema = z.object({
     .transform((v) => v === 'true' || v === '1'),
   CORS_ORIGINS: z.string().optional(),
   SECRETS_MASTER_KEY: z.string().optional(),
+  /**
+   * Process role for production split:
+   * - all (default): HTTP + in-process crons/schedulers (local/dev)
+   * - api: HTTP only; skip in-process crons (worker owns them)
+   * - worker: process queues + crons; still listens for healthchecks
+   */
+  APP_ROLE: z.enum(['api', 'worker', 'all']).default('all'),
   // SaaS layer (013): billing / platform-admin / email.
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
@@ -233,6 +240,10 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): ApiEnv {
     COOKIE_SECURE: result.data.COOKIE_SECURE ?? false,
     COOKIE_PARTITIONED: result.data.COOKIE_PARTITIONED ?? false,
   };
+}
+
+export function shouldRunInProcessCrons(env: ApiEnv = loadEnv()): boolean {
+  return env.APP_ROLE === 'all' || env.APP_ROLE === 'worker';
 }
 
 export function getCorsOrigins(env: ApiEnv): string[] | true {

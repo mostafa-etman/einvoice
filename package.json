@@ -19,7 +19,12 @@
     "dev:api": "pnpm db:prepare && turbo run dev --filter=@einvoice/shared --filter=@einvoice/api",
     "dev:web": "turbo run dev --filter=@einvoice/shared --filter=@einvoice/web",
     "infra:up": "docker compose -f infra/docker-compose.yml --env-file infra/.env up -d",
-    "infra:down": "docker compose -f infra/docker-compose.yml --env-file infra/.env down"
+    "infra:down": "docker compose -f infra/docker-compose.yml --env-file infra/.env down",
+    "prod:build": "docker compose -f docker-compose.prod.yml --env-file .env.prod build",
+    "prod:up": "docker compose -f docker-compose.prod.yml --env-file .env.prod up -d",
+    "prod:down": "docker compose -f docker-compose.prod.yml --env-file .env.prod down",
+    "prod:migrate": "bash ./scripts/prod-migrate.sh",
+    "prod:logs": "docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f --tail=200"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

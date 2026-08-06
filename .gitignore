@@ -15,6 +15,13 @@ coverage/
 .env.*
 !.env.example
 !**/.env.example
+!.env.prod.example
+
+# Local production secrets (never commit)
+.env.prod
+
+# Prod backup dumps
+backups/
 
 # Certs (generated)
 infra/certs/*

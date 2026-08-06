@@ -1,10 +1,22 @@
+# Keep build contexts lean; do not send secrets or local artifacts.
 node_modules
 .git
+.github
 .next
 dist
 coverage
-.env
-.env.*
+.turbo
+.pnpm-store
+**/.env
+**/.env.*
+!.env.prod.example
 *.log
 infra/certs/*
 !infra/certs/README.md
+apps/agent
+specs
+.specify
+.cursor
+backups
+*.md
+!DEPLOY.md

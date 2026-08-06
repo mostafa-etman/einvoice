@@ -10,7 +10,7 @@ import {
 import { UsageRollupService } from './usage-rollup.service';
 import { UsageExportService } from './usage-export.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { loadEnv } from '../config/env';
+import { loadEnv, shouldRunInProcessCrons } from '../config/env';
 import { bucketDateInTz } from './usage-aggregate';
 
 @Processor(QUEUE_USAGE_ROLLUP)
@@ -100,6 +100,10 @@ export class UsageRollupScheduler implements OnModuleInit {
     // Avoid Redis schedulers / open handles that hang Jest teardown.
     if (env.NODE_ENV === 'test') {
       this.log.log('Skipping usage-rollup scheduler in test env');
+      return;
+    }
+    if (!shouldRunInProcessCrons(env)) {
+      this.log.log('Skipping usage-rollup scheduler (APP_ROLE=api)');
       return;
     }
     const every = Math.max(60_000, env.USAGE_ROLLUP_INTERVAL_MS);
