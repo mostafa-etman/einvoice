@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Production Next.js web image — linux/amd64
-FROM --platform=linux/amd64 node:20-bookworm-slim AS base
+FROM --platform=linux/amd64 node:22-bookworm-slim AS base
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl \
   && rm -rf /var/lib/apt/lists/*
