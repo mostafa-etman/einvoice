@@ -17,8 +17,11 @@ RUN pnpm dlx turbo@2.3.3 prune @einvoice/api --docker
 FROM base AS installer
 COPY --from=pruner /app/out/json/ .
 COPY --from=pruner /app/out/pnpm-lock.yaml ./pnpm-lock.yaml
+COPY --from=pruner /app/.npmrc ./.npmrc
 RUN pnpm install --frozen-lockfile
 COPY --from=pruner /app/out/full/ .
+# turbo prune omits root shared configs; packages extend ../../tsconfig.base.json
+COPY --from=pruner /app/tsconfig.base.json /app/turbo.json ./
 RUN pnpm --filter @einvoice/shared build \
   && pnpm --filter @einvoice/eta-core build \
   && pnpm --filter @einvoice/api exec prisma generate \
