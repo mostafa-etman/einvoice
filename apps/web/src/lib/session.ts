@@ -19,6 +19,7 @@ export function subscribeAccessToken(listener: TokenListener): () => void {
 
 const TENANT_KEY = 'einvoice.activeTenantId';
 const BRANCH_KEY = 'einvoice.activeBranchId';
+const SIDEBAR_COLLAPSED_KEY = 'einvoice.sidebarCollapsed';
 /**
  * Non-secret hint that an HttpOnly refresh cookie may exist on the API host.
  * The cookie itself is not readable from JS; without this flag AuthProvider
@@ -57,4 +58,16 @@ export function setActiveBranchId(id: string | null) {
   if (typeof window === 'undefined') return;
   if (id) localStorage.setItem(BRANCH_KEY, id);
   else localStorage.removeItem(BRANCH_KEY);
+}
+
+/** UI chrome preference — collapsed sidebar (icons only). */
+export function getSidebarCollapsed(): boolean {
+  if (typeof window === 'undefined') return false;
+  return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+}
+
+export function setSidebarCollapsed(collapsed: boolean) {
+  if (typeof window === 'undefined') return;
+  if (collapsed) localStorage.setItem(SIDEBAR_COLLAPSED_KEY, '1');
+  else localStorage.removeItem(SIDEBAR_COLLAPSED_KEY);
 }

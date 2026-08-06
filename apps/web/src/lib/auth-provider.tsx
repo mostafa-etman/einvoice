@@ -13,10 +13,12 @@ import * as authApi from '@/lib/api/auth';
 import type { AuthUser } from '@/lib/api/auth';
 import {
   getAccessToken,
+  getActiveTenantId,
   getSessionHint,
   setAccessToken,
   setSessionHint,
 } from '@/lib/session';
+import { countUnsynced } from '@/lib/offline/draft-queue';
 
 type AuthContextValue = {
   user: AuthUser | null;
@@ -86,6 +88,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(async () => {
+    const tenantId = getActiveTenantId();
+    if (tenantId) {
+      const unsynced = await countUnsynced(tenantId);
+      if (unsynced > 0) {
+        const ok =
+          typeof window === 'undefined' ||
+          window.confirm(
+            `You have ${unsynced} unsynced draft(s). Sign out anyway? Offline drafts stay in this browser until cleared.`,
+          );
+        if (!ok) return;
+      }
+    }
     await authApi.logout();
     setUser(null);
   }, []);

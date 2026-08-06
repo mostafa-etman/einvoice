@@ -64,6 +64,15 @@ export async function parseCsvStream(
           headers = data.map((h) => String(h ?? '').trim());
           return;
         }
+        // Stop at Notes section / comment rows from template CSV re-uploads.
+        const firstCell = String(data[0] ?? '').trim();
+        if (
+          firstCell.startsWith('#') ||
+          firstCell.toLowerCase() === 'column'
+        ) {
+          parser.abort();
+          return;
+        }
         rowNumber += 1;
         if (rowNumber > maxRows) {
           parser.abort();
@@ -105,7 +114,8 @@ export async function parseXlsxBuffer(
   }
   const maxRows = options.maxRows ?? 5000;
   const wb = XLSX.read(buf, { type: 'buffer', cellDates: false, dense: false });
-  const sheetName = wb.SheetNames[0];
+  const sheetName =
+    wb.SheetNames.find((n) => n.toLowerCase() === 'import') ?? wb.SheetNames[0];
   if (!sheetName) return { totalRows: 0 };
   const sheet = wb.Sheets[sheetName]!;
   const ref = sheet['!ref'];

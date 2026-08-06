@@ -1,38 +1,94 @@
 import en from '@/messages/en.json';
 import ar from '@/messages/ar.json';
+import {
+  packageStepIndex,
+  PACKAGE_STEPS,
+  type ExportJob,
+} from '@/lib/api/exports';
 
-describe('exports center smoke (T039)', () => {
-  it('has Export Center create/track labels', () => {
-    expect(en.nav.exports).toBeTruthy();
-    expect(en.exports.title).toBeTruthy();
-    expect(en.exports.local).toBeTruthy();
-    expect(en.exports.createLocal).toBeTruthy();
-    expect(en.exports.formats).toBeTruthy();
-    expect(en.exports.download).toBeTruthy();
-    expect(en.exports.status).toBeTruthy();
-    expect(ar.nav.exports).toBeTruthy();
-    expect(ar.exports.title).toBeTruthy();
-    expect(ar.exports.createLocal).toBeTruthy();
+const baseJob: ExportJob = {
+  id: 'job-1',
+  kind: 'ETA_PACKAGE',
+  status: 'RUNNING',
+  createdAt: '2026-08-01T00:00:00Z',
+};
+
+describe('ETA package progress steps', () => {
+  it('has Requested → In progress → Ready → Downloaded labels in en + ar', () => {
+    expect(PACKAGE_STEPS).toEqual([
+      'REQUESTED',
+      'IN_PROGRESS',
+      'READY',
+      'DOWNLOADED',
+    ]);
+    for (const messages of [en, ar]) {
+      expect(messages.exports.stepRequested).toBeTruthy();
+      expect(messages.exports.stepInProgress).toBeTruthy();
+      expect(messages.exports.stepReady).toBeTruthy();
+      expect(messages.exports.stepDownloaded).toBeTruthy();
+      expect(messages.exports.rangeRequired).toBeTruthy();
+      expect(messages.exports.packageFailed).toBeTruthy();
+      expect(messages.exports.downloadFailed).toBeTruthy();
+    }
   });
-});
 
-describe('exports package smoke (T048)', () => {
-  it('has ETA package request form + status copy', () => {
-    expect(en.exports.etaPackage).toBeTruthy();
-    expect(en.exports.createPackage).toBeTruthy();
-    expect(en.exports.packageStatus).toBeTruthy();
-    expect(en.exports.from).toBeTruthy();
-    expect(en.exports.to).toBeTruthy();
-    expect(ar.exports.etaPackage).toBeTruthy();
-    expect(ar.exports.packageStatus).toBeTruthy();
+  it('advances through the ETA lifecycle', () => {
+    expect(
+      packageStepIndex({
+        ...baseJob,
+        etaPackage: {
+          etaRequestId: 'PKG-1',
+          localStatus: 'REQUESTED',
+          etaStatusRaw: null,
+          readyAt: null,
+        },
+      }),
+    ).toBe(0);
+    expect(
+      packageStepIndex({
+        ...baseJob,
+        etaPackage: {
+          etaRequestId: 'PKG-1',
+          localStatus: 'IN_PROGRESS',
+          etaStatusRaw: 1,
+          readyAt: null,
+        },
+      }),
+    ).toBe(1);
+    expect(
+      packageStepIndex({
+        ...baseJob,
+        status: 'READY',
+        etaPackage: {
+          etaRequestId: 'PKG-1',
+          localStatus: 'READY',
+          etaStatusRaw: 2,
+          readyAt: '2026-08-01T01:00:00Z',
+        },
+      }),
+    ).toBe(2);
+    expect(packageStepIndex({ ...baseJob, status: 'READY' }, true)).toBe(3);
   });
-});
 
-describe('exports history smoke (T056)', () => {
-  it('has history table labels', () => {
-    expect(en.exports.history).toBeTruthy();
-    expect(en.exports.kind).toBeTruthy();
-    expect(en.exports.noJobs).toBeTruthy();
-    expect(ar.exports.history).toBeTruthy();
+  it('reports failure for ETA errors and for requests ETA never accepted', () => {
+    expect(
+      packageStepIndex({
+        ...baseJob,
+        status: 'FAILED',
+        etaPackage: {
+          etaRequestId: 'PKG-1',
+          localStatus: 'ERROR',
+          etaStatusRaw: 3,
+          readyAt: null,
+        },
+      }),
+    ).toBe(-1);
+    expect(
+      packageStepIndex({
+        ...baseJob,
+        status: 'FAILED',
+        errorSummary: 'No documents were accepted by ETA in the selected date range.',
+      }),
+    ).toBe(-1);
   });
 });

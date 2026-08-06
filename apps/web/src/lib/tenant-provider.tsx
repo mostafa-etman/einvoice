@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { listBranches, listMyTenants, type Branch, type TenantMembership } from '@/lib/api/tenants';
 import {
   getActiveBranchId,
@@ -33,6 +33,7 @@ const TenantContext = createContext<TenantContextValue | null>(null);
 
 export function TenantProvider({ children }: { children: ReactNode }) {
   const { user, ready } = useAuth();
+  const queryClient = useQueryClient();
   const [tenantId, setTenantIdState] = useState<string | null>(null);
   const [branchId, setBranchIdState] = useState<string | null>(null);
 
@@ -73,12 +74,17 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     }
   }, [branchesQuery.data, branchId]);
 
-  const setTenantId = useCallback((id: string) => {
-    setActiveTenantId(id);
-    setTenantIdState(id);
-    setActiveBranchId(null);
-    setBranchIdState(null);
-  }, []);
+  const setTenantId = useCallback(
+    (id: string) => {
+      setActiveTenantId(id);
+      setTenantIdState(id);
+      setActiveBranchId(null);
+      setBranchIdState(null);
+      // Defense in depth: drop any caches that forgot to key by tenantId.
+      void queryClient.invalidateQueries();
+    },
+    [queryClient],
+  );
 
   const setBranchId = useCallback((id: string) => {
     setActiveBranchId(id);

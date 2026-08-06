@@ -27,6 +27,25 @@ describe('EtaDocumentLifecycleClient', () => {
     });
   });
 
+  it('PUTs cancel with status cancelled and reason', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return new Response('', { status: 200 });
+    }) as typeof fetch;
+
+    const client = new EtaDocumentLifecycleClient(base, fetchImpl);
+    await client.cancelDocument('tok', 'uuid-c', 'Customer returned goods');
+
+    expect(calls[0]!.url).toBe(
+      `${base}/api/v1.0/documents/state/uuid-c/state`,
+    );
+    expect(JSON.parse(String(calls[0]!.init?.body))).toEqual({
+      status: 'cancelled',
+      reason: 'Customer returned goods',
+    });
+  });
+
   it('PUTs decline cancelation path', async () => {
     const calls: string[] = [];
     const fetchImpl = (async (url: string | URL) => {

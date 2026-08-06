@@ -29,6 +29,13 @@ public sealed class AgentApiClient : IDisposable
             new AuthenticationHeaderValue("Bearer", deviceToken);
     }
 
+    /// <summary>Update cloud API base (HTTPS). Used when the user changes the server URL at pairing.</summary>
+    public void SetBaseUrl(string baseUrl)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
+        _http.BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/");
+    }
+
     public void ClearDeviceToken()
     {
         _http.DefaultRequestHeaders.Authorization = null;
@@ -73,18 +80,32 @@ public sealed class AgentApiClient : IDisposable
         if (ready is not null)
             body["ready"] = ready is JToken jt ? jt : JToken.FromObject(ready);
         PinGuard.AssertNoPinInPayload(body);
-        return PostAsync("agent/heartbeat", body, cancellationToken);
+        return PostAsync("agent/heartbeat", body, idempotencyKey: null, cancellationToken);
     }
 
     public Task<JObject> ClaimAsync(int max = 1, CancellationToken cancellationToken = default) =>
-        PostAsync("agent/jobs/claim", new JObject { ["max"] = max }, cancellationToken);
+        PostAsync("agent/jobs/claim", new JObject { ["max"] = max }, idempotencyKey: null, cancellationToken);
 
-    public Task<JObject> SubmitAsync(string jobId, object submitBody, CancellationToken cancellationToken = default)
+    public Task<JObject> SubmitAsync(
+        string jobId,
+        object submitBody,
+        CancellationToken cancellationToken = default) =>
+        SubmitAsync(jobId, submitBody, idempotencyKey: null, cancellationToken);
+
+    public Task<JObject> SubmitAsync(
+        string jobId,
+        object submitBody,
+        string? idempotencyKey,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
         var body = submitBody is JToken jt ? jt : JToken.FromObject(submitBody);
         PinGuard.AssertNoPinInPayload(body);
-        return PostAsync($"agent/jobs/{Uri.EscapeDataString(jobId)}/submit", body, cancellationToken);
+        return PostAsync(
+            $"agent/jobs/{Uri.EscapeDataString(jobId)}/submit",
+            body,
+            idempotencyKey,
+            cancellationToken);
     }
 
     public Task<JObject> FailAsync(
@@ -103,16 +124,23 @@ public sealed class AgentApiClient : IDisposable
         return PostAsync(
             $"agent/jobs/{Uri.EscapeDataString(jobId)}/fail",
             body,
+            idempotencyKey: null,
             cancellationToken);
     }
 
-    private async Task<JObject> PostAsync(string path, JToken body, CancellationToken cancellationToken)
+    private async Task<JObject> PostAsync(
+        string path,
+        JToken body,
+        string? idempotencyKey,
+        CancellationToken cancellationToken)
     {
         PinGuard.AssertNoPinInPayload(body);
         using var request = new HttpRequestMessage(HttpMethod.Post, path)
         {
             Content = JsonContent(body),
         };
+        if (!string.IsNullOrWhiteSpace(idempotencyKey))
+            request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
         return await SendAsync(request, cancellationToken).ConfigureAwait(false);
     }
 

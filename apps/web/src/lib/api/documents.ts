@@ -1,4 +1,5 @@
-import { apiFetch } from './client';
+import { apiFetch, apiBase, ApiError } from './client';
+import { getAccessToken, getActiveTenantId } from '@/lib/session';
 
 export type DocumentKind =
   | 'INVOICE'
@@ -84,7 +85,13 @@ export type DocumentUpsert = {
     internalCode?: string;
     weightUnitType?: string;
     weightQuantity?: string;
-    taxes?: Array<{ taxType: string; subType: string; rate: string }>;
+    taxes?: Array<{
+      taxType: string;
+      subType: string;
+      rate: string;
+      /** Required for fixed-amount types (T3, T6); ignored for rate-based. */
+      amount?: string;
+    }>;
   }>;
 };
 
@@ -136,17 +143,41 @@ export function previewDocument(body: DocumentUpsert) {
   }>('/documents/preview', { method: 'POST', tenantScoped: true, body });
 }
 
+export type ValidationIssue = {
+  code: string;
+  path?: string;
+  severity?: 'error' | 'warning';
+  message: string;
+  messageKey?: string;
+  /** Company-level problems are fixed in Settings, not on the invoice. */
+  fixIn?: 'settings';
+  settingsArea?: 'branches';
+};
+
 export function validateDocument(id: string) {
   return apiFetch<{
     ok: boolean;
-    issues: Array<{
-      code: string;
-      path?: string;
-      severity?: 'error' | 'warning';
-      message: string;
-      messageKey?: string;
-    }>;
+    issues: ValidationIssue[];
   }>(`/documents/${id}/validate`, { method: 'POST', tenantScoped: true });
+}
+
+export function recalculateDocumentTotals(id: string) {
+  return apiFetch<Record<string, unknown>>(`/documents/${id}/recalculate-totals`, {
+    method: 'POST',
+    tenantScoped: true,
+  });
+}
+
+export function recalculateAllDraftTotals() {
+  return apiFetch<{
+    attempted: number;
+    succeeded: number;
+    failed: number;
+    results: Array<{ id: string; ok: boolean; totalAmount?: string; error?: string }>;
+  }>('/documents/recalculate-totals', {
+    method: 'POST',
+    tenantScoped: true,
+  });
 }
 
 export function markDocumentReady(id: string) {
@@ -203,4 +234,60 @@ export function resetDocumentSubmitCooldown(id: string) {
     method: 'POST',
     tenantScoped: true,
   });
+}
+
+async function readPdfDownload(res: Response, fallbackName: string) {
+  if (!res.ok) {
+    const text = await res.text();
+    let message = res.statusText;
+    try {
+      const data = text ? (JSON.parse(text) as { message?: string }) : null;
+      if (data?.message) message = String(data.message);
+    } catch {
+      if (text) message = text.slice(0, 300);
+    }
+    throw new ApiError(message, res.status);
+  }
+  const blob = await res.blob();
+  const cd = res.headers.get('content-disposition') ?? '';
+  const match = /filename="([^"]+)"/.exec(cd);
+  return { blob, filename: match?.[1] ?? fallbackName };
+}
+
+function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { Accept: 'application/pdf' };
+  const token = getAccessToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const tenantId = getActiveTenantId();
+  if (tenantId) headers['X-Tenant-Id'] = tenantId;
+  return headers;
+}
+
+/** Local pre-submission printable PDF for a saved document. */
+export async function downloadLocalPrintout(id: string, locale?: string) {
+  const q = locale ? `?locale=${encodeURIComponent(locale)}` : '';
+  const res = await fetch(`${apiBase()}/documents/${id}/local-printout${q}`, {
+    method: 'GET',
+    credentials: 'include',
+    headers: authHeaders(),
+  });
+  return readPdfDownload(res, `invoice-${id}-preview.pdf`);
+}
+
+/** Local printable PDF from current (possibly unsaved) form body. */
+export async function downloadLocalPrintoutFromBody(
+  body: DocumentUpsert,
+  locale?: string,
+) {
+  const q = locale ? `?locale=${encodeURIComponent(locale)}` : '';
+  const res = await fetch(`${apiBase()}/documents/local-printout${q}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      ...authHeaders(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  return readPdfDownload(res, `invoice-${body.internalId || 'draft'}-preview.pdf`);
 }

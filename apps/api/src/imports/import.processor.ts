@@ -12,10 +12,25 @@ export class ImportProcessor extends WorkerHost {
   }
   async process(job: Job<ImportJobData>): Promise<void> {
     this.log.log(`import ${job.data.importJobId} ${job.data.phase}`);
-    if (job.data.phase === 'validate') {
-      await this.imports.processValidate(job.data.tenantId, job.data.importJobId);
-    } else {
-      await this.imports.processRun(job.data.tenantId, job.data.importJobId);
+    try {
+      if (job.data.phase === 'validate') {
+        await this.imports.processValidate(
+          job.data.tenantId,
+          job.data.importJobId,
+        );
+      } else {
+        await this.imports.processRun(job.data.tenantId, job.data.importJobId);
+      }
+    } catch (err) {
+      this.log.error(
+        `import ${job.data.importJobId} ${job.data.phase} failed: ${String(err)}`,
+      );
+      await this.imports.failJob(
+        job.data.tenantId,
+        job.data.importJobId,
+        err,
+      );
+      throw err;
     }
   }
 }

@@ -1,10 +1,17 @@
 import type { JsonObject } from './canonical-serialize.js';
-import { calculateLine, type LineInput } from './calculate-totals.js';
+import {
+  calculateLine,
+  estimateEtaItemTotal,
+  type EtaTaxAmountLike,
+  type LineInput,
+} from './calculate-totals.js';
 import { KIND_TO_ETA_TYPE, type DocumentKind } from './builders/document.js';
 import { isValidEtaDateTimeIssued } from './eta-formats.js';
+import { add, formatMoney, sub } from './money.js';
 import {
   documentKindTypicallyRequiresTax,
   findDuplicateTaxTypes,
+  isFixedAmountTaxType,
   isFullyTaxFree,
 } from './tax-modes.js';
 
@@ -62,6 +69,132 @@ function assertJsonNumber(
       messageKey: 'documents.validation.numberExpected',
       params: { path, got: typeof value },
     });
+  }
+}
+
+/** ETA applies a ±0.5 tolerance to every calculated amount (Main Calculations). */
+export const ETA_TOTAL_TOLERANCE = 0.5;
+
+function toAmount(value: unknown): string | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return formatMoney(value);
+  if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) {
+    return formatMoney(value);
+  }
+  return null;
+}
+
+/** Signed difference (actual - expected) when it breaches ETA's tolerance. */
+function beyondTolerance(expected: string, actual: string): string | null {
+  const difference = sub(actual, expected);
+  return Math.abs(Number(difference)) > ETA_TOTAL_TOLERANCE ? difference : null;
+}
+
+/**
+ * Mirrors ETA's SF337 item-total estimation before submission, so a wrong
+ * total is reported locally with expected vs actual instead of coming back as
+ * a refusal ("Total [115] must be [113], difference [2]").
+ */
+function checkEtaTotals(document: JsonObject, issues: ValidationIssue[]): void {
+  const invoiceLines = document.invoiceLines;
+  if (!Array.isArray(invoiceLines)) return;
+
+  let sumLineTotals = '0.00';
+  let sumNetTotals = '0.00';
+  let incomplete = false;
+
+  invoiceLines.forEach((line, i) => {
+    if (!line || typeof line !== 'object' || Array.isArray(line)) {
+      incomplete = true;
+      return;
+    }
+    const L = line as JsonObject;
+    const netTotal = toAmount(L.netTotal);
+    const declared = toAmount(L.total);
+    if (netTotal == null || declared == null) {
+      incomplete = true;
+      return;
+    }
+
+    const taxes: EtaTaxAmountLike[] = [];
+    for (const t of Array.isArray(L.taxableItems) ? L.taxableItems : []) {
+      if (!t || typeof t !== 'object' || Array.isArray(t)) {
+        incomplete = true;
+        continue;
+      }
+      const item = t as JsonObject;
+      const amount = toAmount(item.amount);
+      if (amount == null) {
+        incomplete = true;
+        continue;
+      }
+      taxes.push({ taxType: String(item.taxType ?? ''), amount });
+    }
+
+    const estimate = estimateEtaItemTotal({
+      netTotal,
+      itemsDiscount: toAmount(L.itemsDiscount) ?? '0.00',
+      taxes,
+    });
+    const difference = beyondTolerance(estimate.total, declared);
+    if (difference) {
+      issues.push({
+        code: 'ETA_ITEM_TOTAL_MISMATCH',
+        path: `invoiceLines[${i}].total`,
+        severity: 'error',
+        messageKey: 'documents.validation.itemTotalMismatch',
+        params: {
+          line: String(i + 1),
+          expected: estimate.total,
+          actual: declared,
+          difference,
+          netTotal: estimate.netTotal,
+          additiveTaxes: estimate.additiveTaxTotal,
+          withholdingTaxes: estimate.deductibleTaxTotal,
+          itemsDiscount: estimate.itemsDiscount,
+        },
+      });
+    }
+
+    sumLineTotals = add(sumLineTotals, declared);
+    sumNetTotals = add(sumNetTotals, netTotal);
+  });
+
+  if (incomplete) return;
+
+  const netAmount = toAmount(document.netAmount);
+  if (netAmount != null) {
+    const difference = beyondTolerance(sumNetTotals, netAmount);
+    if (difference) {
+      issues.push({
+        code: 'ETA_NET_AMOUNT_MISMATCH',
+        path: 'netAmount',
+        severity: 'error',
+        messageKey: 'documents.validation.netAmountMismatch',
+        params: { expected: sumNetTotals, actual: netAmount, difference },
+      });
+    }
+  }
+
+  const totalAmount = toAmount(document.totalAmount);
+  if (totalAmount != null) {
+    const extraDiscount = toAmount(document.extraDiscountAmount) ?? '0.00';
+    const expected = sub(sumLineTotals, extraDiscount);
+    const difference = beyondTolerance(expected, totalAmount);
+    if (difference) {
+      issues.push({
+        code: 'ETA_TOTAL_AMOUNT_MISMATCH',
+        path: 'totalAmount',
+        severity: 'error',
+        messageKey: 'documents.validation.totalAmountMismatch',
+        params: {
+          expected,
+          actual: totalAmount,
+          difference,
+          lineTotals: sumLineTotals,
+          extraDiscountAmount: extraDiscount,
+        },
+      });
+    }
   }
 }
 
@@ -165,6 +298,8 @@ export function validateDocument(params: {
         );
       }
     });
+
+    checkEtaTotals(document, issues);
   }
 
   if (!refs.branchOk) {
@@ -242,12 +377,46 @@ export function validateDocument(params: {
         });
       }
 
+      (line.taxes ?? []).forEach((tax, tIdx) => {
+        if (!isFixedAmountTaxType(tax.taxType)) return;
+        const amount = tax.amount;
+        if (amount == null || amount === '' || !Number.isFinite(Number(amount))) {
+          issues.push({
+            code: 'FIXED_TAX_AMOUNT_REQUIRED',
+            path: `lines[${i}].taxes[${tIdx}].amount`,
+            severity: 'error',
+            messageKey: 'documents.validation.fixedTaxAmountRequired',
+            params: { taxType: tax.taxType },
+          });
+        } else if (Number(amount) < 0) {
+          issues.push({
+            code: 'FIXED_TAX_AMOUNT_NEGATIVE',
+            path: `lines[${i}].taxes[${tIdx}].amount`,
+            severity: 'error',
+            messageKey: 'documents.validation.fixedTaxAmountNegative',
+            params: { taxType: tax.taxType },
+          });
+        }
+        const rate = Number(tax.rate);
+        if (Number.isFinite(rate) && rate !== 0) {
+          issues.push({
+            code: 'FIXED_TAX_RATE_MUST_BE_ZERO',
+            path: `lines[${i}].taxes[${tIdx}].rate`,
+            severity: 'error',
+            messageKey: 'documents.validation.fixedTaxRateZero',
+            params: { taxType: tax.taxType },
+          });
+        }
+      });
+
       try {
         calculateLine(line);
       } catch (e) {
         const msg = e instanceof Error ? e.message : '';
         if (msg.includes('Duplicate TaxType')) {
           // Already reported above as DUPLICATE_TAX_TYPE.
+        } else if (msg.includes('requires an explicit amount')) {
+          // Already reported as FIXED_TAX_AMOUNT_REQUIRED when amount missing.
         } else {
           issues.push({
             code: 'LINE_CALC_ERROR',

@@ -88,7 +88,10 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   }
   if (options.tenantScoped) {
     const tenantId = getActiveTenantId();
-    if (tenantId) headers['X-Tenant-Id'] = tenantId;
+    if (!tenantId) {
+      throw new ApiError('Active tenant is required for this request', 400);
+    }
+    headers['X-Tenant-Id'] = tenantId;
   }
 
   const res = await fetch(`${apiBase()}${path}`, {

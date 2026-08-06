@@ -23,6 +23,7 @@ export class ItemCodesService {
     return this.tenantPrisma.withTenant(tenantId, (tx) =>
       tx.itemCode.findMany({
         where: {
+          tenantId,
           ...(filters?.type ? { type: filters.type as ItemCodeType } : {}),
           ...(filters?.active !== undefined
             ? { isActive: filters.active }

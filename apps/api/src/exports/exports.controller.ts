@@ -65,8 +65,8 @@ export class ExportsController {
       dateTo: string;
       documentTypeNames?: string[];
       statuses?: string[];
-      type?: 'full' | 'summary';
-      format?: 'JSON' | 'XML' | 'CSV';
+      type?: string;
+      format?: string;
     },
   ) {
     return this.exports.createEtaPackage({

@@ -3,6 +3,7 @@ import { INestApplication } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { TenantPrismaService } from '../src/prisma/tenant-prisma.service';
 
 async function ownerCtx(app: INestApplication, suffix: string) {
   const email = `br_${suffix}@example.com`;
@@ -16,7 +17,24 @@ async function ownerCtx(app: INestApplication, suffix: string) {
     .set('Authorization', `Bearer ${reg.body.accessToken}`)
     .send({ name: `Branches ${suffix}` })
     .expect(201);
-  return { token: reg.body.accessToken as string, tenantId: tenant.body.id as string };
+  const tenantId = tenant.body.id as string;
+  const userId = reg.body.user.id as string;
+
+  // The Free plan only allows 1 branch (the auto-created "Main" branch already
+  // uses it) — override so this suite can exercise a second branch (013-saas-layer).
+  const tenantPrisma = app.get(TenantPrismaService);
+  await tenantPrisma.withTenant(tenantId, (tx) =>
+    tx.quotaOverride.create({
+      data: {
+        tenantId,
+        branchQuota: 10,
+        reason: 'test: allow multiple branches in the branches settings suite',
+        createdByUserId: userId,
+      },
+    }),
+  );
+
+  return { token: reg.body.accessToken as string, tenantId };
 }
 
 describe('Settings branches API', () => {

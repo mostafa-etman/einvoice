@@ -26,10 +26,14 @@ export {
 export {
   calculateLine,
   calculateDocumentTotals,
+  estimateEtaItemTotal,
   type LineInput,
   type LineComputed,
+  type LineTaxComputed,
   type DocumentTotals,
   type LineTaxInput,
+  type EtaTaxAmountLike,
+  type EtaItemTotalBreakdown,
 } from './calculate-totals.js';
 export {
   buildInvoice,
@@ -47,6 +51,7 @@ export {
 } from './builders/document.js';
 export {
   validateDocument,
+  ETA_TOTAL_TOLERANCE,
   type ValidationIssue,
   type TypeVersionSchema,
   type ValidatorRefs,
@@ -56,6 +61,21 @@ export {
   ETA_ZERO_RATED_SUBTYPES,
   ETA_EXEMPT_SUBTYPES,
   ETA_STANDARD_TAXABLE_SUBTYPE,
+  ETA_DEDUCTIBLE_TAX_TYPES,
+  ETA_TAXABLE_FEE_TAX_TYPES,
+  ETA_NON_TAXABLE_FEE_TAX_TYPES,
+  ETA_FIXED_AMOUNT_TAX_TYPES,
+  etaTaxDirection,
+  etaTaxSign,
+  isDeductibleTaxType,
+  isTaxableFeeTaxType,
+  isNonTaxableFeeTaxType,
+  isFixedAmountTaxType,
+  isWithholdingCatalogEntry,
+  deductibleTaxTypesFromCatalog,
+  normalizeTaxTypeCode,
+  type EtaTaxDirection,
+  type EtaTaxTypeCatalogEntry,
   defaultTaxableTax,
   zeroRatedTax,
   exemptTax,
@@ -87,3 +107,37 @@ export {
   type ReceivedDocumentKind,
   type EtaDocumentDirectionReceived,
 } from './received-classify.js';
+export {
+  checkLateSubmission,
+  ETA_LATE_SUBMISSION_WARN_DAYS_DEFAULT,
+  type LateSubmissionCheck,
+} from './late-submission.js';
+export {
+  ISSUER_ADDRESS_FIELDS,
+  REQUIRED_ISSUER_ADDRESS_FIELDS,
+  isIssuerAddressComplete,
+  missingIssuerAddressFields,
+  normalizeIssuerAddress,
+  resolveIssuerAddress,
+  type IssuerAddress,
+} from './issuer-address.js';
+export {
+  ETA_ISSUER_TYPES,
+  isIssuerNameComplete,
+  resolveIssuerId,
+  resolveIssuerName,
+  resolveIssuerType,
+  type IssuerType,
+} from './issuer-identity.js';
+export {
+  ETA_INTERNAL_ID_MAX_LENGTH,
+  ETA_INTERNAL_ID_PATTERN,
+  ETA_DOCUMENT_UUID_PATTERN,
+  ETA_DOCUMENT_LONG_ID_PATTERN,
+  formatInternalId,
+  isValidEtaInternalId,
+  isPlausibleEtaDocumentReference,
+  validateInternalIdScheme,
+  type InternalIdSchemeInput,
+  type InternalIdSchemeIssue,
+} from './internal-id.js';

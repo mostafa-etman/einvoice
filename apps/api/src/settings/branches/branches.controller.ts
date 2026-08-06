@@ -14,7 +14,10 @@ import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { CurrentUser, type AuthUser } from '../../auth/current-user.decorator';
 import { PermissionsGuard, RequirePermissions } from '../../rbac/permissions.guard';
 import { requireTenant } from '../require-tenant';
-import { BranchesSettingsService } from './branches.service';
+import {
+  BranchesSettingsService,
+  type BranchAddressInput,
+} from './branches.service';
 
 @Controller('branches')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -40,6 +43,7 @@ export class BranchesController {
       etaBranchCode?: string;
       activityCode?: string;
       defaultCurrencyCode?: string;
+      address?: BranchAddressInput;
     },
   ) {
     return this.branches.create(requireTenant(tenantHeader), user.userId, body);
@@ -59,6 +63,7 @@ export class BranchesController {
       etaBranchCode?: string | null;
       activityCode?: string | null;
       defaultCurrencyCode?: string | null;
+      address?: BranchAddressInput;
     },
   ) {
     return this.branches.update(

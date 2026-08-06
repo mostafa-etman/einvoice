@@ -1,0 +1,273 @@
+openapi: 3.0.3
+info:
+  title: eInvoice Usage Analytics API
+  version: 0.1.0
+  description: >
+    Per-tenant usage metering summary, time series, and CSV/XLSX export.
+    Reads daily/monthly rollups built from the UsageEvent log.
+    JWT + X-Tenant-Id. Never returns secrets or other tenants' data.
+servers:
+  - url: https://api.localhost
+security:
+  - bearerAuth: []
+  - tenantHeader: []
+
+paths:
+  /analytics/summary:
+    get:
+      summary: Aggregated meter totals for filters
+      operationId: getAnalyticsSummary
+      tags: [Analytics]
+      parameters:
+        - $ref: "#/components/parameters/from"
+        - $ref: "#/components/parameters/to"
+        - $ref: "#/components/parameters/branchId"
+        - $ref: "#/components/parameters/currencyCode"
+      responses:
+        "200":
+          description: Totals per canonical meter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsSummary"
+        "403":
+          description: Missing analytics.view
+
+  /analytics/series:
+    get:
+      summary: Time series for meters
+      operationId: getAnalyticsSeries
+      tags: [Analytics]
+      parameters:
+        - $ref: "#/components/parameters/from"
+        - $ref: "#/components/parameters/to"
+        - $ref: "#/components/parameters/branchId"
+        - $ref: "#/components/parameters/currencyCode"
+        - name: grain
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [day, month]
+        - name: meters
+          in: query
+          required: false
+          description: Comma-separated subset; default all six
+          schema:
+            type: string
+            example: issued,received,valid,invalid,api_calls,storage_bytes
+      responses:
+        "200":
+          description: Series points from rollups
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsSeries"
+        "403":
+          description: Missing analytics.view
+
+  /analytics/exports:
+    post:
+      summary: Request usage export (CSV or XLSX)
+      operationId: createAnalyticsExport
+      tags: [Analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAnalyticsExportRequest"
+      responses:
+        "201":
+          description: Export job created (or completed if small/sync)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageExportJob"
+        "403":
+          description: Missing analytics.export
+
+    get:
+      summary: List recent analytics export jobs
+      operationId: listAnalyticsExports
+      tags: [Analytics]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, maximum: 50 }
+      responses:
+        "200":
+          description: Export jobs for tenant
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/UsageExportJob"
+        "403":
+          description: Missing analytics.view or analytics.export
+
+  /analytics/exports/{jobId}:
+    get:
+      summary: Get export job status
+      operationId: getAnalyticsExport
+      tags: [Analytics]
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageExportJob"
+        "404":
+          description: Not found in tenant
+        "403":
+          description: Missing permission
+
+  /analytics/exports/{jobId}/download:
+    get:
+      summary: Download export artifact
+      operationId: downloadAnalyticsExport
+      tags: [Analytics]
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: File bytes
+          content:
+            text/csv:
+              schema: { type: string, format: binary }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        "409":
+          description: Job not READY
+        "403":
+          description: Missing analytics.export
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    tenantHeader:
+      type: apiKey
+      in: header
+      name: X-Tenant-Id
+
+  parameters:
+    from:
+      name: from
+      in: query
+      required: true
+      schema: { type: string, format: date }
+      description: Inclusive start date (metering timezone)
+    to:
+      name: to
+      in: query
+      required: true
+      schema: { type: string, format: date }
+      description: Inclusive end date (metering timezone)
+    branchId:
+      name: branchId
+      in: query
+      required: false
+      schema: { type: string, format: uuid }
+    currencyCode:
+      name: currencyCode
+      in: query
+      required: false
+      schema: { type: string, example: EGP }
+
+  schemas:
+    UsageMeter:
+      type: string
+      enum: [issued, received, valid, invalid, api_calls, storage_bytes]
+
+    MeterValues:
+      type: object
+      required: [issued, received, valid, invalid, api_calls, storage_bytes]
+      properties:
+        issued: { type: number }
+        received: { type: number }
+        valid: { type: number }
+        invalid: { type: number }
+        api_calls: { type: number }
+        storage_bytes: { type: number }
+
+    AnalyticsSummary:
+      type: object
+      required: [from, to, timezone, totals, asOf, filters]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        timezone: { type: string, example: Africa/Cairo }
+        asOf: { type: string, format: date-time }
+        filters:
+          type: object
+          properties:
+            branchId: { type: string, format: uuid, nullable: true }
+            currencyCode: { type: string, nullable: true }
+        totals:
+          $ref: "#/components/schemas/MeterValues"
+        notes:
+          type: array
+          items: { type: string }
+          description: >
+            e.g. api_calls and storage_bytes are organization-level when
+            branch/currency filters are set
+
+    AnalyticsSeries:
+      type: object
+      required: [grain, timezone, points]
+      properties:
+        grain: { type: string, enum: [day, month] }
+        timezone: { type: string }
+        points:
+          type: array
+          items:
+            type: object
+            required: [bucket, values]
+            properties:
+              bucket: { type: string, format: date }
+              values:
+                $ref: "#/components/schemas/MeterValues"
+
+    CreateAnalyticsExportRequest:
+      type: object
+      required: [format, from, to]
+      properties:
+        format: { type: string, enum: [CSV, XLSX] }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        branchId: { type: string, format: uuid, nullable: true }
+        currencyCode: { type: string, nullable: true }
+        grain: { type: string, enum: [day, month], default: day }
+
+    UsageExportJob:
+      type: object
+      required: [id, status, format, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [QUEUED, RUNNING, READY, FAILED, EXPIRED]
+        format: { type: string, enum: [CSV, XLSX] }
+        filters:
+          type: object
+          additionalProperties: true
+        byteSize: { type: integer, nullable: true }
+        errorSummary: { type: string, nullable: true }
+        expiresAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }

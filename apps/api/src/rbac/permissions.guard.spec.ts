@@ -13,9 +13,23 @@ describe('RBAC permission matrix', () => {
     expect(ROLE_PERMISSION_MATRIX.Viewer).not.toContain(PERMISSIONS.DOCUMENTS_MANAGE);
   });
 
-  it('Accountant has billing.manage but not members.manage', () => {
-    expect(ROLE_PERMISSION_MATRIX.Accountant).toContain(PERMISSIONS.BILLING_MANAGE);
+  it('Accountant can view billing but not manage the subscription', () => {
+    expect(ROLE_PERMISSION_MATRIX.Accountant).toContain(PERMISSIONS.BILLING_VIEW);
+    expect(ROLE_PERMISSION_MATRIX.Accountant).not.toContain(PERMISSIONS.BILLING_MANAGE);
     expect(ROLE_PERMISSION_MATRIX.Accountant).not.toContain(PERMISSIONS.MEMBERS_MANAGE);
+    expect(ROLE_PERMISSION_MATRIX.Accountant).not.toContain(PERMISSIONS.ANALYTICS_VIEW);
+    expect(ROLE_PERMISSION_MATRIX.Accountant).toContain(PERMISSIONS.REPORTS_VIEW);
+    expect(ROLE_PERMISSION_MATRIX.Accountant).toContain(PERMISSIONS.REPORTS_EXPORT);
+  });
+
+  it('Owner and Admin own billing.manage', () => {
+    expect(ROLE_PERMISSION_MATRIX.Owner).toContain(PERMISSIONS.BILLING_MANAGE);
+    expect(ROLE_PERMISSION_MATRIX.Admin).toContain(PERMISSIONS.BILLING_MANAGE);
+  });
+
+  it('Admin has analytics.view and analytics.export', () => {
+    expect(ROLE_PERMISSION_MATRIX.Admin).toContain(PERMISSIONS.ANALYTICS_VIEW);
+    expect(ROLE_PERMISSION_MATRIX.Admin).toContain(PERMISSIONS.ANALYTICS_EXPORT);
   });
 
   it('PermissionsGuard is defined', () => {

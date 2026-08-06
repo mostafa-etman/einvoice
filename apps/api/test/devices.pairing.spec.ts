@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { isDatabaseAvailable, skipMessage } from './db-guard';
+import { TenantPrismaService } from '../src/prisma/tenant-prisma.service';
 
 async function ownerCtx(app: INestApplication, suffix: string) {
   const email = `dev_${suffix}@example.com`;
@@ -17,10 +18,26 @@ async function ownerCtx(app: INestApplication, suffix: string) {
     .set('Authorization', `Bearer ${reg.body.accessToken}`)
     .send({ name: `Devices Tenant ${suffix}` })
     .expect(201);
+  const tenantId = tenant.body.id as string;
+
+  // The Free plan only allows 1 paired device — override so this suite can
+  // exercise repeated/attempted pairing without tripping the quota gate (013-saas-layer).
+  const tenantPrisma = app.get(TenantPrismaService);
+  await tenantPrisma.withTenant(tenantId, (tx) =>
+    tx.quotaOverride.create({
+      data: {
+        tenantId,
+        deviceQuota: 10,
+        reason: 'test: allow multiple device pairings in the devices pairing suite',
+        createdByUserId: reg.body.user.id as string,
+      },
+    }),
+  );
+
   return {
     email,
     token: reg.body.accessToken as string,
-    tenantId: tenant.body.id as string,
+    tenantId,
   };
 }
 

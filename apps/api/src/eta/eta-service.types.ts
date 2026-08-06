@@ -3,7 +3,10 @@ export type EtaConnectionStatus = {
   setupRequired: boolean;
   expiresAt: string | null;
   scope: string | null;
+  /** Human label: sandbox | production | custom */
   environment: string | null;
+  /** Tenant enum: SANDBOX | PRODUCTION */
+  activeEnvironment?: 'SANDBOX' | 'PRODUCTION';
   lastTestOutcome: 'success' | 'failure' | 'never';
   lastTestMessage: string | null;
   settingsPath: string;

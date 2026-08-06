@@ -19,6 +19,13 @@ import { ExportsModule } from './exports/exports.module';
 import { QueuesModule } from './queues/queues.module';
 import { StorageModule } from './storage/storage.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { SyncModule } from './sync/sync.module';
+import { AnalyticsModule } from './analytics/analytics.module';
+import { ReportsModule } from './reports/reports.module';
+import { BackupModule } from './backup/backup.module';
+import { BillingModule } from './billing/billing.module';
+import { EmailModule } from './email/email.module';
+import { PlatformAdminModule } from './platform-admin/platform-admin.module';
 
 @Module({
   imports: [
@@ -36,10 +43,17 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     EtaCodesModule,
     PurchasesModule,
     StorageModule,
-    QueuesModule,
     ImportsModule,
     ExportsModule,
+    QueuesModule,
     WebhooksModule,
+    SyncModule,
+    AnalyticsModule,
+    ReportsModule,
+    BackupModule,
+    BillingModule,
+    EmailModule,
+    PlatformAdminModule,
   ],
   providers: [
     {

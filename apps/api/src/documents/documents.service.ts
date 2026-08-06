@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,17 +9,78 @@ import {
   buildByKind,
   canonicalSerialize,
   formatEtaDateTimeIssued,
+  isFixedAmountTaxType,
   isSubtypeOfTaxType,
+  isValidEtaInternalId,
   KIND_TO_ETA_TYPE,
+  resolveIssuerAddress,
+  resolveIssuerId,
+  resolveIssuerName,
+  resolveIssuerType,
+  isIssuerNameComplete,
   serializeEtaDocument,
   validateDocument,
   type DocumentKind as EtaDocumentKind,
+  type IssuerAddress,
   type JsonObject,
   type LineInput,
 } from '@einvoice/eta-core';
 import type { DocumentKind, DocumentStatus, Prisma } from '@prisma/client';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { QuotaService } from '../billing/quota.service';
+import { EtaService } from '../eta/eta.service';
+import { branchAddressToIssuerAddress } from '../settings/branches/branches.service';
+import type { ArtifactStorage } from '../storage/storage.module';
+import {
+  renderLocalInvoicePdf,
+  type LocalInvoicePdfLocale,
+} from './local-invoice-pdf';
+
+/** Issuer identity/address is company-level, so it is fixed in Settings. */
+function isIssuerSettingsPath(path: string): boolean {
+  return path === 'issuer' || path.startsWith('issuer.');
+}
+
+/** Company identity → ETA credentials; address → Branches. */
+function issuerSettingsArea(
+  path: string,
+): 'branches' | 'eta-credentials' {
+  if (
+    path === 'issuer.name' ||
+    path === 'issuer.id' ||
+    path === 'issuer.type' ||
+    path === 'issuer'
+  ) {
+    return 'eta-credentials';
+  }
+  return 'branches';
+}
+
+const ISSUER_FIELD_LABELS: Record<string, string> = {
+  governate: 'address governate',
+  regionCity: 'address region/city',
+  street: 'address street',
+  buildingNumber: 'address building number',
+  country: 'address country',
+  branchId: 'ETA branch code',
+  id: 'ETA registration number',
+  name: 'taxpayer legal name',
+  type: 'registration type (B/P/F)',
+};
+
+function issuerFixMessage(path: string, code?: string): string {
+  const field = path.split('.').pop() ?? path;
+  const label = ISSUER_FIELD_LABELS[field] ?? field;
+  const where =
+    issuerSettingsArea(path) === 'eta-credentials'
+      ? 'Settings → ETA connection'
+      : 'Settings → Branches';
+  if (code === 'ISSUER_NAME_PLACEHOLDER') {
+    return `Issuer name is still the branch label (e.g. "Main"), not your company name. Set the taxpayer legal name in ${where}, then reopen this invoice.`;
+  }
+  return `Missing issuer (your company) ${label}. Issuer details are company-level — fix this in ${where}, then reopen this invoice.`;
+}
 
 export type AddressDto = {
   branchId?: string;
@@ -32,6 +94,13 @@ export type AddressDto = {
   room?: string;
   landmark?: string;
   additionalInformation?: string;
+};
+
+type LocalInvoiceParty = {
+  type?: string;
+  id?: string;
+  name?: string;
+  address?: Record<string, unknown> | null;
 };
 
 export type DocumentUpsertDto = {
@@ -97,7 +166,9 @@ export type DocumentUpsertDto = {
     internalCode?: string;
     weightUnitType?: string;
     weightQuantity?: string;
-    taxes?: Array<{ taxType: string; subType: string; rate: string }>;
+    itemsDiscount?: string;
+    valueDifference?: string;
+    taxes?: Array<{ taxType: string; subType: string; rate: string; amount?: string }>;
   }>;
 };
 
@@ -106,6 +177,9 @@ export class DocumentsService {
   constructor(
     private readonly tenantPrisma: TenantPrismaService,
     private readonly audit: AuditService,
+    private readonly quota: QuotaService,
+    private readonly eta: EtaService,
+    @Inject('ArtifactStorage') private readonly artifacts: ArtifactStorage,
   ) {}
 
   private lineInputs(dto: DocumentUpsertDto): LineInput[] {
@@ -118,7 +192,12 @@ export class DocumentsService {
       unitPrice: l.unitPrice,
       discountRate: l.discountRate,
       discountAmount: l.discountAmount,
-      taxes: l.taxes,
+      taxes: (l.taxes ?? []).map((t) => ({
+        taxType: t.taxType,
+        subType: t.subType,
+        rate: t.rate,
+        ...(t.amount != null && t.amount !== '' ? { amount: t.amount } : {}),
+      })),
       currencySold: l.currencySold,
       amountEGP: l.amountEGP,
       amountSold: l.amountSold,
@@ -126,6 +205,8 @@ export class DocumentsService {
       internalCode: l.internalCode,
       weightUnitType: l.weightUnitType,
       weightQuantity: l.weightQuantity,
+      itemsDiscount: l.itemsDiscount,
+      valueDifference: l.valueDifference,
     }));
   }
 
@@ -176,30 +257,30 @@ export class DocumentsService {
       (await tx.tenantEtaCredential.findFirst({
         where: { tenantId, branchId: null },
       }));
+    const tenant = await tx.tenant.findUnique({ where: { id: tenantId } });
 
-    const defaultAddress: JsonObject = {
-      branchId: branch.etaBranchCode ?? '0',
-      country: 'EG',
-      ...(dto.issuer?.address
-        ? (dto.issuer.address as JsonObject)
-        : {}),
-    };
-    // Prefer explicit DTO values, but treat blank strings as unset so credentials/branch apply.
-    const addr = defaultAddress;
-    if (!String(addr.branchId ?? '').trim()) {
-      addr.branchId = branch.etaBranchCode ?? '0';
-    }
-    if (!String(addr.country ?? '').trim()) {
-      addr.country = 'EG';
-    }
+    // The issuer is our own company: the address comes from branch settings and
+    // a document may only override individual fields. Blank overrides fall back
+    // to settings so an invoice can never ship an emptied issuer address.
+    const addr = resolveIssuerAddress(
+      branchAddressToIssuerAddress(branch),
+      dto.issuer?.address as IssuerAddress | undefined,
+      { branchId: branch.etaBranchCode, country: 'EG' },
+    ) as JsonObject;
 
+    // issuer.name is the taxpayer LEGAL name (tenant.legalName) — never branch.name
+    // ("Main"). Blank per-invoice overrides fall back to settings.
     const issuerSnapshot: JsonObject = {
-      type: dto.issuer?.type?.trim() || 'B',
-      id:
-        dto.issuer?.id?.trim() ||
-        tenantCred?.registrationNumber?.trim() ||
-        '',
-      name: dto.issuer?.name?.trim() || branch.name,
+      type: resolveIssuerType(tenant?.issuerType, dto.issuer?.type),
+      id: resolveIssuerId(
+        tenantCred?.registrationNumber,
+        dto.issuer?.id,
+      ),
+      name: resolveIssuerName(
+        tenant?.legalName,
+        dto.issuer?.name,
+        branch.name,
+      ),
       address: addr,
     };
 
@@ -209,16 +290,13 @@ export class DocumentsService {
       tenantCred?.activityCode?.trim() ||
       '';
 
-    const etaDocumentType = KIND_TO_ETA_TYPE[kind as EtaDocumentKind];
-    const etaDocumentTypeVersion = '1.0';
-
     return {
       branch,
       exchangeRate,
       issuerSnapshot,
       taxpayerActivityCode,
-      etaDocumentType,
-      etaDocumentTypeVersion,
+      etaDocumentType: KIND_TO_ETA_TYPE[kind as EtaDocumentKind],
+      etaDocumentTypeVersion: '1.0',
       typeVersionFetchedAt: new Date(),
     };
   }
@@ -324,6 +402,8 @@ export class DocumentsService {
     etaPayloadJson: Prisma.JsonValue;
     canonicalPreview: string | null;
     version: number;
+    clientIdempotencyKey?: string | null;
+    syncRevision?: number;
     signaturesJson?: Prisma.JsonValue | null;
     signedAt?: Date | null;
     needsAttention?: boolean;
@@ -370,6 +450,8 @@ export class DocumentsService {
       etaPayload,
       canonicalString,
       version: doc.version,
+      clientIdempotencyKey: doc.clientIdempotencyKey ?? null,
+      syncRevision: doc.syncRevision ?? 0,
       signaturesJson: doc.signaturesJson ?? null,
       signedAt: doc.signedAt?.toISOString() ?? null,
       needsAttention: doc.needsAttention ?? false,
@@ -409,6 +491,10 @@ export class DocumentsService {
           needsAttentionReason: true,
           submissionUuid: true,
           etaUuid: true,
+          etaStatus: true,
+          etaStatusUpdatedAt: true,
+          submitInFlight: true,
+          submitCooldownUntil: true,
         },
       }),
     );
@@ -425,9 +511,20 @@ export class DocumentsService {
     return this.toDetail(doc);
   }
 
-  async create(tenantId: string, actorUserId: string, dto: DocumentUpsertDto) {
+  async create(
+    tenantId: string,
+    actorUserId: string,
+    dto: DocumentUpsertDto,
+    opts?: { clientIdempotencyKey?: string },
+  ) {
     if (!dto.lines?.length) throw new BadRequestException('At least one line required');
+    this.assertInternalId(dto.internalId);
 
+    await this.quota.checkTenantWritable(tenantId);
+
+    const etaEnvironment = await this.eta.getActiveEnvironment(tenantId);
+
+    try {
     const created = await this.tenantPrisma.withTenant(tenantId, async (tx) => {
       const issueDateTime = new Date(dto.issueDateTime);
       const binding = await this.resolveBinding(
@@ -477,6 +574,9 @@ export class DocumentsService {
           etaPayloadJson: built.etaPayload as Prisma.InputJsonValue,
           etaPayloadText: payloadText,
           canonicalPreview: canonical,
+          etaEnvironment,
+          clientIdempotencyKey: opts?.clientIdempotencyKey,
+          syncRevision: opts?.clientIdempotencyKey ? 1 : 0,
           version: 1,
           createdByUserId: actorUserId,
           updatedByUserId: actorUserId,
@@ -496,15 +596,49 @@ export class DocumentsService {
       tenantId,
       resourceType: 'document',
       resourceId: created.id,
-      metadata: { kind: created.kind, internalId: created.internalId },
+      metadata: {
+        kind: created.kind,
+        internalId: created.internalId,
+        clientIdempotencyKey: opts?.clientIdempotencyKey ?? null,
+      },
     });
 
     return this.toDetail(created);
+    } catch (err) {
+      this.rethrowInternalIdConflict(err);
+    }
+  }
+
+  private assertInternalId(internalId: string) {
+    if (!isValidEtaInternalId(internalId)) {
+      throw new BadRequestException({
+        code: 'INVALID_INTERNAL_ID',
+        message:
+          'internalId must be 1–50 Latin alphanumeric characters (may include . _ -) and start with a letter or digit',
+      });
+    }
+  }
+
+  private rethrowInternalIdConflict(err: unknown): never {
+    if (
+      err &&
+      typeof err === 'object' &&
+      'code' in err &&
+      (err as { code?: string }).code === 'P2002'
+    ) {
+      throw new ConflictException({
+        code: 'DUPLICATE_INTERNAL_ID',
+        message: 'A document with this internalId already exists for this tenant',
+      });
+    }
+    throw err;
   }
 
   async update(tenantId: string, actorUserId: string, id: string, dto: DocumentUpsertDto) {
     if (!dto.lines?.length) throw new BadRequestException('At least one line required');
+    this.assertInternalId(dto.internalId);
 
+    try {
     const updated = await this.tenantPrisma.withTenant(tenantId, async (tx) => {
       const existing = await tx.document.findFirst({ where: { id, tenantId } });
       if (!existing) throw new NotFoundException('Document not found');
@@ -591,6 +725,9 @@ export class DocumentsService {
     });
 
     return this.toDetail(updated);
+    } catch (err) {
+      this.rethrowInternalIdConflict(err);
+    }
   }
 
   async remove(tenantId: string, actorUserId: string, id: string) {
@@ -646,6 +783,142 @@ export class DocumentsService {
     };
   }
 
+  private async loadTenantLogo(
+    tenantId: string,
+  ): Promise<{ buffer: Buffer; contentType?: string } | null> {
+    const tenant = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.tenant.findUnique({
+        where: { id: tenantId },
+        select: { logoObjectKey: true, logoContentType: true },
+      }),
+    );
+    if (!tenant?.logoObjectKey) return null;
+    try {
+      const buffer = await this.artifacts.getByKey(tenant.logoObjectKey);
+      return { buffer, contentType: tenant.logoContentType ?? undefined };
+    } catch {
+      return null;
+    }
+  }
+
+  private normalizePrintLocale(locale?: string): LocalInvoicePdfLocale {
+    return locale?.toLowerCase().startsWith('ar') ? 'ar' : 'en';
+  }
+
+  /** Local printable PDF (display-only). Distinct from ETA official printout. */
+  async localPrintoutById(
+    tenantId: string,
+    id: string,
+    locale?: string,
+  ): Promise<{ pdf: Buffer; filename: string }> {
+    const detail = await this.get(tenantId, id);
+    const payload = detail.etaPayload as JsonObject;
+    const logo = await this.loadTenantLogo(tenantId);
+    const pdf = await renderLocalInvoicePdf({
+      locale: this.normalizePrintLocale(locale),
+      kind: detail.kind,
+      internalId: detail.internalId,
+      issueDateTime: detail.issueDateTime,
+      currencyCode: detail.currencyCode,
+      taxpayerActivityCode: String(payload.taxpayerActivityCode ?? ''),
+      issuer: (payload.issuer as LocalInvoiceParty) ?? {},
+      receiver: (payload.receiver as LocalInvoiceParty) ?? null,
+      lines: (detail.lines as Array<Record<string, unknown>>).map((l) => ({
+        description: String(l.description ?? ''),
+        itemType: String(l.itemType ?? ''),
+        itemCode: String(l.itemCode ?? ''),
+        unitType: String(l.unitType ?? ''),
+        quantity: String(l.quantity ?? ''),
+        unitPrice: String(l.unitPrice ?? ''),
+        discountAmount: String(l.discountAmount ?? '0'),
+        taxes: Array.isArray(l.taxes)
+          ? (l.taxes as Array<Record<string, unknown>>).map((t) => ({
+              taxType: String(t.taxType ?? ''),
+              subType: String(t.subType ?? ''),
+              rate: String(t.rate ?? ''),
+              amount: t.amount != null ? String(t.amount) : undefined,
+            }))
+          : [],
+      })),
+      totals: {
+        totalSalesAmount: String(detail.totals.totalSalesAmount),
+        totalDiscountAmount: String(detail.totals.totalDiscountAmount),
+        netAmount: String(detail.totals.netAmount),
+        totalAmount: String(detail.totals.totalAmount),
+        extraDiscountAmount: String(detail.totals.extraDiscountAmount ?? '0'),
+        taxTotals: detail.totals.taxTotals,
+      },
+      logo,
+    });
+    return {
+      pdf,
+      filename: `invoice-${detail.internalId}-preview.pdf`,
+    };
+  }
+
+  /** Local PDF from current (possibly unsaved) form data. */
+  async localPrintoutFromDto(
+    tenantId: string,
+    dto: DocumentUpsertDto,
+    locale?: string,
+  ): Promise<{ pdf: Buffer; filename: string }> {
+    const preview = await this.preview(tenantId, dto);
+    const payload = preview.etaPayload as JsonObject;
+    const logo = await this.loadTenantLogo(tenantId);
+    const lines = Array.isArray(payload.invoiceLines)
+      ? (payload.invoiceLines as Array<Record<string, unknown>>)
+      : [];
+    const pdf = await renderLocalInvoicePdf({
+      locale: this.normalizePrintLocale(locale),
+      kind: dto.kind,
+      internalId: dto.internalId,
+      issueDateTime: dto.issueDateTime,
+      currencyCode: dto.currencyCode,
+      taxpayerActivityCode: String(payload.taxpayerActivityCode ?? ''),
+      issuer: (payload.issuer as LocalInvoiceParty) ?? {},
+      receiver: (payload.receiver as LocalInvoiceParty) ?? null,
+      lines: lines.map((l) => {
+        const unitValue = (l.unitValue as Record<string, unknown>) ?? {};
+        const discount = (l.discount as Record<string, unknown>) ?? {};
+        const taxes = Array.isArray(l.taxableItems)
+          ? (l.taxableItems as Array<Record<string, unknown>>)
+          : [];
+        return {
+          description: String(l.description ?? ''),
+          itemType: String(l.itemType ?? ''),
+          itemCode: String(l.itemCode ?? ''),
+          unitType: String(l.unitType ?? ''),
+          quantity: String(l.quantity ?? ''),
+          unitPrice: String(unitValue.amountEGP ?? unitValue.amountSold ?? '0'),
+          discountAmount: String(discount.amount ?? '0'),
+          taxes: taxes.map((t) => ({
+            taxType: String(t.taxType ?? ''),
+            subType: String(t.subType ?? ''),
+            rate: String(t.rate ?? ''),
+            amount: t.amount != null ? String(t.amount) : undefined,
+          })),
+        };
+      }),
+      totals: {
+        totalSalesAmount: String(preview.totals.totalSalesAmount),
+        totalDiscountAmount: String(preview.totals.totalDiscountAmount),
+        netAmount: String(preview.totals.netAmount),
+        totalAmount: String(preview.totals.totalAmount),
+        extraDiscountAmount: String(
+          (preview.totals as { extraDiscountAmount?: string }).extraDiscountAmount ??
+            dto.extraDiscountAmount ??
+            '0',
+        ),
+        taxTotals: (preview.totals as { taxTotals?: unknown }).taxTotals,
+      },
+      logo,
+    });
+    return {
+      pdf,
+      filename: `invoice-${dto.internalId || 'draft'}-preview.pdf`,
+    };
+  }
+
   async validate(tenantId: string, actorUserId: string, id: string) {
     const detail = await this.get(tenantId, id);
     const result = await this.runValidation(tenantId, detail);
@@ -695,6 +968,283 @@ export class DocumentsService {
       metadata: {},
     });
     return this.toDetail(updated);
+  }
+
+  /**
+   * Statuses that may be recalculated. Signed/submitted payloads must not be
+   * mutated — their digests are already bound to the stored totals.
+   */
+  private static readonly RECALCULABLE_STATUSES: DocumentStatus[] = [
+    'DRAFT',
+    'READY',
+  ];
+
+  async recalculateTotals(tenantId: string, actorUserId: string, id: string) {
+    const updated = await this.tenantPrisma.withTenant(tenantId, async (tx) => {
+      const existing = await tx.document.findFirst({
+        where: { id, tenantId },
+        include: {
+          lines: { include: { taxes: true }, orderBy: { lineNumber: 'asc' } },
+        },
+      });
+      if (!existing) throw new NotFoundException('Document not found');
+
+      if (
+        !DocumentsService.RECALCULABLE_STATUSES.includes(existing.status) ||
+        existing.signedAt ||
+        (Array.isArray(existing.signaturesJson) &&
+          (existing.signaturesJson as unknown[]).length > 0)
+      ) {
+        throw new BadRequestException(
+          'Only draft/ready unsigned documents can have totals recalculated',
+        );
+      }
+
+      const dto = this.upsertDtoFromStored(existing);
+      const binding = await this.resolveBinding(
+        tx,
+        tenantId,
+        dto.kind,
+        dto.branchId,
+        dto.currencyCode,
+        new Date(dto.issueDateTime),
+        dto,
+      );
+      const built = this.buildFromDto(
+        dto,
+        binding.issuerSnapshot,
+        binding.etaDocumentTypeVersion,
+        binding.taxpayerActivityCode,
+      );
+      const payloadText = serializeEtaDocument(built.etaPayload);
+      const canonical = canonicalSerialize(built.etaPayload);
+
+      await tx.documentLineTax.deleteMany({
+        where: { line: { documentId: id } },
+      });
+      await tx.documentLine.deleteMany({ where: { documentId: id } });
+
+      return tx.document.update({
+        where: { id },
+        data: {
+          exchangeRate: binding.exchangeRate,
+          extraDiscountAmount: built.totals.extraDiscountAmount,
+          totalSalesAmount: built.totals.totalSalesAmount,
+          totalDiscountAmount: built.totals.totalDiscountAmount,
+          netAmount: built.totals.netAmount,
+          totalAmount: built.totals.totalAmount,
+          totalItemsDiscountAmount: built.totals.totalItemsDiscountAmount,
+          taxTotalsJson: built.totals.taxTotals as unknown as Prisma.InputJsonValue,
+          etaPayloadJson: built.etaPayload as Prisma.InputJsonValue,
+          etaPayloadText: payloadText,
+          canonicalPreview: canonical,
+          version: { increment: 1 },
+          updatedByUserId: actorUserId,
+          lines: {
+            create: this.lineCreateData(tenantId, dto, built),
+          },
+        },
+        include: {
+          lines: { include: { taxes: true }, orderBy: { lineNumber: 'asc' } },
+        },
+      });
+    });
+
+    await this.audit.write({
+      action: 'documents.recalculate_totals',
+      outcome: 'success',
+      actorUserId,
+      tenantId,
+      resourceType: 'document',
+      resourceId: id,
+      metadata: {
+        status: updated.status,
+        totalAmount: updated.totalAmount,
+        netAmount: updated.netAmount,
+      },
+    });
+
+    return this.toDetail(updated);
+  }
+
+  async recalculateTotalsBatch(tenantId: string, actorUserId: string) {
+    const ids = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.document.findMany({
+        where: {
+          tenantId,
+          status: { in: DocumentsService.RECALCULABLE_STATUSES },
+          signedAt: null,
+        },
+        select: { id: true },
+        orderBy: { updatedAt: 'asc' },
+      }),
+    );
+
+    const results: Array<{
+      id: string;
+      ok: boolean;
+      totalAmount?: string;
+      error?: string;
+    }> = [];
+
+    for (const { id } of ids) {
+      try {
+        const detail = await this.recalculateTotals(tenantId, actorUserId, id);
+        results.push({
+          id,
+          ok: true,
+          totalAmount: String(
+            (detail.totals as { totalAmount?: string }).totalAmount ?? '',
+          ),
+        });
+      } catch (e) {
+        results.push({
+          id,
+          ok: false,
+          error: e instanceof Error ? e.message : 'recalculate failed',
+        });
+      }
+    }
+
+    await this.audit.write({
+      action: 'documents.recalculate_totals.batch',
+      outcome: 'success',
+      actorUserId,
+      tenantId,
+      resourceType: 'document',
+      metadata: {
+        attempted: results.length,
+        succeeded: results.filter((r) => r.ok).length,
+        failed: results.filter((r) => !r.ok).length,
+      },
+    });
+
+    return {
+      attempted: results.length,
+      succeeded: results.filter((r) => r.ok).length,
+      failed: results.filter((r) => !r.ok).length,
+      results,
+    };
+  }
+
+  /** Rebuild an upsert DTO from a stored draft so totals can be recomputed. */
+  private upsertDtoFromStored(doc: {
+    kind: DocumentKind;
+    branchId: string;
+    currencyCode: string;
+    issueDateTime: Date;
+    internalId: string;
+    version: number;
+    receiverType: string | null;
+    receiverId: string | null;
+    receiverName: string | null;
+    receiverAddressJson: Prisma.JsonValue | null;
+    referencesJson: Prisma.JsonValue | null;
+    extraDiscountAmount: string;
+    etaPayloadJson: Prisma.JsonValue;
+    lines: Array<{
+      description: string;
+      itemType: string;
+      itemCode: string;
+      unitType: string;
+      quantity: string;
+      unitPrice: string;
+      discountRate: string | null;
+      discountAmount: string;
+      currencySold: string | null;
+      amountSold: string | null;
+      amountEgp: string | null;
+      currencyExchangeRate: string | null;
+      internalCode: string | null;
+      itemsDiscount: string;
+      valueDifference: string;
+      taxes: Array<{
+        taxType: string;
+        subType: string;
+        rate: string;
+        amount: string;
+      }>;
+    }>;
+  }): DocumentUpsertDto {
+    const payload = doc.etaPayloadJson as JsonObject;
+    return {
+      kind: doc.kind,
+      branchId: doc.branchId,
+      currencyCode: doc.currencyCode,
+      issueDateTime: doc.issueDateTime.toISOString(),
+      internalId: doc.internalId,
+      version: doc.version,
+      taxpayerActivityCode: String(payload.taxpayerActivityCode ?? ''),
+      purchaseOrderReference:
+        typeof payload.purchaseOrderReference === 'string'
+          ? payload.purchaseOrderReference
+          : undefined,
+      purchaseOrderDescription:
+        typeof payload.purchaseOrderDescription === 'string'
+          ? payload.purchaseOrderDescription
+          : undefined,
+      salesOrderReference:
+        typeof payload.salesOrderReference === 'string'
+          ? payload.salesOrderReference
+          : undefined,
+      salesOrderDescription:
+        typeof payload.salesOrderDescription === 'string'
+          ? payload.salesOrderDescription
+          : undefined,
+      proformaInvoiceNumber:
+        typeof payload.proformaInvoiceNumber === 'string'
+          ? payload.proformaInvoiceNumber
+          : undefined,
+      serviceDeliveryDate:
+        typeof payload.serviceDeliveryDate === 'string'
+          ? payload.serviceDeliveryDate
+          : undefined,
+      receiver: {
+        type: doc.receiverType ?? undefined,
+        id: doc.receiverId ?? undefined,
+        name: doc.receiverName ?? undefined,
+        address: (doc.receiverAddressJson as AddressDto | null) ?? undefined,
+      },
+      payment: (payload.payment as DocumentUpsertDto['payment']) ?? null,
+      delivery: (payload.delivery as DocumentUpsertDto['delivery']) ?? null,
+      references:
+        (doc.referencesJson as DocumentUpsertDto['references']) ??
+        (payload.references as DocumentUpsertDto['references']) ??
+        null,
+      extraDiscountAmount: doc.extraDiscountAmount,
+      lines: doc.lines.map((l, lineIdx) => {
+        const pl = (
+          Array.isArray(payload.invoiceLines) ? payload.invoiceLines : []
+        )[lineIdx] as JsonObject | undefined;
+        return {
+          description: l.description,
+          itemType: l.itemType,
+          itemCode: l.itemCode,
+          unitType: l.unitType,
+          quantity: l.quantity,
+          unitPrice: l.unitPrice,
+          discountRate: l.discountRate ?? undefined,
+          discountAmount: l.discountAmount,
+          currencySold: l.currencySold ?? undefined,
+          amountEGP: l.amountEgp ?? undefined,
+          amountSold: l.amountSold ?? undefined,
+          currencyExchangeRate: l.currencyExchangeRate ?? undefined,
+          internalCode: l.internalCode ?? undefined,
+          weightUnitType:
+            typeof pl?.weightUnitType === 'string' ? pl.weightUnitType : undefined,
+          weightQuantity:
+            pl?.weightQuantity != null ? String(pl.weightQuantity) : undefined,
+          itemsDiscount: l.itemsDiscount,
+          valueDifference: l.valueDifference,
+          taxes: l.taxes.map((t) => ({
+            taxType: t.taxType,
+            subType: t.subType,
+            rate: isFixedAmountTaxType(t.taxType) ? '0' : t.rate,
+            ...(isFixedAmountTaxType(t.taxType) ? { amount: t.amount } : {}),
+          })),
+        };
+      }),
+    };
   }
 
   private async runValidation(
@@ -816,7 +1366,10 @@ export class DocumentsService {
               ? taxesRaw.map((t) => ({
                   taxType: String(t.taxType),
                   subType: String(t.subType),
-                  rate: String(t.rate),
+                  rate: String(t.rate ?? '0'),
+                  ...(t.amount != null && String(t.amount) !== ''
+                    ? { amount: String(t.amount) }
+                    : {}),
                 }))
               : [],
           };
@@ -833,6 +1386,26 @@ export class DocumentsService {
         });
       }
 
+      // Catch leftover "Main"/branch labels that slipped into signed drafts.
+      const payloadIssuer = (detail.etaPayload as JsonObject).issuer;
+      const issuerName =
+        payloadIssuer && typeof payloadIssuer === 'object' && !Array.isArray(payloadIssuer)
+          ? String((payloadIssuer as JsonObject).name ?? '')
+          : '';
+      if (
+        issuerName &&
+        branch &&
+        !isIssuerNameComplete(issuerName, branch.name)
+      ) {
+        issues.push({
+          code: 'ISSUER_NAME_PLACEHOLDER',
+          path: 'issuer.name',
+          severity: 'error',
+          messageKey: 'documents.validation.issuerNamePlaceholder',
+          params: { path: 'issuer.name', branchName: branch.name },
+        });
+      }
+
       const errors = issues.filter((i) => i.severity === 'error');
       return {
         ok: errors.length === 0,
@@ -840,16 +1413,35 @@ export class DocumentsService {
           code: i.code,
           path: i.path,
           severity: i.severity,
-          messageKey: i.messageKey,
+          messageKey: isIssuerSettingsPath(i.path)
+            ? 'documents.validation.issuerFromSettings'
+            : i.messageKey,
+          // Company-level fields are fixed in Settings, not on the invoice.
+          fixIn: isIssuerSettingsPath(i.path) ? ('settings' as const) : undefined,
+          settingsArea: isIssuerSettingsPath(i.path)
+            ? issuerSettingsArea(i.path)
+            : undefined,
           message:
-            i.code === 'REQUIRED_FIELD'
+            (i.code === 'REQUIRED_FIELD' || i.code === 'ISSUER_NAME_PLACEHOLDER') &&
+            isIssuerSettingsPath(i.path)
+              ? issuerFixMessage(i.path, i.code)
+              : i.code === 'REQUIRED_FIELD'
               ? `Missing required field: ${i.path}`
               : i.code === 'DUPLICATE_TAX_TYPE'
                 ? `TaxType must be unique per line: ${i.params?.taxTypes ?? ''}`
                 : i.code === 'TAX_TYPICALLY_REQUIRED'
                   ? 'This document type typically requires VAT. A fully tax-free invoice may be refused by ETA. You can still proceed if the supply is truly not taxable.'
-                  : i.code === 'TAX_SUBTYPE_PARENT_MISMATCH'
+                    : i.code === 'TAX_SUBTYPE_PARENT_MISMATCH'
                     ? `Tax subtype ${i.params?.subType ?? ''} does not belong to tax type ${i.params?.taxType ?? ''}`
+                    : i.code === 'ETA_ITEM_TOTAL_MISMATCH'
+                    ? `Line ${i.params?.line ?? ''} total must be ${i.params?.expected ?? ''} but is ${i.params?.actual ?? ''} (net ${i.params?.netTotal ?? ''} + taxes ${i.params?.additiveTaxes ?? ''} − withholding ${i.params?.withholdingTaxes ?? ''} − items discount ${i.params?.itemsDiscount ?? ''})`
+                    : i.code === 'ETA_TOTAL_AMOUNT_MISMATCH' ||
+                        i.code === 'ETA_NET_AMOUNT_MISMATCH'
+                    ? `${i.path} must be ${i.params?.expected ?? ''} but is ${i.params?.actual ?? ''}`
+                    : i.code === 'FIXED_TAX_AMOUNT_REQUIRED'
+                    ? `Fixed-amount tax ${i.params?.taxType ?? ''} requires an explicit amount`
+                    : i.code === 'FIXED_TAX_RATE_MUST_BE_ZERO'
+                    ? `Fixed-amount tax ${i.params?.taxType ?? ''} must use rate 0`
                     : i.params?.path
                     ? `${i.messageKey} (${i.params.path})`
                     : `${i.code}: ${i.path}`,

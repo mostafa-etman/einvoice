@@ -7,6 +7,7 @@ import {
   type PutArtifactInput,
   type PutArtifactResult,
 } from './minio-artifact.store';
+import { notifyStoragePut } from './storage-hooks';
 
 export const MINIO_CLIENT = 'MINIO_CLIENT';
 export const MINIO_BUCKET = 'MINIO_BUCKET';
@@ -51,7 +52,11 @@ export const MINIO_BUCKET = 'MINIO_BUCKET';
     {
       provide: 'ArtifactStorage',
       useFactory: (client: Minio.Client, bucket: string, store: MinioArtifactStore) => ({
-        put: (input: PutArtifactInput) => store.put(input),
+        async put(input: PutArtifactInput) {
+          const result = await store.put(input);
+          void notifyStoragePut(input.tenantId);
+          return result;
+        },
         async get(tenantId: string, kind: string, objectId: string): Promise<Buffer> {
           const key = tenantArtifactKey(tenantId, kind, objectId);
           const stream = await client.getObject(bucket, key);
@@ -73,7 +78,12 @@ export const MINIO_BUCKET = 'MINIO_BUCKET';
           await client.putObject(bucket, key, body, body.length, {
             'Content-Type': contentType,
           });
+          const tenantMatch = /^tenants\/([^/]+)\//.exec(key);
+          if (tenantMatch?.[1]) void notifyStoragePut(tenantMatch[1]);
           return { bucket, key, contentType, byteSize: body.byteLength };
+        },
+        async removeByKey(key: string): Promise<void> {
+          await client.removeObject(bucket, key).catch(() => undefined);
         },
         tenantArtifactKey,
         bucket,
@@ -94,6 +104,7 @@ export type ArtifactStorage = {
     body: Buffer,
     contentType: string,
   ) => Promise<PutArtifactResult>;
+  removeByKey: (key: string) => Promise<void>;
   tenantArtifactKey: typeof tenantArtifactKey;
   bucket: string;
 };

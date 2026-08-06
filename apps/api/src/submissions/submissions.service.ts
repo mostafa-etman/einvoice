@@ -12,7 +12,6 @@ import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { EtaService } from '../eta/eta.service';
 import { EtaSubmitClient, EtaSubmitError } from '../eta/eta-submit.client';
-import { loadEnv } from '../config/env';
 import { assembleSubmitDocuments } from './batch-assembler';
 import { verifyPayloadInternalIds, verifyEtaPayloadFormats } from './submission-integrity';
 import {
@@ -29,7 +28,9 @@ import {
   type CooldownState,
 } from './submit-cooldown';
 import { MAX_DUPLICATE_RETRIES } from './duplicate-submission';
-import { parseEtaDocument, type JsonObject } from '@einvoice/eta-core';
+import { checkLateSubmission, parseEtaDocument, type JsonObject } from '@einvoice/eta-core';
+import { UsageEmitService } from '../analytics/usage-emit.service';
+import { QuotaService } from '../billing/quota.service';
 
 export type SubmitAttemptLogEntry = {
   at: string;
@@ -75,10 +76,39 @@ export type SubmissionDetail = {
   }>;
 };
 
+export type BatchSubmitItemResult = {
+  documentId: string;
+  internalId: string | null;
+  outcome: 'sent' | 'skipped' | 'failed';
+  reason?: string;
+  attemptOutcome?: string;
+  etaUuid?: string | null;
+  documentStatus: string | null;
+  intakeError?: unknown;
+};
+
+export type BatchSubmitResult = {
+  requested: number;
+  sent: number;
+  skipped: number;
+  failed: number;
+  submissionId: string | null;
+  submission: SubmissionDetail | null;
+  /** Advisory only — ETA still decides; signed issue dates are never mutated. */
+  lateWarnings: Array<{
+    documentId: string;
+    internalId: string;
+    issueDateTime: string;
+    ageDays: number;
+    warnDays: number;
+    isLate: boolean;
+  }>;
+  results: BatchSubmitItemResult[];
+};
+
 @Injectable()
 export class SubmissionsService implements OnModuleDestroy {
   private readonly logger = new Logger(SubmissionsService.name);
-  private readonly etaSubmit: EtaSubmitClient;
   /** Exactly one delayed retry timer per document. */
   private readonly delayedRetries = new Map<string, NodeJS.Timeout>();
 
@@ -86,9 +116,9 @@ export class SubmissionsService implements OnModuleDestroy {
     private readonly tenantPrisma: TenantPrismaService,
     private readonly eta: EtaService,
     private readonly audit: AuditService,
-  ) {
-    this.etaSubmit = new EtaSubmitClient(loadEnv().ETA_API_BASE_URL);
-  }
+    private readonly usageEmit: UsageEmitService,
+    private readonly quota: QuotaService,
+  ) {}
 
   onModuleDestroy() {
     for (const [docId, timer] of this.delayedRetries) {
@@ -152,6 +182,11 @@ export class SubmissionsService implements OnModuleDestroy {
       throw new BadRequestException('Idempotency-Key must be at least 8 characters');
     }
 
+    await this.quota.checkTenantWritable(tenantId);
+    // Each document in the batch that would newly count as issued needs headroom.
+    // Assert once per submission: if already at limit, refuse before ETA post.
+    await this.quota.assertWithinLimits(tenantId, 'documents');
+
     // Document-level gates (cooldown / in-flight) — stop the duplicate loop.
     if (!opts.isScheduledRetry) {
       await this.assertDocumentsSubmittable(tenantId, documentIds, opts.triggerSource);
@@ -188,6 +223,19 @@ export class SubmissionsService implements OnModuleDestroy {
         this.logger.log(
           `Idempotent replay for submission ${existing.id} state=${existing.state} — no ETA POST`,
         );
+        await this.audit.write({
+          action: 'submissions.idempotent_replay',
+          outcome: 'success',
+          actorUserId,
+          tenantId,
+          resourceType: 'submission',
+          resourceId: existing.id,
+          metadata: {
+            batchIdempotencyKey: opts.idempotencyKey,
+            state: existing.state,
+            triggerSource: opts.triggerSource,
+          },
+        });
       }
       return this.getDetail(tenantId, existing.id);
     }
@@ -227,11 +275,13 @@ export class SubmissionsService implements OnModuleDestroy {
         }
       }
 
+      const etaEnvironment = await this.eta.getActiveEnvironment(tenantId);
       const created = await tx.submission.create({
         data: {
           tenantId,
           batchIdempotencyKey: opts.idempotencyKey,
           state: 'ASSEMBLING',
+          etaEnvironment,
           documentCount: docs.length,
           createdByUserId: actorUserId,
           triggerSource: opts.triggerSource,
@@ -285,6 +335,202 @@ export class SubmissionsService implements OnModuleDestroy {
       idempotencyKey: key,
       triggerSource: 'user',
     });
+  }
+
+  /**
+   * List multi-select send: partition selected IDs into eligible SIGNED docs
+   * vs skipped (wrong status / in-flight / cooldown / no signature), then
+   * reuse submitDocuments for the eligible set.
+   */
+  async submitSelected(
+    tenantId: string,
+    actorUserId: string,
+    documentIds: string[],
+    idempotencyKey: string,
+  ): Promise<BatchSubmitResult> {
+    const uniqueIds = [...new Set(documentIds.filter(Boolean))];
+    if (!uniqueIds.length) {
+      throw new BadRequestException('At least one documentId is required');
+    }
+    if (!idempotencyKey || idempotencyKey.length < 8) {
+      throw new BadRequestException('Idempotency-Key must be at least 8 characters');
+    }
+
+    const docs = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.document.findMany({
+        where: { tenantId, id: { in: uniqueIds } },
+        include: {
+          filingLocks: {
+            where: { tenantId },
+            select: { documentVersion: true },
+          },
+        },
+      }),
+    );
+    const byId = new Map(docs.map((d) => [d.id, d]));
+
+    const results: BatchSubmitItemResult[] = [];
+    const eligibleIds: string[] = [];
+
+    for (const id of uniqueIds) {
+      const doc = byId.get(id);
+      if (!doc) {
+        results.push({
+          documentId: id,
+          internalId: null,
+          outcome: 'failed',
+          reason: 'not_found',
+          documentStatus: null,
+        });
+        continue;
+      }
+
+      if (doc.status !== 'SIGNED') {
+        results.push({
+          documentId: doc.id,
+          internalId: doc.internalId,
+          outcome: 'skipped',
+          reason: `status_${doc.status.toLowerCase()}`,
+          documentStatus: doc.status,
+        });
+        continue;
+      }
+      if (!doc.signaturesJson) {
+        results.push({
+          documentId: doc.id,
+          internalId: doc.internalId,
+          outcome: 'skipped',
+          reason: 'no_signatures',
+          documentStatus: doc.status,
+        });
+        continue;
+      }
+      if (
+        doc.filingLocks.some((l) => l.documentVersion === doc.version)
+      ) {
+        results.push({
+          documentId: doc.id,
+          internalId: doc.internalId,
+          outcome: 'skipped',
+          reason: 'filing_lock',
+          documentStatus: doc.status,
+        });
+        continue;
+      }
+      if (isInFlightHeld(doc.submitInFlight, doc.submitInFlightSince)) {
+        results.push({
+          documentId: doc.id,
+          internalId: doc.internalId,
+          outcome: 'skipped',
+          reason: 'submit_in_flight',
+          documentStatus: doc.status,
+        });
+        continue;
+      }
+      const payloadHash = this.payloadHashOf(doc);
+      const cooldown = evaluateCooldown(this.cooldownStateOf(doc), payloadHash);
+      if (cooldown.blocked) {
+        results.push({
+          documentId: doc.id,
+          internalId: doc.internalId,
+          outcome: 'skipped',
+          reason: 'duplicate_cooldown',
+          documentStatus: doc.status,
+        });
+        continue;
+      }
+
+      eligibleIds.push(doc.id);
+    }
+
+    let submission: SubmissionDetail | null = null;
+    const lateWarnings = eligibleIds.map((id) => {
+      const doc = byId.get(id)!;
+      const check = checkLateSubmission(doc.issueDateTime);
+      return {
+        documentId: doc.id,
+        internalId: doc.internalId,
+        ...check,
+      };
+    });
+
+    if (eligibleIds.length) {
+      try {
+        submission = await this.submitDocuments(
+          tenantId,
+          actorUserId,
+          eligibleIds,
+          {
+            idempotencyKey,
+            triggerSource: 'user_batch',
+          },
+        );
+        for (const row of submission.documents) {
+          results.push({
+            documentId: row.documentId,
+            internalId: row.internalId,
+            outcome:
+              row.attemptOutcome === 'ACCEPTED'
+                ? 'sent'
+                : row.attemptOutcome === 'REFUSED_AT_INTAKE'
+                  ? 'failed'
+                  : row.attemptOutcome === 'PENDING'
+                    ? 'sent'
+                    : 'failed',
+            reason: row.attemptOutcome,
+            attemptOutcome: row.attemptOutcome,
+            etaUuid: row.etaUuid,
+            documentStatus: row.documentStatus,
+            intakeError: row.intakeError,
+          });
+        }
+      } catch (err) {
+        const message =
+          err instanceof ConflictException || err instanceof BadRequestException
+            ? (() => {
+                const res = err.getResponse();
+                if (typeof res === 'string') return res;
+                if (res && typeof res === 'object') {
+                  const o = res as { message?: string | string[]; code?: string };
+                  const msg = Array.isArray(o.message)
+                    ? o.message.join('; ')
+                    : o.message;
+                  return o.code ? `${o.code}: ${msg ?? ''}` : (msg ?? err.message);
+                }
+                return err.message;
+              })()
+            : err instanceof Error
+              ? err.message
+              : 'submit_failed';
+        for (const id of eligibleIds) {
+          const doc = byId.get(id)!;
+          results.push({
+            documentId: id,
+            internalId: doc.internalId,
+            outcome: 'failed',
+            reason: message.slice(0, 300),
+            documentStatus: doc.status,
+          });
+        }
+      }
+    }
+
+    // Keep results in the caller's selection order.
+    const byDoc = new Map(results.map((r) => [r.documentId, r]));
+    const ordered = uniqueIds
+      .map((id) => byDoc.get(id))
+      .filter((r): r is BatchSubmitItemResult => Boolean(r));
+
+    return {
+      requested: uniqueIds.length,
+      sent: ordered.filter((r) => r.outcome === 'sent').length,
+      skipped: ordered.filter((r) => r.outcome === 'skipped').length,
+      failed: ordered.filter((r) => r.outcome === 'failed').length,
+      submissionId: submission?.id ?? null,
+      submission,
+      lateWarnings: lateWarnings.filter((w) => w.isLate),
+      results: ordered,
+    };
   }
 
   /**
@@ -546,10 +792,18 @@ export class SubmissionsService implements OnModuleDestroy {
       let etaBody: Eta202Body;
       try {
         const branchId = docs[0]?.branchId;
-        const token = await this.eta.getAccessToken(tenantId, { branchId });
-        etaBody = await this.etaSubmit.postDocumentSubmissions(
-          token,
-          integrity.documents as Record<string, unknown>[],
+        const apiBaseUrl = await this.eta.getApiBaseUrl(tenantId);
+        const etaSubmit = new EtaSubmitClient(apiBaseUrl);
+        // ONE cached token for the whole batch — never /connect/token per invoice.
+        // On 401 (hour window ended mid-batch) refresh once and retry.
+        etaBody = await this.eta.withAccessToken(
+          tenantId,
+          { branchId },
+          (token) =>
+            etaSubmit.postDocumentSubmissions(
+              token,
+              integrity.documents as Record<string, unknown>[],
+            ),
         );
       } catch (err) {
         if (err instanceof EtaSubmitError && err.isDuplicate) {
@@ -1027,6 +1281,7 @@ export class SubmissionsService implements OnModuleDestroy {
               etaUuid: m.etaUuid,
               etaLongId: m.etaLongId,
               submissionUuid: etaSubmissionUuidForStore,
+              etaEnvironment: submission.etaEnvironment ?? undefined,
               needsAttention: false,
               needsAttentionReason: null,
               etaStatus: 'Submitted',
@@ -1037,6 +1292,16 @@ export class SubmissionsService implements OnModuleDestroy {
               submitPendingRetrySubmissionId: null,
               submitDuplicateRetryCount: 0,
             },
+          });
+          const issuedDoc = await tx.document.findUnique({
+            where: { id: m.documentId },
+            select: { branchId: true, currencyCode: true },
+          });
+          void this.usageEmit.emitIssued({
+            tenantId,
+            documentId: m.documentId,
+            branchId: issuedDoc?.branchId,
+            currencyCode: issuedDoc?.currencyCode,
           });
         } else {
           const detailMsg =
@@ -1086,6 +1351,13 @@ export class SubmissionsService implements OnModuleDestroy {
               etaStatusRawSnapshot: etaBody as unknown as Prisma.InputJsonValue,
             },
           });
+          if (toStatus === 'VALID' || toStatus === 'INVALID') {
+            void this.usageEmit.emitDocumentOutcome({
+              tenantId,
+              documentId: m.documentId,
+              toStatus,
+            });
+          }
         }
       }
 

@@ -1,0 +1,192 @@
+openapi: 3.0.3
+info:
+  title: Offline Sync API
+  version: 0.1.0
+  description: >
+    Tenant-scoped draft sync and conflict resolution for offline clients.
+    Submission idempotency reuses existing /submissions contracts with
+    Idempotency-Key (per document).
+servers:
+  - url: /api
+paths:
+  /sync/drafts:
+    put:
+      summary: Idempotent draft upsert
+      operationId: syncDraftUpsert
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 8
+        - name: If-Match-Revision
+          in: header
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+          description: Client baseRevision; omit on first create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DraftSyncBody"
+      responses:
+        "200":
+          description: Existing document returned for same Idempotency-Key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DraftSyncResult"
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DraftSyncResult"
+        "409":
+          description: Clash — Conflict UI required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncConflict"
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+
+  /sync/conflicts/{conflictId}/resolve:
+    post:
+      summary: Resolve an open sync conflict
+      operationId: resolveSyncConflict
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - name: conflictId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConflictResolution"
+      responses:
+        "200":
+          description: Document after resolution
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DraftSyncResult"
+        "404":
+          description: Conflict not found or already resolved
+
+  /submissions:
+    post:
+      summary: Create submission (existing) — must honor Idempotency-Key
+      description: >
+        Offline/agent resync MUST send Idempotency-Key stable per document
+        (or document+version). Replay returns prior submission; never double POST to ETA.
+      parameters:
+        - $ref: "#/components/parameters/TenantHeader"
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 8
+      responses:
+        "200":
+          description: Idempotent replay
+        "202":
+          description: Accepted
+
+components:
+  parameters:
+    TenantHeader:
+      name: X-Tenant-Id
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    DraftSyncBody:
+      type: object
+      required: [kind, branchId, currencyCode, issueDateTime, internalId, lines]
+      properties:
+        kind:
+          type: string
+        branchId:
+          type: string
+          format: uuid
+        currencyCode:
+          type: string
+        issueDateTime:
+          type: string
+          format: date-time
+        internalId:
+          type: string
+        taxpayerActivityCode:
+          type: string
+        issuer:
+          type: object
+        receiver:
+          type: object
+        lines:
+          type: array
+          items:
+            type: object
+        clientIdempotencyKey:
+          type: string
+          description: Same as Idempotency-Key header when not only in header
+
+    DraftSyncResult:
+      type: object
+      required: [id, syncRevision, clientIdempotencyKey]
+      properties:
+        id:
+          type: string
+          format: uuid
+        syncRevision:
+          type: integer
+        clientIdempotencyKey:
+          type: string
+        status:
+          type: string
+
+    SyncConflict:
+      type: object
+      required: [conflictId, documentId, local, server]
+      properties:
+        conflictId:
+          type: string
+          format: uuid
+        documentId:
+          type: string
+          format: uuid
+        local:
+          type: object
+        server:
+          type: object
+        conflictingPaths:
+          type: array
+          items:
+            type: string
+
+    ConflictResolution:
+      type: object
+      required: [resolution]
+      properties:
+        resolution:
+          type: string
+          enum: [KEEP_LOCAL, KEEP_SERVER, MERGED]
+        mergedPayload:
+          type: object
+          description: Required when resolution=MERGED

@@ -1,0 +1,335 @@
+openapi: 3.0.3
+info:
+  title: eInvoice Billing API
+  version: 0.1.0
+  description: |
+    Tenant Plans & Billing — catalog, subscription, quotas, checkout (Stripe test),
+    invoices. Webhooks are provider-signed (no user JWT).
+servers:
+  - url: /api
+paths:
+  /billing/plans:
+    get:
+      summary: List active plans
+      operationId: listPlans
+      tags: [Billing]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Plan catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [plans]
+                properties:
+                  plans:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Plan"
+
+  /billing/subscription:
+    get:
+      summary: Current subscription + effective entitlements
+      operationId: getSubscription
+      tags: [Billing]
+      security:
+        - bearerAuth: []
+        - tenantHeader: []
+      responses:
+        "200":
+          description: Subscription
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubscriptionView"
+        "403":
+          description: Missing billing.view
+
+  /billing/quotas:
+    get:
+      summary: Usage vs limits (issued Cairo month, branches, devices)
+      operationId: getQuotas
+      tags: [Billing]
+      security:
+        - bearerAuth: []
+        - tenantHeader: []
+      responses:
+        "200":
+          description: Quota snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotaSnapshot"
+
+  /billing/checkout:
+    post:
+      summary: Start checkout for Starter or Pro (Stripe test)
+      operationId: startCheckout
+      tags: [Billing]
+      security:
+        - bearerAuth: []
+        - tenantHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [planCode]
+              properties:
+                planCode:
+                  type: string
+                  enum: [STARTER, PRO]
+                successUrl:
+                  type: string
+                  format: uri
+                cancelUrl:
+                  type: string
+                  format: uri
+      responses:
+        "200":
+          description: Checkout session
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [checkoutUrl]
+                properties:
+                  checkoutUrl:
+                    type: string
+                    format: uri
+        "400":
+          description: Enterprise or invalid plan / downgrade blocked
+        "403":
+          description: Missing billing.manage
+
+  /billing/change-plan:
+    post:
+      summary: Change among Free/Starter/Pro when no checkout needed or after portal
+      operationId: changePlan
+      tags: [Billing]
+      security:
+        - bearerAuth: []
+        - tenantHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [planCode]
+              properties:
+                planCode:
+                  type: string
+                  enum: [FREE, STARTER, PRO]
+      responses:
+        "200":
+          description: Updated subscription
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubscriptionView"
+        "409":
+          description: Usage exceeds target quotas
+
+  /billing/enterprise-request:
+    post:
+      summary: Record Enterprise sales request (no self-checkout)
+      operationId: requestEnterprise
+      tags: [Billing]
+      security:
+        - bearerAuth: []
+        - tenantHeader: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      responses:
+        "202":
+          description: Request accepted; contact sales path
+
+  /billing/invoices:
+    get:
+      summary: List invoice references
+      operationId: listInvoices
+      tags: [Billing]
+      security:
+        - bearerAuth: []
+        - tenantHeader: []
+      responses:
+        "200":
+          description: Invoices
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/InvoiceRef"
+
+  /billing/webhooks/stripe:
+    post:
+      summary: Stripe webhook (raw body + signature)
+      operationId: stripeWebhook
+      tags: [BillingWebhooks]
+      parameters:
+        - in: header
+          name: Stripe-Signature
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Received (idempotent)
+        "400":
+          description: Invalid signature
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    tenantHeader:
+      type: apiKey
+      in: header
+      name: X-Tenant-Id
+
+  schemas:
+    Plan:
+      type: object
+      required: [code, documentQuota, branchQuota, deviceQuota, selfServe]
+      properties:
+        code:
+          type: string
+          enum: [FREE, STARTER, PRO, ENTERPRISE]
+        name:
+          type: string
+        documentQuota:
+          type: integer
+        branchQuota:
+          type: integer
+        deviceQuota:
+          type: integer
+        selfServe:
+          type: boolean
+        priceDisplay:
+          type: string
+          nullable: true
+
+    SubscriptionView:
+      type: object
+      required: [status, plan, entitlements]
+      properties:
+        status:
+          type: string
+          enum: [TRIAL, ACTIVE, PAST_DUE, READ_ONLY, SUSPENDED, CANCELLED]
+        plan:
+          $ref: "#/components/schemas/Plan"
+        graceEndsAt:
+          type: string
+          format: date-time
+          nullable: true
+        entitlements:
+          $ref: "#/components/schemas/Entitlements"
+        accessMode:
+          type: string
+          enum: [FULL, READ_ONLY, BLOCKED]
+          description: Derived from status / suspend
+
+    Entitlements:
+      type: object
+      required: [documentQuota, branchQuota, deviceQuota]
+      properties:
+        documentQuota:
+          type: integer
+        branchQuota:
+          type: integer
+        deviceQuota:
+          type: integer
+        overrideActive:
+          type: boolean
+
+    QuotaSnapshot:
+      type: object
+      required: [period, documents, branches, devices]
+      properties:
+        period:
+          type: object
+          properties:
+            timezone:
+              type: string
+              example: Africa/Cairo
+            monthStart:
+              type: string
+              format: date-time
+            monthEnd:
+              type: string
+              format: date-time
+        documents:
+          $ref: "#/components/schemas/QuotaBar"
+        branches:
+          $ref: "#/components/schemas/QuotaBar"
+        devices:
+          $ref: "#/components/schemas/QuotaBar"
+
+    QuotaBar:
+      type: object
+      required: [used, limit]
+      properties:
+        used:
+          type: integer
+        limit:
+          type: integer
+
+    InvoiceRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        amountCents:
+          type: integer
+        currency:
+          type: string
+        hostedInvoiceUrl:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    QuotaExceededError:
+      type: object
+      description: Returned from mutate APIs when quota would be exceeded
+      required: [code, resource, used, limit, message]
+      properties:
+        code:
+          type: string
+          enum: [QUOTA_EXCEEDED]
+        resource:
+          type: string
+          enum: [documents, branches, devices]
+        used:
+          type: integer
+        limit:
+          type: integer
+        message:
+          type: string

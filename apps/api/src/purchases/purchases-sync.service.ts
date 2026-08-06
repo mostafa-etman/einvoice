@@ -18,32 +18,45 @@ import {
   mapDetailsLines,
   mapEtaReceivedRow,
 } from './received-document.mapper';
+import { UsageEmitService } from '../analytics/usage-emit.service';
 
 @Injectable()
 export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PurchasesSyncService.name);
   private readonly inFlight = new Set<string>();
-  private search: EtaDocumentsSearchClient;
-  private recent: EtaDocumentsRecentClient;
-  private details: EtaDocumentDetailsClient;
   private cronTimer: ReturnType<typeof setInterval> | null = null;
   private readonly syncEnabled: boolean;
   private readonly useRecent: boolean;
   private readonly intervalMs: number;
+  private testOverrides: {
+    search?: EtaDocumentsSearchClient;
+    recent?: EtaDocumentsRecentClient;
+    details?: EtaDocumentDetailsClient;
+  } = {};
 
   constructor(
     private readonly tenantPrisma: TenantPrismaService,
     private readonly prisma: PrismaService,
     private readonly eta: EtaService,
     private readonly audit: AuditService,
+    private readonly usageEmit: UsageEmitService,
   ) {
     const env = loadEnv();
-    this.search = new EtaDocumentsSearchClient(env.ETA_API_BASE_URL);
-    this.recent = new EtaDocumentsRecentClient(env.ETA_API_BASE_URL);
-    this.details = new EtaDocumentDetailsClient(env.ETA_API_BASE_URL);
     this.syncEnabled = env.PURCHASES_SYNC_ENABLED;
     this.useRecent = env.PURCHASES_SYNC_USE_RECENT;
     this.intervalMs = env.PURCHASES_SYNC_INTERVAL_MS;
+  }
+
+  private async clientsFor(tenantId: string) {
+    const base = await this.eta.getApiBaseUrl(tenantId);
+    return {
+      search:
+        this.testOverrides.search ?? new EtaDocumentsSearchClient(base),
+      recent:
+        this.testOverrides.recent ?? new EtaDocumentsRecentClient(base),
+      details:
+        this.testOverrides.details ?? new EtaDocumentDetailsClient(base),
+    };
   }
 
   onModuleInit() {
@@ -65,9 +78,7 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
     recent?: EtaDocumentsRecentClient;
     details?: EtaDocumentDetailsClient;
   }) {
-    if (opts.search) this.search = opts.search;
-    if (opts.recent) this.recent = opts.recent;
-    if (opts.details) this.details = opts.details;
+    this.testOverrides = { ...this.testOverrides, ...opts };
   }
 
   async startManualSync(tenantId: string, triggeredByUserId: string) {
@@ -201,11 +212,13 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
 
     try {
       const accessToken = await this.eta.getAccessToken(tenantId);
+      const clients = await this.clientsFor(tenantId);
+      const etaEnvironment = await this.eta.getActiveEnvironment(tenantId);
       const byUuid = new Map<string, Record<string, unknown>>();
 
       let token: string | null | undefined = undefined;
       do {
-        const page = await this.search.searchReceived(accessToken, {
+        const page = await clients.search.searchReceived(accessToken, {
           pageSize: 100,
           continuationToken: token || undefined,
         });
@@ -222,7 +235,7 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
 
       if (this.useRecent) {
         try {
-          const recent = await this.recent.recentReceived(accessToken, {
+          const recent = await clients.recent.recentReceived(accessToken, {
             pageSize: 100,
           });
           for (const row of recent.result) {
@@ -244,7 +257,13 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
 
       for (const [uuid, row] of byUuid) {
         try {
-          const outcome = await this.upsertOne(tenantId, accessToken, row);
+          const outcome = await this.upsertOne(
+            tenantId,
+            accessToken,
+            row,
+            clients.details,
+            etaEnvironment,
+          );
           if (outcome === 'new') counters.newCount += 1;
           else if (outcome === 'updated') counters.updatedCount += 1;
           else counters.skippedCount += 1;
@@ -308,13 +327,15 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
     tenantId: string,
     accessToken: string,
     row: Record<string, unknown>,
+    detailsClient: EtaDocumentDetailsClient,
+    etaEnvironment: 'SANDBOX' | 'PRODUCTION',
   ): Promise<'new' | 'updated' | 'skipped'> {
     const mapped = mapEtaReceivedRow(row);
     if (!mapped.documentUuid) return 'skipped';
 
     let details: Record<string, unknown> | null = null;
     try {
-      details = await this.details.getDetails(accessToken, mapped.documentUuid);
+      details = await detailsClient.getDetails(accessToken, mapped.documentUuid);
     } catch {
       details = null;
     }
@@ -348,6 +369,7 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
         netAmount: mapped.netAmount,
         rawSummaryJson: mapped.rawSummaryJson,
         rawDetailsJson: (details ?? undefined) as Prisma.InputJsonValue | undefined,
+        etaEnvironment,
         lastSyncedAt: now,
       };
 
@@ -363,6 +385,11 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
         });
         docId = created.id;
         outcome = 'new';
+        void this.usageEmit.emitReceived({
+          tenantId,
+          receivedDocumentId: created.id,
+          currencyCode: mapped.currency ?? null,
+        });
       } else {
         await tx.receivedDocument.update({
           where: { id: existing.id },

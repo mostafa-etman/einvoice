@@ -12,10 +12,15 @@ describe('imports wizard smoke (T021)', () => {
     expect(en.imports.partialSuccess).toBeTruthy();
     expect(en.imports.runSignSubmit).toBeTruthy();
     expect(en.imports.downloadTemplate).toBeTruthy();
+    expect(en.imports.templateHelp).toBeTruthy();
+    expect(en.imports.branch).toBeTruthy();
+    expect(en.imports.runSignSubmitHelp).toBeTruthy();
     expect(ar.nav.imports).toBeTruthy();
     expect(ar.imports.title).toBeTruthy();
     expect(ar.imports.partialSuccess).toBeTruthy();
     expect(ar.imports.runCreateOnly).toBeTruthy();
+    expect(ar.imports.templateHelp).toBeTruthy();
+    expect(ar.imports.branch).toBeTruthy();
   });
 });
 

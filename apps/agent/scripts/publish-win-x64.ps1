@@ -6,7 +6,7 @@
 param(
     [string]$Configuration = "Release",
     [string]$OutputDir = "",
-    [string]$ApiBaseUrl = "http://localhost:3001"
+    [string]$ApiBaseUrl = "https://api.example.com"
 )
 
 $ErrorActionPreference = "Stop"

@@ -4,7 +4,6 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { ItemCodeType, Prisma } from '@prisma/client';
-import { loadEnv } from '../../config/env';
 import { TenantPrismaService } from '../../prisma/tenant-prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import { EtaService } from '../../eta/eta.service';
@@ -44,21 +43,24 @@ export function applyUpsertCounters(
 @Injectable()
 export class ItemCodesSyncService {
   private readonly logger = new Logger(ItemCodesSyncService.name);
-  private client: EtaItemCodesClient;
+  private client: EtaItemCodesClient | null = null;
   private readonly inFlight = new Set<string>();
 
   constructor(
     private readonly tenantPrisma: TenantPrismaService,
     private readonly eta: EtaService,
     private readonly audit: AuditService,
-  ) {
-    const env = loadEnv();
-    this.client = new EtaItemCodesClient(env.ETA_API_BASE_URL);
-  }
+  ) {}
 
   /** Test seam */
   setClientForTests(client: EtaItemCodesClient) {
     this.client = client;
+  }
+
+  private async resolveClient(tenantId: string): Promise<EtaItemCodesClient> {
+    if (this.client) return this.client;
+    const base = await this.eta.getApiBaseUrl(tenantId);
+    return new EtaItemCodesClient(base);
   }
 
   async startSync(tenantId: string, triggeredByUserId: string) {
@@ -160,11 +162,12 @@ export class ItemCodesSyncService {
 
     try {
       const accessToken = await this.eta.getAccessToken(tenantId);
+      const client = await this.resolveClient(tenantId);
       const taxpayerRin = await this.resolveTaxpayerRin(tenantId);
 
       for (const codeType of ['EGS', 'GS1'] as EtaItemCodeType[]) {
         try {
-          for await (const page of this.client.paginateAll(accessToken, codeType, {
+          for await (const page of client.paginateAll(accessToken, codeType, {
             pageSize: 100,
             taxpayerRin: taxpayerRin ?? undefined,
             onlyActive: false,

@@ -55,7 +55,13 @@ public sealed class SigningWorker : BackgroundService
             {
                 await TickAsync(stoppingToken).ConfigureAwait(false);
                 Online = true;
-                StatusText = HasDeviceToken ? "Online" : "Not paired";
+                var pendingUpload = _queue.ListByState(SqliteOfflineQueue.StatePendingUpload).Count;
+                if (!HasDeviceToken)
+                    StatusText = "Not paired";
+                else if (pendingUpload > 0)
+                    StatusText = $"Pending upload ({pendingUpload})";
+                else
+                    StatusText = "Online";
             }
             catch (DeviceUnauthorizedException)
             {
@@ -196,7 +202,8 @@ public sealed class SigningWorker : BackgroundService
             try
             {
                 var body = JObject.Parse(item.SignedJson);
-                await _api.SubmitAsync(item.JobId, body, ct).ConfigureAwait(false);
+                var idempotencyKey = $"{item.DocumentId}:v{item.DocumentVersion}";
+                await _api.SubmitAsync(item.JobId, body, idempotencyKey, ct).ConfigureAwait(false);
                 _queue.MarkDone(item.Id);
                 _log.LogInformation("Uploaded signature for job {JobId}", item.JobId);
             }

@@ -15,11 +15,29 @@ Official docs:
 
 `POST /api/v1.0/documentpackages/requests`
 
-Body (subset): `dateFrom`, `dateTo`, optional `documentTypeNames`, `statuses`,
-`type` (`full`|`summary`), `format` (`JSON`|`XML`|`CSV` summary-only),
-`truncateifexceeded`, etc. per ETA.
+Wire body (as of ETA SDK — casing is significant):
 
-**Success**: `201` + package/request id → store as `EtaPackageRequest.etaRequestId`.
+```json
+{
+  "type": "Full",
+  "format": "JSON",
+  "queryParameters": {
+    "dateFrom": "2026-07-01T00:00:00Z",
+    "dateTo": "2026-07-31T23:59:59Z",
+    "documentTypeNames": ["I"],
+    "statuses": ["Valid"],
+    "truncateifexceeded": true
+  }
+}
+```
+
+- `type`: `Full` | `Summary` (PascalCase — lowercase yields `Invalid Package Type`)
+- `format`: `JSON` | `XML` | `CSV` (uppercase; CSV only with Summary)
+- Filters live under `queryParameters` (flat top-level dates are ignored / rejected)
+- `statuses`: `Valid` | `Invalid` | `Rejected` | `Cancelled` (PascalCase)
+
+**Success**: `201` + `{ packageId }` (also accept `requestId`) → store as
+`EtaPackageRequest.etaRequestId`.
 
 ### Get Package Requests (canonical status)
 

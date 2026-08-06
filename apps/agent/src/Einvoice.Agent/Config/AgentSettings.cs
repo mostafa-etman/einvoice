@@ -8,8 +8,10 @@ namespace Einvoice.Agent.Config;
 /// </summary>
 public sealed class AgentSettings
 {
+    public const string DefaultApiBaseUrl = "https://api.example.com";
+
     public string Environment { get; init; } = "Development";
-    public string ApiBaseUrl { get; init; } = "http://localhost:3001";
+    public string ApiBaseUrl { get; set; } = DefaultApiBaseUrl;
     public string? DeviceToken { get; set; }
     public string DeviceLabel { get; init; } = System.Environment.MachineName;
 
@@ -51,6 +53,8 @@ public sealed class AgentSettings
     /// <summary>Apply non-secret local config (never contains PIN).</summary>
     public void ApplyLocalConfig(LocalAgentConfig local)
     {
+        if (!string.IsNullOrWhiteSpace(local.ApiBaseUrl))
+            ApiBaseUrl = NormalizeApiBaseUrl(local.ApiBaseUrl);
         if (!string.IsNullOrWhiteSpace(local.Pkcs11LibraryPath))
             Pkcs11LibraryPath = local.Pkcs11LibraryPath;
         if (!string.IsNullOrWhiteSpace(local.CertificateThumbprint))
@@ -61,6 +65,17 @@ public sealed class AgentSettings
             CertificateSubjectFilter = local.CertificateSubjectFilter;
         else if (!string.IsNullOrWhiteSpace(local.CertificateIssuerFilter))
             CertificateSubjectFilter = local.CertificateIssuerFilter;
+    }
+
+    public static string NormalizeApiBaseUrl(string url)
+    {
+        var trimmed = url.Trim().TrimEnd('/');
+        if (!trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            && !trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = "https://" + trimmed;
+        }
+        return trimmed;
     }
 
     public static AgentSettings FromEnvironment(IDictionary<string, string?>? env = null)
@@ -80,10 +95,13 @@ public sealed class AgentSettings
         else if (string.Equals(G("EINVOICE_USE_SOFTWARE_KEY"), "1", StringComparison.Ordinal))
             provider = SigningProviderKind.Software;
 
+        var envApi = G("EINVOICE_API_BASE_URL") ?? G("API_BASE_URL");
         var settings = new AgentSettings
         {
             Environment = G("AGENT_ENVIRONMENT") ?? "Development",
-            ApiBaseUrl = G("EINVOICE_API_BASE_URL") ?? G("API_BASE_URL") ?? "http://localhost:3001",
+            ApiBaseUrl = string.IsNullOrWhiteSpace(envApi)
+                ? DefaultApiBaseUrl
+                : NormalizeApiBaseUrl(envApi),
             DeviceToken = G("EINVOICE_DEVICE_TOKEN"),
             DeviceLabel = G("EINVOICE_DEVICE_LABEL") ?? System.Environment.MachineName,
             SigningProvider = provider,
@@ -98,7 +116,11 @@ public sealed class AgentSettings
         };
 
         var local = LocalAgentConfig.Load(settings.LocalConfigPath);
+        // Env wins over local file when both are set.
+        var beforeLocal = settings.ApiBaseUrl;
         settings.ApplyLocalConfig(local);
+        if (!string.IsNullOrWhiteSpace(envApi))
+            settings.ApiBaseUrl = beforeLocal;
         return settings;
     }
 

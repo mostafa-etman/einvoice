@@ -1,0 +1,148 @@
+openapi: 3.0.3
+info:
+  title: Business Tax Reports API
+  version: 1.0.0
+  description: >
+    Read-only business/tax reports from issued and received documents.
+    Distinct from /analytics (usage metering).
+servers:
+  - url: /api
+paths:
+  /reports/{reportId}:
+    get:
+      summary: Run a report
+      operationId: getReport
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: reportId
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [S1, S2, S3, S4, P1, P2, P3, C1, C2, C3]
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: branchId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: currencyCode
+          in: query
+          schema: { type: string }
+        - name: perCurrency
+          in: query
+          schema: { type: boolean, default: false }
+        - name: includeNonFinancialStatuses
+          in: query
+          schema: { type: boolean, default: false }
+        - name: showGross
+          in: query
+          schema: { type: boolean, default: false }
+        - name: grain
+          in: query
+          schema: { type: string, enum: [day, month], default: day }
+        - name: perBranch
+          in: query
+          schema: { type: boolean, default: false }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+        - name: documentKind
+          in: query
+          description: Repeatable filter for document kinds
+          schema: { type: string }
+      responses:
+        '200':
+          description: Report payload (shape varies by reportId)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResponse'
+        '401': { description: Unauthorized }
+        '403': { description: Missing reports.view }
+        '400': { description: Invalid filters }
+  /reports/{reportId}/export:
+    post:
+      summary: Export a report
+      operationId: exportReport
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: reportId
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [S1, S2, S3, S4, P1, P2, P3, C1, C2, C3]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [format, from, to]
+              properties:
+                format:
+                  type: string
+                  enum: [CSV, XLSX, PDF]
+                from: { type: string, format: date }
+                to: { type: string, format: date }
+                branchId: { type: string, format: uuid }
+                currencyCode: { type: string }
+                perCurrency: { type: boolean }
+                includeNonFinancialStatuses: { type: boolean }
+                showGross: { type: boolean }
+                grain: { type: string, enum: [day, month] }
+                perBranch: { type: boolean }
+                limit: { type: integer }
+      responses:
+        '200':
+          description: File download
+          content:
+            text/csv: { schema: { type: string, format: binary } }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+            application/pdf: { schema: { type: string, format: binary } }
+        '400':
+          description: PDF not supported for this reportId
+        '403':
+          description: Missing reports.export
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    TenantHeader:
+      name: X-Tenant-Id
+      in: header
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    ReportResponse:
+      type: object
+      required: [reportId, filters, summary]
+      properties:
+        reportId: { type: string }
+        filters: { type: object }
+        summary: { type: object }
+        series:
+          type: array
+          items: { type: object }
+        rows:
+          type: array
+          items: { type: object }
+        vat:
+          type: object
+          description: Present on S4/P3/C1
+        chart:
+          type: object
+          description: Optional series tailored for recharts

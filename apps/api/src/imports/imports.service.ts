@@ -8,7 +8,7 @@ import {
 import { createHash } from 'node:crypto';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import type { DocumentKind, ImportJobStatus, Prisma } from '@prisma/client';
+import type { ImportJobStatus, Prisma } from '@prisma/client';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { DocumentsService } from '../documents/documents.service';
@@ -19,19 +19,24 @@ import {
   IMPORT_REQUIRED_FIELDS,
   applyMapping,
   type ColumnMapping,
+  type FieldError,
 } from './import-validate.service';
 import { ImportErrorReportService } from './import-error-report.service';
 import { resolveImportTerminalStatus } from './import-partial-status';
+import {
+  IMPORT_ALL_FIELD_KEYS,
+  notesRows,
+  sampleImportRows,
+} from './import-schema';
+import {
+  buildDocumentUpsert,
+  groupRowsByInternalId,
+  type MappedImportRow,
+} from './import-document-builder';
 import { QUEUE_IMPORT, type ImportJobData } from '../queues/queue-names';
 import type { ArtifactStorage } from '../storage/storage.module';
 import { loadEnv } from '../config/env';
 import * as XLSX from 'xlsx';
-
-const ETA_TYPE_TO_KIND: Record<string, DocumentKind> = {
-  I: 'INVOICE',
-  C: 'CREDIT_NOTE',
-  D: 'DEBIT_NOTE',
-};
 
 @Injectable()
 export class ImportsService {
@@ -50,34 +55,42 @@ export class ImportsService {
   ) {}
 
   templateCsv(_documentType = 'I'): Buffer {
-    const headers = [...IMPORT_REQUIRED_FIELDS];
-    const sample = [
-      'INV-SAMPLE-001',
-      new Date().toISOString(),
-      'Sample Buyer',
-      '123456789',
-      'EGS-1',
-      '1',
-      '100.00',
-    ];
-    const body = `${headers.join(',')}\n${sample.join(',')}\n`;
-    return Buffer.from(body, 'utf8');
+    const issued = new Date().toISOString();
+    const rows = sampleImportRows(issued);
+    const body = rows
+      .map((r) =>
+        r
+          .map((cell) => {
+            const s = String(cell ?? '');
+            return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+          })
+          .join(','),
+      )
+      .join('\n');
+    const notes = notesRows()
+      .map((r) =>
+        r
+          .map((cell) => {
+            const s = String(cell ?? '');
+            return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+          })
+          .join(','),
+      )
+      .join('\n');
+    // CSV: Import sheet content + a Notes section after a blank line comment.
+    const combined = `${body}\n\n# --- Column notes (do not import below this line) ---\n${notes}\n`;
+    return Buffer.from(combined, 'utf8');
   }
 
   templateXlsx(_documentType = 'I'): Buffer {
-    const headers = [...IMPORT_REQUIRED_FIELDS];
-    const sample = [
-      'INV-SAMPLE-001',
-      new Date().toISOString(),
-      'Sample Buyer',
-      '123456789',
-      'EGS-1',
-      '1',
-      '100.00',
-    ];
+    const issued = new Date().toISOString();
+    const importAoA = sampleImportRows(issued);
+    const notesAoA = notesRows();
     const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet([headers, sample]);
-    XLSX.utils.book_append_sheet(wb, ws, 'Import');
+    const wsImport = XLSX.utils.aoa_to_sheet(importAoA);
+    const wsNotes = XLSX.utils.aoa_to_sheet(notesAoA);
+    XLSX.utils.book_append_sheet(wb, wsImport, 'Import');
+    XLSX.utils.book_append_sheet(wb, wsNotes, 'Notes');
     return Buffer.from(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
   }
 
@@ -144,11 +157,14 @@ export class ImportsService {
       tenantId: args.tenantId,
       kind: 'imports',
       objectId,
-      contentType: args.contentType || (format === 'csv' ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+      contentType:
+        args.contentType ||
+        (format === 'csv'
+          ? 'text/csv'
+          : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
       body: args.buffer,
     });
 
-    // Auto-map when headers match template field names
     const mapping = await this.proposeMapping(args.buffer, format);
 
     const job = await this.tenantPrisma.withTenant(args.tenantId, (tx) =>
@@ -189,27 +205,40 @@ export class ImportsService {
     const headers = new Set<string>();
     if (format === 'csv') {
       const text = buffer.toString('utf8').split(/\r?\n/)[0] ?? '';
-      for (const h of text.split(',')) headers.add(h.trim());
+      for (const h of text.split(',')) {
+        const cleaned = h.trim().replace(/^"|"$/g, '');
+        if (cleaned && !cleaned.startsWith('#')) headers.add(cleaned);
+      }
     } else {
       const wb = XLSX.read(buffer, { type: 'buffer' });
-      const sheet = wb.Sheets[wb.SheetNames[0]!];
+      const sheetName =
+        wb.SheetNames.find((n) => n.toLowerCase() === 'import') ??
+        wb.SheetNames[0];
+      const sheet = sheetName ? wb.Sheets[sheetName] : undefined;
       if (sheet) {
         const rows = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1 });
         for (const h of rows[0] ?? []) headers.add(String(h ?? '').trim());
       }
     }
     const mapping: ColumnMapping = {};
-    for (const field of IMPORT_REQUIRED_FIELDS) {
+    for (const field of IMPORT_ALL_FIELD_KEYS) {
       if (headers.has(field)) mapping[field] = field;
     }
     return mapping;
   }
 
-  async putMapping(tenantId: string, userId: string, jobId: string, mapping: ColumnMapping) {
+  async putMapping(
+    tenantId: string,
+    userId: string,
+    jobId: string,
+    mapping: ColumnMapping,
+  ) {
     const job = await this.getJob(tenantId, jobId);
     const missing = IMPORT_REQUIRED_FIELDS.filter((f) => !mapping[f]?.trim());
     if (missing.length) {
-      throw new BadRequestException(`Required fields unmapped: ${missing.join(', ')}`);
+      throw new BadRequestException(
+        `Required fields unmapped: ${missing.join(', ')}`,
+      );
     }
     const updated = await this.tenantPrisma.withTenant(tenantId, (tx) =>
       tx.importJob.update({
@@ -236,7 +265,9 @@ export class ImportsService {
     const mapping = (job.mappingJson ?? {}) as ColumnMapping;
     const missing = IMPORT_REQUIRED_FIELDS.filter((f) => !mapping[f]?.trim());
     if (missing.length) {
-      throw new BadRequestException(`Required fields unmapped: ${missing.join(', ')}`);
+      throw new BadRequestException(
+        `Required fields unmapped: ${missing.join(', ')}`,
+      );
     }
     await this.tenantPrisma.withTenant(tenantId, (tx) =>
       tx.importJob.update({
@@ -304,12 +335,36 @@ export class ImportsService {
     return this.artifacts.getByKey(job.errorReportObjectKey);
   }
 
-  async processValidate(tenantId: string, jobId: string) {
+  /** Mark job FAILED so the UI does not stay stuck in VALIDATING/RUNNING. */
+  async failJob(tenantId: string, jobId: string, err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    this.log.error(`import job ${jobId} failed: ${message}`);
+    try {
+      await this.tenantPrisma.withTenant(tenantId, (tx) =>
+        tx.importJob.update({
+          where: { id: jobId },
+          data: {
+            status: 'FAILED',
+            finishedAt: new Date(),
+          },
+        }),
+      );
+    } catch (updateErr) {
+      this.log.error(
+        `could not mark import job ${jobId} FAILED: ${String(updateErr)}`,
+      );
+    }
+  }
+
+  private async parseAllRows(
+    job: { sourceObjectKey: string; sourceFileName: string; sourceContentType: string | null },
+  ) {
     const env = loadEnv();
-    const job = await this.getJob(tenantId, jobId);
-    const mapping = (job.mappingJson ?? {}) as ColumnMapping;
     const fileBuf = await this.artifacts.getByKey(job.sourceObjectKey);
-    const format = detectImportFormat(job.sourceFileName, job.sourceContentType);
+    const format = detectImportFormat(
+      job.sourceFileName,
+      job.sourceContentType ?? undefined,
+    );
     if (format === 'unsupported') throw new Error('Unsupported format');
 
     const rows: { rowNumber: number; cells: Record<string, string> }[] = [];
@@ -317,6 +372,9 @@ export class ImportsService {
       await this.parseSvc.parseCsv(fileBuf.toString('utf8'), {
         maxRows: env.IMPORT_MAX_ROWS,
         onRow: (r) => {
+          // Skip notes preamble rows if the template CSV was re-uploaded whole.
+          const first = Object.values(r.cells)[0] ?? '';
+          if (String(first).startsWith('#')) return;
           rows.push(r);
         },
       });
@@ -328,15 +386,24 @@ export class ImportsService {
         },
       });
     }
+    return rows;
+  }
+
+  async processValidate(tenantId: string, jobId: string) {
+    const job = await this.getJob(tenantId, jobId);
+    const mapping = (job.mappingJson ?? {}) as ColumnMapping;
+    const rows = await this.parseAllRows(job);
 
     const { results, validRows, invalidRows } = this.validateSvc.validateRows(
       rows,
       mapping,
+      { jobDocumentType: job.documentType },
     );
 
-    // Replace prior row results + error report
     await this.tenantPrisma.withTenant(tenantId, async (tx) => {
-      await tx.importRowResult.deleteMany({ where: { importJobId: jobId, tenantId } });
+      await tx.importRowResult.deleteMany({
+        where: { importJobId: jobId, tenantId },
+      });
       const batchSize = 200;
       for (let i = 0; i < results.length; i += batchSize) {
         const slice = results.slice(i, i + batchSize);
@@ -378,10 +445,38 @@ export class ImportsService {
     );
   }
 
+  private extractErrors(err: unknown): FieldError[] {
+    if (
+      err &&
+      typeof err === 'object' &&
+      'response' in err &&
+      (err as { response?: { message?: unknown } }).response
+    ) {
+      const msg = (err as { response: { message?: unknown } }).response.message;
+      if (msg && typeof msg === 'object' && msg !== null && 'issues' in msg) {
+        const issues = (msg as { issues: Array<Record<string, unknown>> }).issues;
+        return issues.map((i) => ({
+          field: String(i.path ?? i.field ?? 'document'),
+          code: String(i.code ?? 'VALIDATION'),
+          message: String(i.message ?? i.messageKey ?? 'Validation failed'),
+        }));
+      }
+      if (typeof msg === 'string') {
+        return [{ field: 'document', code: 'ERROR', message: msg }];
+      }
+    }
+    return [
+      {
+        field: 'document',
+        code: 'ERROR',
+        message: err instanceof Error ? err.message : String(err),
+      },
+    ];
+  }
+
   async processRun(tenantId: string, jobId: string) {
     const job = await this.getJob(tenantId, jobId);
     const mapping = (job.mappingJson ?? {}) as ColumnMapping;
-    const kind = ETA_TYPE_TO_KIND[job.documentType] ?? 'INVOICE';
 
     const branchId =
       job.branchId ??
@@ -395,137 +490,160 @@ export class ImportsService {
       )?.id;
     if (!branchId) throw new Error('No branch available for import');
 
-    const validRows = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+    const branches = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.branch.findMany({
+        where: { tenantId },
+        select: { id: true, etaBranchCode: true },
+      }),
+    );
+    const branchByCode = new Map(
+      branches
+        .filter((b) => b.etaBranchCode)
+        .map((b) => [b.etaBranchCode!, b.id]),
+    );
+
+    const validRowRecords = await this.tenantPrisma.withTenant(tenantId, (tx) =>
       tx.importRowResult.findMany({
         where: { tenantId, importJobId: jobId, status: 'VALID' },
         orderBy: { rowNumber: 'asc' },
       }),
     );
+    const validByNum = new Map(validRowRecords.map((r) => [r.rowNumber, r]));
 
-    // Need mapped cells — re-parse file for VALID rows only
-    const env = loadEnv();
-    const fileBuf = await this.artifacts.getByKey(job.sourceObjectKey);
-    const format = detectImportFormat(job.sourceFileName, job.sourceContentType);
-    const allRows: { rowNumber: number; cells: Record<string, string> }[] = [];
-    if (format === 'csv') {
-      await this.parseSvc.parseCsv(fileBuf.toString('utf8'), {
-        maxRows: env.IMPORT_MAX_ROWS,
-        onRow: (r) => {
-          allRows.push(r);
-        },
-      });
-    } else {
-      await this.parseSvc.parseXlsx(fileBuf, {
-        maxRows: env.IMPORT_MAX_ROWS,
-        onRow: async (r) => {
-          allRows.push(r);
-        },
-      });
+    const allRows = await this.parseAllRows(job);
+    const mappedValid: MappedImportRow[] = [];
+    for (const raw of allRows) {
+      if (!validByNum.has(raw.rowNumber)) continue;
+      const mapped = applyMapping(raw.cells, mapping);
+      mappedValid.push({ rowNumber: raw.rowNumber, mapped });
     }
-    const byNum = new Map(allRows.map((r) => [r.rowNumber, r]));
+
+    const groups = groupRowsByInternalId(mappedValid);
 
     let createdDocs = 0;
     let failedRows = 0;
     let signEnqueued = 0;
+    const actorUserId = job.createdByUserId ?? 'system';
 
-    for (const row of validRows) {
-      if (row.documentId) {
+    for (const group of groups) {
+      // Resume: if any line already linked to a document, count as created.
+      const already = group.rows
+        .map((r) => validByNum.get(r.rowNumber))
+        .find((r) => r?.documentId);
+      if (already?.documentId) {
         createdDocs += 1;
         continue;
       }
-      const raw = byNum.get(row.rowNumber);
-      if (!raw) {
-        failedRows += 1;
-        continue;
-      }
-      const mapped = applyMapping(raw.cells, mapping);
+
       try {
-        const rowBranchId =
-          (mapped.branchId || '').trim() || branchId;
-        const dto = {
-          kind,
-          branchId: rowBranchId,
-          currencyCode: 'EGP',
-          issueDateTime: mapped.dateTimeIssued || new Date().toISOString(),
-          internalId: mapped.internalID,
-          version: 0,
-          receiver: {
-            type: 'B',
-            id: mapped.receiverId,
-            name: mapped.receiverName,
-          },
-          lines: [
-            {
-              description: mapped.itemCode || 'Item',
-              itemType: 'EGS',
-              itemCode: mapped.itemCode,
-              unitType: 'EA',
-              quantity: mapped.quantity,
-              unitPrice: mapped.unitPrice,
-              discountAmount: '0.00',
-              taxes: [{ taxType: 'T1', subType: 'V001', rate: '14.00' }],
-            },
-          ],
-        };
-        const created = await this.documents.create(
-          tenantId,
-          job.createdByUserId ?? 'system',
-          dto,
-        );
-        await this.documents.markReady(
-          tenantId,
-          job.createdByUserId ?? 'system',
-          created.id,
-        );
-        // Link lineage
-        await this.tenantPrisma.withTenant(tenantId, (tx) =>
-          tx.document.update({
+        const dto = buildDocumentUpsert(group, {
+          defaultBranchId: branchId,
+          jobDocumentType: job.documentType,
+          resolveBranchId: (code) => branchByCode.get(code) ?? null,
+        });
+
+        const created = await this.documents.create(tenantId, actorUserId, dto);
+
+        try {
+          await this.documents.markReady(tenantId, actorUserId, created.id);
+        } catch (readyErr) {
+          // Avoid orphan READY-blocked drafts without feedback.
+          const errors = this.extractErrors(readyErr);
+          await this.tenantPrisma.withTenant(tenantId, async (tx) => {
+            await tx.document.delete({ where: { id: created.id } }).catch(() => undefined);
+            for (const row of group.rows) {
+              const rec = validByNum.get(row.rowNumber);
+              if (!rec) continue;
+              await tx.importRowResult.update({
+                where: { id: rec.id },
+                data: {
+                  status: 'FAILED',
+                  errorsJson: errors as unknown as Prisma.InputJsonValue,
+                },
+              });
+            }
+          });
+          failedRows += group.rows.length;
+          continue;
+        }
+
+        await this.tenantPrisma.withTenant(tenantId, async (tx) => {
+          await tx.document.update({
             where: { id: created.id },
-            data: { importJobId: jobId, importRowNumber: row.rowNumber },
-          }),
-        );
-        await this.tenantPrisma.withTenant(tenantId, (tx) =>
-          tx.importRowResult.update({
-            where: { id: row.id },
-            data: { status: 'CREATED', documentId: created.id },
-          }),
-        );
+            data: {
+              importJobId: jobId,
+              importRowNumber: group.rows[0]!.rowNumber,
+            },
+          });
+          for (const row of group.rows) {
+            const rec = validByNum.get(row.rowNumber);
+            if (!rec) continue;
+            await tx.importRowResult.update({
+              where: { id: rec.id },
+              data: { status: 'CREATED', documentId: created.id },
+            });
+          }
+        });
         createdDocs += 1;
 
         if (job.runMode === 'CREATE_SIGN_SUBMIT') {
           try {
             await this.signing.sendForSignature(
               tenantId,
-              job.createdByUserId ?? 'system',
+              actorUserId,
               created.id,
             );
-            await this.tenantPrisma.withTenant(tenantId, (tx) =>
-              tx.importRowResult.update({
-                where: { id: row.id },
-                data: { status: 'SIGN_ENQUEUED' },
-              }),
-            );
+            await this.tenantPrisma.withTenant(tenantId, async (tx) => {
+              for (const row of group.rows) {
+                const rec = validByNum.get(row.rowNumber);
+                if (!rec) continue;
+                await tx.importRowResult.update({
+                  where: { id: rec.id },
+                  data: { status: 'SIGN_ENQUEUED' },
+                });
+              }
+            });
             signEnqueued += 1;
           } catch (err) {
-            this.log.warn(`sign enqueue failed for ${created.id}: ${String(err)}`);
-            failedRows += 1;
-            await this.tenantPrisma.withTenant(tenantId, (tx) =>
-              tx.importRowResult.update({
-                where: { id: row.id },
-                data: { status: 'FAILED' },
-              }),
+            this.log.warn(
+              `sign enqueue failed for ${created.id}: ${String(err)}`,
             );
+            const errors = this.extractErrors(err);
+            await this.tenantPrisma.withTenant(tenantId, async (tx) => {
+              for (const row of group.rows) {
+                const rec = validByNum.get(row.rowNumber);
+                if (!rec) continue;
+                await tx.importRowResult.update({
+                  where: { id: rec.id },
+                  data: {
+                    status: 'FAILED',
+                    errorsJson: errors as unknown as Prisma.InputJsonValue,
+                  },
+                });
+              }
+            });
+            failedRows += group.rows.length;
           }
         }
       } catch (err) {
-        this.log.warn(`create failed row ${row.rowNumber}: ${String(err)}`);
-        failedRows += 1;
-        await this.tenantPrisma.withTenant(tenantId, (tx) =>
-          tx.importRowResult.update({
-            where: { id: row.id },
-            data: { status: 'FAILED' },
-          }),
+        this.log.warn(
+          `create failed invoice ${group.internalId}: ${String(err)}`,
         );
+        const errors = this.extractErrors(err);
+        await this.tenantPrisma.withTenant(tenantId, async (tx) => {
+          for (const row of group.rows) {
+            const rec = validByNum.get(row.rowNumber);
+            if (!rec) continue;
+            await tx.importRowResult.update({
+              where: { id: rec.id },
+              data: {
+                status: 'FAILED',
+                errorsJson: errors as unknown as Prisma.InputJsonValue,
+              },
+            });
+          }
+        });
+        failedRows += group.rows.length;
       }
     }
 

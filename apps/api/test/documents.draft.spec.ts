@@ -232,4 +232,55 @@ describe('Documents validate / kinds / rbac / isolation', () => {
       .set('X-Tenant-Id', b.tenantId)
       .expect(404);
   });
+
+  it('accepts fixed-amount + withholding taxes and recalculates draft totals', async () => {
+    const ctx = await ownerCtx(app, `tax${Date.now()}`);
+    const created = await request(app.getHttpServer())
+      .post('/documents')
+      .set('Authorization', `Bearer ${ctx.token}`)
+      .set('X-Tenant-Id', ctx.tenantId)
+      .send(
+        draftBody(ctx.branchId, `TAX-${Date.now()}`, {
+          lines: [
+            {
+              description: 'Service',
+              itemType: 'EGS',
+              itemCode: 'EGS-1',
+              unitType: 'EA',
+              quantity: '1',
+              unitPrice: '100.00',
+              taxes: [
+                { taxType: 'T1', subType: 'V009', rate: '14.00' },
+                { taxType: 'T3', subType: 'Tbl02', rate: '0', amount: '5.00' },
+                { taxType: 'T4', subType: 'W004', rate: '1.00' },
+              ],
+            },
+          ],
+        }),
+      )
+      .expect(201);
+
+    // net 100 + VAT on (100+5)=14.70 + T3 5 − WHT 1 = 118.70
+    expect(created.body.totals.totalAmount).toBe('118.70');
+    const lineTaxes = created.body.lines[0].taxes as Array<{
+      taxType: string;
+      amount: string;
+      rate: string;
+    }>;
+    expect(lineTaxes.find((t) => t.taxType === 'T3')).toMatchObject({
+      amount: '5.00',
+      rate: '0',
+    });
+    expect(lineTaxes.find((t) => t.taxType === 'T4')!.amount).toBe('1.00');
+
+    const recalc = await request(app.getHttpServer())
+      .post(`/documents/${created.body.id}/recalculate-totals`)
+      .set('Authorization', `Bearer ${ctx.token}`)
+      .set('X-Tenant-Id', ctx.tenantId)
+      .expect(200);
+
+    expect(recalc.body.totals.totalAmount).toBe('118.70');
+    expect(recalc.body.version).toBe(created.body.version + 1);
+    expect(recalc.body.status).toBe('DRAFT');
+  });
 });

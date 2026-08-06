@@ -20,7 +20,6 @@ import {
   PermissionsGuard,
   RequirePermissions,
 } from '../rbac/permissions.guard';
-import { loadEnv } from '../config/env';
 import { EtaService } from '../eta/eta.service';
 import { EtaPrintoutClient } from '../eta/eta-printout.client';
 import { requireTenant } from '../settings/require-tenant';
@@ -31,16 +30,12 @@ import { PurchasesBuyerActionsService } from './purchases-buyer-actions.service'
 @Controller('purchases')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class PurchasesController {
-  private printoutClient: EtaPrintoutClient;
-
   constructor(
     private readonly purchases: PurchasesService,
     private readonly sync: PurchasesSyncService,
     private readonly buyer: PurchasesBuyerActionsService,
     private readonly eta: EtaService,
-  ) {
-    this.printoutClient = new EtaPrintoutClient(loadEnv().ETA_API_BASE_URL);
-  }
+  ) {}
 
   @Get()
   @RequirePermissions(PERMISSIONS.DOCUMENTS_VIEW)
@@ -175,12 +170,41 @@ export class PurchasesController {
       throw new NotFoundException('Purchase or printout identity unavailable');
     }
     const token = await this.eta.getAccessToken(tenantId);
-    const pdf = await this.printoutClient.getPdf(token, detail.documentUuid);
+    const printout = new EtaPrintoutClient(
+      await this.eta.getApiBaseUrl(tenantId),
+    );
+    const pdf = await printout.getPdf(token, detail.documentUuid);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
       'Content-Disposition',
       `attachment; filename="purchase-${detail.documentUuid}.pdf"`,
     );
     res.send(pdf);
+  }
+
+  @Get(':id/local-printout')
+  @RequirePermissions(PERMISSIONS.DOCUMENTS_VIEW)
+  async localPrintout(
+    @Headers('x-tenant-id') tenantHeader: string | undefined,
+    @Param('id') id: string,
+    @Query('locale') locale: string | undefined,
+    @Res() res: Response,
+  ) {
+    const tenantId = requireTenant(tenantHeader);
+    try {
+      const { pdf, filename } = await this.purchases.localPrintout(
+        tenantId,
+        id,
+        locale,
+      );
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(pdf);
+    } catch (err) {
+      if (err instanceof Error && (err as { status?: number }).status === 404) {
+        throw new NotFoundException(err.message);
+      }
+      throw err;
+    }
   }
 }

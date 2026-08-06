@@ -66,6 +66,8 @@ describe('Settings cross-tenant isolation (T045)', () => {
         clientId: 'b-client',
         clientSecret: 'b-secret-value',
         registrationNumber: 'B-REG',
+        taxpayerLegalName: `Iso B Legal ${suffix}`,
+        issuerType: 'B',
       })
       .expect(200);
 

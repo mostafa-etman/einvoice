@@ -1,0 +1,369 @@
+openapi: 3.0.3
+info:
+  title: eInvoice Platform Admin API
+  version: 0.1.0
+  description: |
+    Super-admin console APIs. Requires JWT user with isPlatformOperator=true.
+    Not tenant-RBAC. All mutating actions must be audited.
+servers:
+  - url: /api
+paths:
+  /platform-admin/tenants:
+    get:
+      summary: List/search tenants
+      operationId: listTenants
+      tags: [PlatformAdmin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: q
+          schema:
+            type: string
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [ACTIVE, PAST_DUE, READ_ONLY, SUSPENDED, CANCELLED]
+        - in: query
+          name: cursor
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Tenant page
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TenantSummary"
+                  nextCursor:
+                    type: string
+                    nullable: true
+        "403":
+          description: Not platform operator
+
+    post:
+      summary: Provision tenant (sales-assisted)
+      operationId: provisionTenant
+      tags: [PlatformAdmin]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, ownerEmail, planCode]
+              properties:
+                name:
+                  type: string
+                ownerEmail:
+                  type: string
+                  format: email
+                ownerName:
+                  type: string
+                planCode:
+                  type: string
+                  enum: [FREE, STARTER, PRO, ENTERPRISE]
+                reason:
+                  type: string
+      responses:
+        "201":
+          description: Provisioned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantDetail"
+
+  /platform-admin/tenants/{tenantId}:
+    get:
+      summary: Tenant detail (plan, status, quotas)
+      operationId: getTenant
+      tags: [PlatformAdmin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+      responses:
+        "200":
+          description: Detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantDetail"
+
+  /platform-admin/tenants/{tenantId}/suspend:
+    post:
+      summary: Suspend tenant
+      operationId: suspendTenant
+      tags: [PlatformAdmin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        "200":
+          description: Suspended
+
+  /platform-admin/tenants/{tenantId}/activate:
+    post:
+      summary: Activate suspended tenant
+      operationId: activateTenant
+      tags: [PlatformAdmin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Activated
+
+  /platform-admin/tenants/{tenantId}/plan:
+    post:
+      summary: Assign plan and/or quota overrides
+      operationId: assignPlan
+      tags: [PlatformAdmin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                planCode:
+                  type: string
+                  enum: [FREE, STARTER, PRO, ENTERPRISE]
+                documentQuota:
+                  type: integer
+                  nullable: true
+                branchQuota:
+                  type: integer
+                  nullable: true
+                deviceQuota:
+                  type: integer
+                  nullable: true
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        "200":
+          description: Updated entitlements
+
+  /platform-admin/tenants/{tenantId}/usage:
+    get:
+      summary: Usage + quota snapshot for tenant
+      operationId: getTenantUsage
+      tags: [PlatformAdmin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+      responses:
+        "200":
+          description: Usage
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  quotas:
+                    type: object
+                    additionalProperties: true
+                  meters:
+                    type: object
+                    description: Aligns with analytics issued/received/etc.
+                    additionalProperties: true
+
+  /platform-admin/impersonation:
+    post:
+      summary: Start impersonation (read-only default)
+      operationId: startImpersonation
+      tags: [Impersonation]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenantId, targetUserId, reason]
+              properties:
+                tenantId:
+                  type: string
+                  format: uuid
+                targetUserId:
+                  type: string
+                  format: uuid
+                reason:
+                  type: string
+                  minLength: 3
+                ttlMinutes:
+                  type: integer
+                  minimum: 5
+                  maximum: 120
+                  default: 30
+      responses:
+        "201":
+          description: Session started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImpersonationSession"
+
+  /platform-admin/impersonation/{sessionId}/break-glass:
+    post:
+      summary: Elevate session to WRITE with typed reason
+      operationId: breakGlassImpersonation
+      tags: [Impersonation]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/sessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 5
+      responses:
+        "200":
+          description: Mode WRITE until expiry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImpersonationSession"
+
+  /platform-admin/impersonation/{sessionId}/end:
+    post:
+      summary: End impersonation session
+      operationId: endImpersonation
+      tags: [Impersonation]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/sessionId"
+      responses:
+        "200":
+          description: Ended
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    tenantId:
+      in: path
+      name: tenantId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    sessionId:
+      in: path
+      name: sessionId
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    TenantSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        planCode:
+          type: string
+        status:
+          type: string
+        suspendedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    TenantDetail:
+      allOf:
+        - $ref: "#/components/schemas/TenantSummary"
+        - type: object
+          properties:
+            ownerEmail:
+              type: string
+            entitlements:
+              type: object
+              additionalProperties: true
+            graceEndsAt:
+              type: string
+              format: date-time
+              nullable: true
+
+    ImpersonationSession:
+      type: object
+      required: [id, mode, expiresAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        targetUserId:
+          type: string
+          format: uuid
+        mode:
+          type: string
+          enum: [READ_ONLY, WRITE]
+        reason:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        accessToken:
+          type: string
+          description: Short-lived token for impersonated requests (never logged)

@@ -25,6 +25,8 @@ function baseEnv(overrides: Partial<ApiEnv> = {}): ApiEnv {
     PACKAGE_POLL_INITIAL_MS: 5000,
     PACKAGE_POLL_MAX_MS: 120_000,
     PACKAGE_STALL_HOURS: 24,
+    SYNC_BACKOFF_INITIAL_MS: 1000,
+    SYNC_BACKOFF_MAX_MS: 60_000,
     JWT_ACCESS_SECRET: 'test-access-secret-min-16',
     JWT_ACCESS_TTL: '15m',
     REFRESH_COOKIE_NAME: 'refresh_token',
@@ -36,7 +38,7 @@ function baseEnv(overrides: Partial<ApiEnv> = {}): ApiEnv {
       'base64',
     ),
     ...overrides,
-  };
+  } as ApiEnv;
 }
 
 describe('buildRefreshSerializeOptions', () => {

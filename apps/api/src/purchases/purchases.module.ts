@@ -3,6 +3,7 @@ import { AuditModule } from '../audit/audit.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { EtaModule } from '../eta/eta.module';
 import { TenantModule } from '../tenant/tenant.module';
+import { AnalyticsModule } from '../analytics/analytics.module';
 import { EtaService } from '../eta/eta.service';
 import { AuditService } from '../audit/audit.service';
 import { PurchasesController } from './purchases.controller';
@@ -14,7 +15,7 @@ import { PurchasesSyncService } from './purchases-sync.service';
 import { PurchasesBuyerActionsService } from './purchases-buyer-actions.service';
 
 @Module({
-  imports: [PrismaModule, AuditModule, EtaModule, TenantModule],
+  imports: [PrismaModule, AuditModule, EtaModule, TenantModule, AnalyticsModule],
   controllers: [PurchasesController],
   providers: [
     PurchasesService,

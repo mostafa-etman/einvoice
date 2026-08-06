@@ -52,13 +52,12 @@ export class EtaController {
   async testConnection(
     @Headers('x-tenant-id') tenantHeader: string | undefined,
     @CurrentUser() user: AuthUser,
-    @Body() body: { branchId?: string },
+    @Body() body: { branchId?: string; environment?: 'SANDBOX' | 'PRODUCTION' },
   ) {
-    return this.eta.testConnection(
-      requireTenant(tenantHeader),
-      user.userId,
-      body?.branchId,
-    );
+    return this.eta.testConnection(requireTenant(tenantHeader), user.userId, {
+      branchId: body?.branchId,
+      environment: body?.environment,
+    });
   }
 
   @Get('settings/eta/document-types')

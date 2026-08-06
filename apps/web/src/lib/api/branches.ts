@@ -1,4 +1,7 @@
 import { apiFetch } from './client';
+import type { IssuerAddress } from '@einvoice/eta-core';
+
+export type BranchAddress = IssuerAddress;
 
 export type Branch = {
   id: string;
@@ -8,6 +11,9 @@ export type Branch = {
   etaBranchCode: string | null;
   activityCode: string | null;
   defaultCurrencyCode: string | null;
+  /** Issuer (seller) address inherited by every document from this branch. */
+  address: BranchAddress;
+  addressComplete: boolean;
 };
 
 export async function listBranches(): Promise<Branch[]> {
@@ -20,6 +26,7 @@ export async function createBranch(body: {
   etaBranchCode?: string;
   activityCode?: string;
   defaultCurrencyCode?: string;
+  address?: BranchAddress;
 }): Promise<Branch> {
   return apiFetch<Branch>('/branches', {
     method: 'POST',
@@ -37,6 +44,7 @@ export async function updateBranch(
     etaBranchCode: string | null;
     activityCode: string | null;
     defaultCurrencyCode: string | null;
+    address: BranchAddress;
   }>,
 ): Promise<Branch> {
   return apiFetch<Branch>(`/branches/${id}`, {

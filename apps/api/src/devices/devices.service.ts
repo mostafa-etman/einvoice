@@ -8,6 +8,7 @@ import {
 import type { Prisma, SigningDevice } from '@prisma/client';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { QuotaService } from '../billing/quota.service';
 import {
   buildDeviceToken,
   hashSecretToken,
@@ -42,6 +43,7 @@ export class DevicesService {
   constructor(
     private readonly tenantPrisma: TenantPrismaService,
     private readonly audit: AuditService,
+    private readonly quota: QuotaService,
   ) {}
 
   async list(tenantId: string): Promise<DeviceSummary[]> {
@@ -115,6 +117,9 @@ export class DevicesService {
     const [tenantId] = parts;
     const codeHash = hashSecretToken(input.pairingCode);
     if (!input.label?.trim()) throw new BadRequestException('label is required');
+
+    await this.quota.checkTenantWritable(tenantId!);
+    await this.quota.assertWithinLimits(tenantId!, 'devices');
 
     const result = await this.tenantPrisma.withTenant(tenantId!, async (tx) => {
       const code = await tx.pairingCode.findFirst({ where: { tenantId, codeHash } });

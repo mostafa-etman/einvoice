@@ -22,20 +22,21 @@ export class EtaDocTypesClient {
     return this.fetchImpl ?? globalThis.fetch.bind(globalThis);
   }
 
-  private typesKey(tenantId: string) {
-    return `eta:doctypes:${tenantId}`;
+  private typesKey(tenantId: string, environment = 'SANDBOX') {
+    return `eta:doctypes:${tenantId}:${environment}`;
   }
 
-  private versionsKey(tenantId: string, typeId: string) {
-    return `eta:doctype-ver:${tenantId}:${typeId}`;
+  private versionsKey(tenantId: string, typeId: string, environment = 'SANDBOX') {
+    return `eta:doctype-ver:${tenantId}:${environment}:${typeId}`;
   }
 
   async listDocumentTypes(
     tenantId: string,
     accessToken: string,
-    opts?: { refresh?: boolean },
+    opts?: { refresh?: boolean; environment?: string },
   ): Promise<{ items: Record<string, unknown>[]; fetchedAt: string; fromCache: boolean }> {
-    const key = this.typesKey(tenantId);
+    const environment = opts?.environment ?? 'SANDBOX';
+    const key = this.typesKey(tenantId, environment);
     if (!opts?.refresh) {
       const cached = await this.readCache(key);
       if (cached) {
@@ -66,14 +67,15 @@ export class EtaDocTypesClient {
     tenantId: string,
     typeId: string,
     accessToken: string,
-    opts?: { refresh?: boolean },
+    opts?: { refresh?: boolean; environment?: string },
   ): Promise<{
     documentTypeId: string;
     items: Record<string, unknown>[];
     fetchedAt: string;
     fromCache: boolean;
   }> {
-    const key = this.versionsKey(tenantId, typeId);
+    const environment = opts?.environment ?? 'SANDBOX';
+    const key = this.versionsKey(tenantId, typeId, environment);
     if (!opts?.refresh) {
       const cached = await this.readCache(key);
       if (cached) {

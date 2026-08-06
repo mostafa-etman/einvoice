@@ -8,6 +8,7 @@ export default function SettingsHubPage() {
   const locale = useLocale();
 
   const links = [
+    { href: `/${locale}/settings/company`, label: t('company') },
     { href: `/${locale}/settings/branches`, label: t('branches') },
     { href: `/${locale}/settings/currencies`, label: t('currencies') },
     { href: `/${locale}/settings/eta-credentials`, label: t('eta') },
@@ -16,6 +17,7 @@ export default function SettingsHubPage() {
       label: t('etaDocumentTypes'),
     },
     { href: `/${locale}/settings/item-codes`, label: t('itemCodes') },
+    { href: `/${locale}/settings/invoice-numbering`, label: t('invoiceNumbering') },
   ];
 
   return (

@@ -37,6 +37,9 @@ describe('ETA config (mocked)', () => {
         SECRETS_MASTER_KEY: Buffer.from(
           'test-secrets-master-key-32bytes!',
         ).toString('base64'),
+        BACKUP_ARCHIVE_MASTER_KEY: Buffer.from(
+          'test-backup-archive-key-32bytes!',
+        ).toString('base64'),
         ETA_BASE_URL: 'https://api.preprod.invoicing.eta.gov.eg',
       }),
     ).toThrow(/ETA_IDENTITY_BASE_URL|ETA_API_BASE_URL/);

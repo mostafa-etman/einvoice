@@ -6,6 +6,7 @@ export type EtaConnectionStatus = {
   expiresAt: string | null;
   scope: string | null;
   environment: string | null;
+  activeEnvironment?: 'SANDBOX' | 'PRODUCTION';
   lastTestOutcome: 'success' | 'failure' | 'never';
   lastTestMessage: string | null;
   settingsPath: string;
@@ -32,13 +33,19 @@ export function getEtaConnection() {
   });
 }
 
-export function testEtaConnection(branchId?: string) {
+export function testEtaConnection(opts?: {
+  branchId?: string;
+  environment?: 'SANDBOX' | 'PRODUCTION';
+}) {
   return apiFetch<EtaConnectionStatus>(
     '/settings/eta-credentials/test-connection',
     {
       method: 'POST',
       tenantScoped: true,
-      body: { branchId },
+      body: {
+        branchId: opts?.branchId,
+        environment: opts?.environment,
+      },
     },
   );
 }

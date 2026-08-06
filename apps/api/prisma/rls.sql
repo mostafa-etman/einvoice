@@ -1,4 +1,11 @@
 -- Tenant-scoped RLS. GUCs: app.tenant_id, app.user_id (SET LOCAL via set_config(..., true))
+--
+-- Intentionally NOT RLS-protected (global / shared / identity):
+--   users              — global login identity; tenant membership is via memberships
+--   tenants            — root registry (access mediated by memberships + app checks)
+--   permissions, plans — platform catalogs
+--   currencies, eta_code_catalogs, eta_code_entries — shared ETA reference data
+--   refresh_sessions, billing_webhook_events — non-tenant or provider-scoped
 
 ALTER TABLE branches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE branches FORCE ROW LEVEL SECURITY;
@@ -230,3 +237,137 @@ DROP POLICY IF EXISTS tenant_isolation_eta_package_requests ON eta_package_reque
 CREATE POLICY tenant_isolation_eta_package_requests ON eta_package_requests
   USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
   WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE sync_conflicts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sync_conflicts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_sync_conflicts ON sync_conflicts;
+CREATE POLICY tenant_isolation_sync_conflicts ON sync_conflicts
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE usage_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE usage_events FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_usage_events ON usage_events;
+CREATE POLICY tenant_isolation_usage_events ON usage_events
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE usage_daily_rollups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE usage_daily_rollups FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_usage_daily_rollups ON usage_daily_rollups;
+CREATE POLICY tenant_isolation_usage_daily_rollups ON usage_daily_rollups
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE usage_monthly_rollups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE usage_monthly_rollups FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_usage_monthly_rollups ON usage_monthly_rollups;
+CREATE POLICY tenant_isolation_usage_monthly_rollups ON usage_monthly_rollups
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE usage_export_jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE usage_export_jobs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_usage_export_jobs ON usage_export_jobs;
+CREATE POLICY tenant_isolation_usage_export_jobs ON usage_export_jobs
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE tenant_backup_jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_backup_jobs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_tenant_backup_jobs ON tenant_backup_jobs;
+CREATE POLICY tenant_isolation_tenant_backup_jobs ON tenant_backup_jobs
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE tenant_backup_schedules ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_backup_schedules FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_tenant_backup_schedules ON tenant_backup_schedules;
+CREATE POLICY tenant_isolation_tenant_backup_schedules ON tenant_backup_schedules
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE tenant_restore_jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_restore_jobs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_tenant_restore_jobs ON tenant_restore_jobs;
+CREATE POLICY tenant_isolation_tenant_restore_jobs ON tenant_restore_jobs
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE tenant_data_export_jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_data_export_jobs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_tenant_data_export_jobs ON tenant_data_export_jobs;
+CREATE POLICY tenant_isolation_tenant_data_export_jobs ON tenant_data_export_jobs
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+-- SaaS layer (013)
+ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subscriptions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_subscriptions ON subscriptions;
+CREATE POLICY tenant_isolation_subscriptions ON subscriptions
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE quota_overrides ENABLE ROW LEVEL SECURITY;
+ALTER TABLE quota_overrides FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_quota_overrides ON quota_overrides;
+CREATE POLICY tenant_isolation_quota_overrides ON quota_overrides
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE payment_customers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payment_customers FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_payment_customers ON payment_customers;
+CREATE POLICY tenant_isolation_payment_customers ON payment_customers
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE invoice_refs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoice_refs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_invoice_refs ON invoice_refs;
+CREATE POLICY tenant_isolation_invoice_refs ON invoice_refs
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE email_outbox ENABLE ROW LEVEL SECURITY;
+ALTER TABLE email_outbox FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_email_outbox ON email_outbox;
+CREATE POLICY tenant_isolation_email_outbox ON email_outbox
+  USING (
+    tenant_id IS NULL
+    OR tenant_id::text = NULLIF(current_setting('app.tenant_id', true), '')
+  )
+  WITH CHECK (
+    tenant_id IS NULL
+    OR tenant_id::text = NULLIF(current_setting('app.tenant_id', true), '')
+  );
+
+ALTER TABLE tenant_invoice_numbering ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_invoice_numbering FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_tenant_invoice_numbering ON tenant_invoice_numbering;
+CREATE POLICY tenant_isolation_tenant_invoice_numbering ON tenant_invoice_numbering
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE document_number_sequences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE document_number_sequences FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_document_number_sequences ON document_number_sequences;
+CREATE POLICY tenant_isolation_document_number_sequences ON document_number_sequences
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+-- Platform-operator sessions: tenant-scoped reads under app.tenant_id; platform
+-- sweeps set app.platform_operator=1 (never from tenant HTTP handlers).
+ALTER TABLE impersonation_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE impersonation_sessions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_impersonation_sessions ON impersonation_sessions;
+CREATE POLICY tenant_isolation_impersonation_sessions ON impersonation_sessions
+  USING (
+    tenant_id::text = NULLIF(current_setting('app.tenant_id', true), '')
+    OR NULLIF(current_setting('app.platform_operator', true), '') = '1'
+  )
+  WITH CHECK (
+    tenant_id::text = NULLIF(current_setting('app.tenant_id', true), '')
+    OR NULLIF(current_setting('app.platform_operator', true), '') = '1'
+  );

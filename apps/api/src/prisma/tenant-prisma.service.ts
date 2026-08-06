@@ -38,6 +38,19 @@ export class TenantPrismaService {
     });
   }
 
+  /**
+   * Platform-operator path for tables that allow `app.platform_operator=1`
+   * (e.g. impersonation_sessions sweeps). Never call from tenant HTTP handlers.
+   */
+  async withPlatformOperator<T>(fn: (tx: TenantTx) => Promise<T>): Promise<T> {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.tenant_id', '', true)`;
+      await tx.$executeRaw`SELECT set_config('app.user_id', '', true)`;
+      await tx.$executeRaw`SELECT set_config('app.platform_operator', '1', true)`;
+      return fn(tx);
+    });
+  }
+
   get client(): PrismaService {
     return this.prisma;
   }

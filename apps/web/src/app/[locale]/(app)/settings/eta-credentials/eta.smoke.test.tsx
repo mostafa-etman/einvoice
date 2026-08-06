@@ -7,4 +7,25 @@ describe('ETA credentials smoke', () => {
     expect(en.settingsEta.rotate).toBeTruthy();
     expect(ar.settingsEta.testConnection).toBeTruthy();
   });
+
+  it('has taxpayer legal name labels in both locales', () => {
+    for (const messages of [en, ar]) {
+      expect(messages.settingsEta.taxpayerLegalName).toBeTruthy();
+      expect(messages.settingsEta.taxpayerLegalNameHelp).toBeTruthy();
+      expect(messages.settingsEta.companyIdentity).toBeTruthy();
+      expect(messages.settingsEta.issuerIdentityIncomplete).toBeTruthy();
+    }
+  });
+
+  it('has environment switch, go-live, and clear-sandbox copy', () => {
+    for (const messages of [en, ar]) {
+      expect(messages.settingsEta.badgeSandbox).toBeTruthy();
+      expect(messages.settingsEta.badgeProduction).toBeTruthy();
+      expect(messages.settingsEta.goLiveTitle).toBeTruthy();
+      expect(messages.settingsEta.clearSandboxTitle).toBeTruthy();
+      expect(messages.settingsEta.clearSandboxIrreversible).toBeTruthy();
+      expect(messages.shell.etaEnvSandbox).toBeTruthy();
+      expect(messages.shell.etaEnvProduction).toBeTruthy();
+    }
+  });
 });

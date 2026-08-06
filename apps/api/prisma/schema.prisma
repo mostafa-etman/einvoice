@@ -49,6 +49,17 @@ enum DocumentStatus {
   REJECTED
 }
 
+enum SyncConflictStatus {
+  OPEN
+  RESOLVED
+}
+
+enum SyncConflictResolution {
+  KEEP_LOCAL
+  KEEP_SERVER
+  MERGED
+}
+
 enum SubmissionState {
   ASSEMBLING
   SENT
@@ -125,6 +136,11 @@ enum ImportRunMode {
   CREATE_SIGN_SUBMIT
 }
 
+enum EtaEnvironment {
+  SANDBOX
+  PRODUCTION
+}
+
 enum ExportJobKind {
   LOCAL
   ETA_PACKAGE
@@ -180,6 +196,28 @@ enum DeviceStatus {
   REVOKED
 }
 
+enum UsageMeter {
+  issued
+  received
+  valid
+  invalid
+  api_calls
+  storage_bytes
+}
+
+enum UsageExportFormat {
+  CSV
+  XLSX
+}
+
+enum UsageExportJobStatus {
+  QUEUED
+  RUNNING
+  READY
+  FAILED
+  EXPIRED
+}
+
 enum SignatureJobStatus {
   PENDING
   CLAIMED
@@ -189,16 +227,19 @@ enum SignatureJobStatus {
 }
 
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
-  email        String   @unique
-  passwordHash String   @map("password_hash")
-  name         String?
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  id                  String   @id @default(uuid()) @db.Uuid
+  email               String   @unique
+  passwordHash        String   @map("password_hash")
+  name                String?
+  isPlatformOperator  Boolean  @default(false) @map("is_platform_operator")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
 
   memberships     Membership[]
   refreshSessions RefreshSession[]
   auditLogs       AuditLog[]       @relation("AuditActor")
+  impersonationsAsOperator ImpersonationSession[] @relation("ImpersonationOperator")
+  impersonationsAsTarget   ImpersonationSession[] @relation("ImpersonationTarget")
 
   @@map("users")
 }
@@ -206,6 +247,18 @@ model User {
 model Tenant {
   id        String   @id @default(uuid()) @db.Uuid
   name      String
+  /// Taxpayer legal / registered company name used as ETA issuer.name.
+  /// Distinct from `name` (workspace label) and from branch.name (e.g. "Main").
+  legalName  String? @map("legal_name")
+  /// ETA issuer.type: B (Business), P (Person), F (Foreign).
+  issuerType String  @default("B") @map("issuer_type")
+  /// Active ETA host profile — selects preprod vs production URLs + credential slot.
+  activeEtaEnvironment EtaEnvironment @default(SANDBOX) @map("active_eta_environment")
+  /// Tenant branding logo in MinIO (printable invoice + settings preview).
+  logoObjectKey   String?   @map("logo_object_key")
+  logoContentType String?   @map("logo_content_type")
+  logoByteSize    Int?      @map("logo_byte_size")
+  logoUpdatedAt   DateTime? @map("logo_updated_at")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -237,6 +290,26 @@ model Tenant {
   importRowResults     ImportRowResult[]
   exportJobs           ExportJob[]
   etaPackageRequests   EtaPackageRequest[]
+  syncConflicts        SyncConflict[]
+  usageEvents          UsageEvent[]
+  usageDailyRollups    UsageDailyRollup[]
+  usageMonthlyRollups  UsageMonthlyRollup[]
+  usageExportJobs      UsageExportJob[]
+  tenantBackupJobs     TenantBackupJob[]
+  tenantBackupSchedules TenantBackupSchedule[]
+  tenantRestoreJobs    TenantRestoreJob[]
+  tenantDataExportJobs TenantDataExportJob[]
+  suspendedAt          DateTime? @map("suspended_at")
+  suspendedReason      String?   @map("suspended_reason")
+  provisionedByUserId  String?   @map("provisioned_by_user_id") @db.Uuid
+  subscription         Subscription?
+  quotaOverrides       QuotaOverride[]
+  paymentCustomers     PaymentCustomer[]
+  invoiceRefs          InvoiceRef[]
+  emailOutbox          EmailOutbox[]
+  impersonationSessions ImpersonationSession[]
+  invoiceNumbering     TenantInvoiceNumbering?
+  documentNumberSequences DocumentNumberSequence[]
 
   @@map("tenants")
 }
@@ -253,14 +326,76 @@ model Branch {
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
+  /// Issuer (seller) address — inherited by every document issued from this branch.
+  addressCountry               String? @map("address_country")
+  addressGovernate             String? @map("address_governate")
+  addressRegionCity            String? @map("address_region_city")
+  addressStreet                String? @map("address_street")
+  addressBuildingNumber        String? @map("address_building_number")
+  addressPostalCode            String? @map("address_postal_code")
+  addressFloor                 String? @map("address_floor")
+  addressRoom                  String? @map("address_room")
+  addressLandmark              String? @map("address_landmark")
+  addressAdditionalInformation String? @map("address_additional_information")
+
   tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   defaultCurrency       Currency?              @relation(fields: [defaultCurrencyCode], references: [code])
   tenantEtaCredentials  TenantEtaCredential[]
   documents             Document[]
   receivedDocuments     ReceivedDocument[]
+  documentNumberSequences DocumentNumberSequence[]
 
   @@index([tenantId])
   @@map("branches")
+}
+
+enum InvoiceNumberCharset {
+  NUMERIC
+  ALPHANUMERIC
+}
+
+enum InvoiceNumberScope {
+  TENANT
+  BRANCH
+  DOCUMENT_KIND
+  BRANCH_AND_KIND
+}
+
+/// Per-tenant invoice (document) internalId numbering scheme.
+model TenantInvoiceNumbering {
+  id             String               @id @default(uuid()) @db.Uuid
+  tenantId       String               @unique @map("tenant_id") @db.Uuid
+  prefix         String               @default("INV-")
+  padWidth       Int                  @default(6) @map("pad_width")
+  startingNumber Int                  @default(1) @map("starting_number")
+  charset        InvoiceNumberCharset @default(NUMERIC)
+  scope          InvoiceNumberScope   @default(TENANT)
+  createdAt      DateTime             @default(now()) @map("created_at")
+  updatedAt      DateTime             @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_invoice_numbering")
+}
+
+/// Atomic sequence counters for document internalId allocation.
+/// scopeKey encodes branch/kind according to TenantInvoiceNumbering.scope.
+model DocumentNumberSequence {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  /// Empty string = not scoped; otherwise branch UUID and/or DocumentKind.
+  scopeKey     String   @default("") @map("scope_key")
+  branchId     String?  @map("branch_id") @db.Uuid
+  documentKind String?  @map("document_kind")
+  lastValue    BigInt   @default(0) @map("last_value")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch? @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, scopeKey])
+  @@index([tenantId])
+  @@map("document_number_sequences")
 }
 
 model Currency {
@@ -355,25 +490,29 @@ model ExchangeRate {
 }
 
 model TenantEtaCredential {
-  id                           String   @id @default(uuid()) @db.Uuid
-  tenantId                     String   @map("tenant_id") @db.Uuid
-  branchId                     String?  @map("branch_id") @db.Uuid
-  clientId                     String   @map("client_id")
-  clientSecretCiphertext       Bytes    @map("client_secret_ciphertext")
-  clientSecretNonce            Bytes    @map("client_secret_nonce")
-  registrationNumber           String?  @map("registration_number")
-  activityCode                 String?  @map("activity_code")
-  isIntermediary               Boolean  @default(false) @map("is_intermediary")
-  onBehalfOfRegistrationNumber String?  @map("on_behalf_of_registration_number")
-  onBehalfOfName               String?  @map("on_behalf_of_name")
-  createdAt                    DateTime @default(now()) @map("created_at")
-  updatedAt                    DateTime @updatedAt @map("updated_at")
+  id                           String         @id @default(uuid()) @db.Uuid
+  tenantId                     String         @map("tenant_id") @db.Uuid
+  branchId                     String?        @map("branch_id") @db.Uuid
+  /// Separate OAuth credentials for sandbox vs production hosts.
+  environment                  EtaEnvironment @default(SANDBOX)
+  clientId                     String         @map("client_id")
+  clientSecretCiphertext       Bytes          @map("client_secret_ciphertext")
+  clientSecretNonce            Bytes          @map("client_secret_nonce")
+  registrationNumber           String?        @map("registration_number")
+  activityCode                 String?        @map("activity_code")
+  isIntermediary               Boolean        @default(false) @map("is_intermediary")
+  onBehalfOfRegistrationNumber String?        @map("on_behalf_of_registration_number")
+  onBehalfOfName               String?        @map("on_behalf_of_name")
+  /// Last successful Test Connection against this environment's identity host.
+  lastValidatedAt              DateTime?      @map("last_validated_at")
+  createdAt                    DateTime       @default(now()) @map("created_at")
+  updatedAt                    DateTime       @updatedAt @map("updated_at")
 
   tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch Branch? @relation(fields: [branchId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
-  @@index([tenantId, branchId])
+  @@index([tenantId, environment, branchId])
   @@map("tenant_eta_credentials")
 }
 
@@ -551,6 +690,8 @@ model Document {
   etaStatus              String?        @map("eta_status")
   etaUuid                String?        @map("eta_uuid")
   etaLongId              String?        @map("eta_long_id")
+  /// Which ETA host accepted / owns this document (stamped on submit/sync).
+  etaEnvironment         EtaEnvironment? @map("eta_environment")
   submissionUuid         String?        @map("submission_uuid")
   etaStatusRaw           Json?          @map("eta_status_raw")
   etaStatusUpdatedAt     DateTime?      @map("eta_status_updated_at")
@@ -571,6 +712,10 @@ model Document {
   submitPendingRetrySubmissionId String? @map("submit_pending_retry_submission_id") @db.Uuid
   importJobId            String?        @map("import_job_id") @db.Uuid
   importRowNumber        Int?           @map("import_row_number")
+  /// Client offline/online create key — unique per tenant when set (010-offline-sync).
+  clientIdempotencyKey   String?        @map("client_idempotency_key")
+  /// Monotonic sync base for conflict detection (independent of ETA document version).
+  syncRevision           Int            @default(0) @map("sync_revision")
   version                Int            @default(0)
   createdAt              DateTime       @default(now()) @map("created_at")
   updatedAt              DateTime       @updatedAt @map("updated_at")
@@ -587,36 +732,64 @@ model Document {
   documentArtifacts DocumentArtifact[]
   filingLocks     DocumentFilingLock[]
   importJob       ImportJob?     @relation(fields: [importJobId], references: [id], onDelete: SetNull)
+  syncConflicts   SyncConflict[]
 
   @@unique([tenantId, internalId])
+  @@unique([tenantId, clientIdempotencyKey])
   @@index([tenantId])
   @@index([tenantId, status])
   @@index([tenantId, importJobId])
+  @@index([tenantId, etaEnvironment])
   @@map("documents")
 }
 
+model SyncConflict {
+  id                     String                  @id @default(uuid()) @db.Uuid
+  tenantId               String                  @map("tenant_id") @db.Uuid
+  documentId             String                  @map("document_id") @db.Uuid
+  clientIdempotencyKey   String                  @map("client_idempotency_key")
+  localSnapshotJson      Json                    @map("local_snapshot_json")
+  serverSnapshotJson     Json                    @map("server_snapshot_json")
+  conflictingPathsJson   Json                    @default("[]") @map("conflicting_paths_json")
+  status                 SyncConflictStatus      @default(OPEN)
+  resolution             SyncConflictResolution?
+  resolvedByUserId       String?                 @map("resolved_by_user_id") @db.Uuid
+  createdAt              DateTime                @default(now()) @map("created_at")
+  resolvedAt             DateTime?               @map("resolved_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([documentId])
+  @@map("sync_conflicts")
+}
+
 model Submission {
-  id                    String          @id @default(uuid()) @db.Uuid
-  tenantId              String          @map("tenant_id") @db.Uuid
-  batchIdempotencyKey   String          @map("batch_idempotency_key")
-  parentSubmissionId    String?         @map("parent_submission_id") @db.Uuid
-  attemptNumber         Int             @default(1) @map("attempt_number")
-  state                 SubmissionState @default(ASSEMBLING)
-  etaSubmissionUuid     String?         @map("eta_submission_uuid")
-  documentCount         Int             @default(0) @map("document_count")
-  acceptedCount         Int             @default(0) @map("accepted_count")
-  refusedCount          Int             @default(0) @map("refused_count")
-  effectiveMaxDocs      Int?            @map("effective_max_docs")
-  effectiveMaxBytes     Int?            @map("effective_max_bytes")
-  lastErrorCode         String?         @map("last_error_code")
-  lastErrorMessage      String?         @map("last_error_message")
+  id                    String           @id @default(uuid()) @db.Uuid
+  tenantId              String           @map("tenant_id") @db.Uuid
+  batchIdempotencyKey   String           @map("batch_idempotency_key")
+  parentSubmissionId    String?          @map("parent_submission_id") @db.Uuid
+  attemptNumber         Int              @default(1) @map("attempt_number")
+  state                 SubmissionState  @default(ASSEMBLING)
+  etaSubmissionUuid     String?          @map("eta_submission_uuid")
+  /// ETA host this submission targeted (stamped when submitted).
+  etaEnvironment        EtaEnvironment?  @map("eta_environment")
+  documentCount         Int              @default(0) @map("document_count")
+  acceptedCount         Int              @default(0) @map("accepted_count")
+  refusedCount          Int              @default(0) @map("refused_count")
+  effectiveMaxDocs      Int?             @map("effective_max_docs")
+  effectiveMaxBytes     Int?             @map("effective_max_bytes")
+  lastErrorCode         String?          @map("last_error_code")
+  lastErrorMessage      String?          @map("last_error_message")
   /// Last raw ETA HTTP body (202 or 422) for diagnostics — never tokens.
-  etaRawResponseJson    Json?           @map("eta_raw_response_json")
-  nextAttemptAt         DateTime?       @map("next_attempt_at")
-  createdByUserId       String?         @map("created_by_user_id") @db.Uuid
-  triggerSource         String          @default("user") @map("trigger_source")
-  createdAt             DateTime        @default(now()) @map("created_at")
-  updatedAt             DateTime        @updatedAt @map("updated_at")
+  etaRawResponseJson    Json?            @map("eta_raw_response_json")
+  nextAttemptAt         DateTime?        @map("next_attempt_at")
+  createdByUserId       String?          @map("created_by_user_id") @db.Uuid
+  triggerSource         String           @default("user") @map("trigger_source")
+  createdAt             DateTime         @default(now()) @map("created_at")
+  updatedAt             DateTime         @updatedAt @map("updated_at")
 
   tenant    Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   parent    Submission?          @relation("SubmissionSplits", fields: [parentSubmissionId], references: [id], onDelete: SetNull)
@@ -627,6 +800,7 @@ model Submission {
   @@index([tenantId])
   @@index([tenantId, state])
   @@index([tenantId, createdAt])
+  @@index([tenantId, etaEnvironment])
   @@map("submissions")
 }
 
@@ -901,6 +1075,8 @@ model ReceivedDocument {
   branchId                 String?                       @map("branch_id") @db.Uuid
   needsAttention           Boolean                       @default(false) @map("needs_attention")
   needsAttentionReason     String?                       @map("needs_attention_reason")
+  /// Which ETA host this purchase was synced from.
+  etaEnvironment           EtaEnvironment?               @map("eta_environment")
   lastSyncedAt             DateTime                      @map("last_synced_at")
   createdAt                DateTime                      @default(now()) @map("created_at")
   updatedAt                DateTime                      @updatedAt @map("updated_at")
@@ -917,6 +1093,7 @@ model ReceivedDocument {
   @@index([tenantId, buyerDecision])
   @@index([tenantId, reconciliationStatus])
   @@index([tenantId, branchId])
+  @@index([tenantId, etaEnvironment])
   @@map("received_documents")
 }
 
@@ -1071,4 +1248,412 @@ model EtaPackageRequest {
   @@unique([tenantId, etaRequestId])
   @@index([tenantId, localStatus])
   @@map("eta_package_requests")
+}
+
+/// Sentinel: org-level / no branch dimension on rollups & events.
+/// Use NIL UUID when branch is absent so unique constraints work under PG.
+
+model UsageEvent {
+  id                 String     @id @default(uuid()) @db.Uuid
+  tenantId           String     @map("tenant_id") @db.Uuid
+  meter              UsageMeter
+  quantity           Decimal    @db.Decimal(24, 6)
+  occurredAt         DateTime   @map("occurred_at")
+  branchId           String?    @map("branch_id") @db.Uuid
+  currencyCode       String?    @map("currency_code")
+  documentId         String?    @map("document_id") @db.Uuid
+  receivedDocumentId String?    @map("received_document_id") @db.Uuid
+  idempotencyKey     String     @map("idempotency_key")
+  metaJson           Json?      @map("meta_json")
+  createdAt          DateTime   @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, meter, idempotencyKey])
+  @@index([tenantId, occurredAt])
+  @@index([tenantId, meter, occurredAt])
+  @@index([tenantId, branchId, occurredAt])
+  @@map("usage_events")
+}
+
+model UsageDailyRollup {
+  id           String     @id @default(uuid()) @db.Uuid
+  tenantId     String     @map("tenant_id") @db.Uuid
+  bucketDate   DateTime   @map("bucket_date") @db.Date
+  meter        UsageMeter
+  /// NIL UUID = org-level / no branch
+  branchKey    String     @default("00000000-0000-0000-0000-000000000000") @map("branch_key") @db.Uuid
+  /// Empty string = org-level / no currency
+  currencyKey  String     @default("") @map("currency_key")
+  value        Decimal    @db.Decimal(24, 6)
+  eventCount   Int        @default(0) @map("event_count")
+  asOf         DateTime   @map("as_of")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, bucketDate, meter, branchKey, currencyKey])
+  @@index([tenantId, bucketDate])
+  @@index([tenantId, meter, bucketDate])
+  @@map("usage_daily_rollups")
+}
+
+model UsageMonthlyRollup {
+  id           String     @id @default(uuid()) @db.Uuid
+  tenantId     String     @map("tenant_id") @db.Uuid
+  bucketMonth  DateTime   @map("bucket_month") @db.Date
+  meter        UsageMeter
+  branchKey    String     @default("00000000-0000-0000-0000-000000000000") @map("branch_key") @db.Uuid
+  currencyKey  String     @default("") @map("currency_key")
+  value        Decimal    @db.Decimal(24, 6)
+  asOf         DateTime   @map("as_of")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, bucketMonth, meter, branchKey, currencyKey])
+  @@index([tenantId, bucketMonth])
+  @@index([tenantId, meter, bucketMonth])
+  @@map("usage_monthly_rollups")
+}
+
+model UsageExportJob {
+  id              String               @id @default(uuid()) @db.Uuid
+  tenantId        String               @map("tenant_id") @db.Uuid
+  createdByUserId String?              @map("created_by_user_id") @db.Uuid
+  status          UsageExportJobStatus @default(QUEUED)
+  format          UsageExportFormat
+  filtersJson     Json                 @map("filters_json")
+  objectKey       String?              @map("object_key")
+  byteSize        Int?                 @map("byte_size")
+  errorSummary    String?              @map("error_summary")
+  expiresAt       DateTime?            @map("expires_at")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@map("usage_export_jobs")
+}
+
+enum TenantBackupJobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+enum TenantBackupTriggerSource {
+  MANUAL
+  SCHEDULE
+}
+
+enum TenantRestoreJobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum TenantDataExportJobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+model TenantBackupJob {
+  id              String                    @id @default(uuid()) @db.Uuid
+  tenantId        String                    @map("tenant_id") @db.Uuid
+  status          TenantBackupJobStatus     @default(QUEUED)
+  triggerSource   TenantBackupTriggerSource @default(MANUAL) @map("trigger_source")
+  scheduleId      String?                   @map("schedule_id") @db.Uuid
+  objectKey       String?                   @map("object_key")
+  byteSize        BigInt?                   @map("byte_size")
+  checksumSha256  String?                   @map("checksum_sha256")
+  schemaVersion   String                    @default("1") @map("schema_version")
+  errorCode       String?                   @map("error_code")
+  errorMessage    String?                   @map("error_message")
+  createdByUserId String?                   @map("created_by_user_id") @db.Uuid
+  startedAt       DateTime?                 @map("started_at")
+  completedAt     DateTime?                 @map("completed_at")
+  expiresAt       DateTime?                 @map("expires_at")
+  createdAt       DateTime                  @default(now()) @map("created_at")
+  updatedAt       DateTime                  @updatedAt @map("updated_at")
+
+  tenant   Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  schedule TenantBackupSchedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, status])
+  @@index([tenantId, triggerSource, createdAt])
+  @@map("tenant_backup_jobs")
+}
+
+model TenantBackupSchedule {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @unique @map("tenant_id") @db.Uuid
+  cronExpression String   @map("cron_expression")
+  timezone       String   @default("Africa/Cairo")
+  paused         Boolean  @default(false)
+  nextRunAt      DateTime? @map("next_run_at")
+  lastRunAt      DateTime? @map("last_run_at")
+  createdByUserId String? @map("created_by_user_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  jobs   TenantBackupJob[]
+
+  @@map("tenant_backup_schedules")
+}
+
+model TenantRestoreJob {
+  id                      String                 @id @default(uuid()) @db.Uuid
+  tenantId                String                 @map("tenant_id") @db.Uuid
+  sourceBackupJobId       String?                @map("source_backup_job_id") @db.Uuid
+  sourceTenantId          String                 @map("source_tenant_id") @db.Uuid
+  sourceChecksumSha256    String                 @map("source_checksum_sha256")
+  sourceObjectKey         String?                @map("source_object_key")
+  status                  TenantRestoreJobStatus @default(QUEUED)
+  confirmationToken       String                 @map("confirmation_token")
+  actorUserId             String                 @map("actor_user_id") @db.Uuid
+  actorIsPlatformOperator Boolean                @default(false) @map("actor_is_platform_operator")
+  ownershipCheckPassed    Boolean?               @map("ownership_check_passed")
+  checksumCheckPassed     Boolean?               @map("checksum_check_passed")
+  emptyOrgCheckPassed     Boolean?               @map("empty_org_check_passed")
+  errorCode               String?                @map("error_code")
+  errorMessage            String?                @map("error_message")
+  startedAt               DateTime?              @map("started_at")
+  completedAt             DateTime?              @map("completed_at")
+  createdAt               DateTime               @default(now()) @map("created_at")
+  updatedAt               DateTime               @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@map("tenant_restore_jobs")
+}
+
+model TenantDataExportJob {
+  id              String                   @id @default(uuid()) @db.Uuid
+  tenantId        String                   @map("tenant_id") @db.Uuid
+  status          TenantDataExportJobStatus @default(QUEUED)
+  includeFiles    Boolean                  @default(false) @map("include_files")
+  objectKey       String?                  @map("object_key")
+  byteSize        BigInt?                  @map("byte_size")
+  errorCode       String?                  @map("error_code")
+  errorMessage    String?                  @map("error_message")
+  createdByUserId String?                  @map("created_by_user_id") @db.Uuid
+  startedAt       DateTime?                @map("started_at")
+  completedAt     DateTime?                @map("completed_at")
+  expiresAt       DateTime?                @map("expires_at")
+  createdAt       DateTime                 @default(now()) @map("created_at")
+  updatedAt       DateTime                 @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@map("tenant_data_export_jobs")
+}
+
+// --- SaaS layer (013) ---
+
+enum PlanCode {
+  FREE
+  STARTER
+  PRO
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  READ_ONLY
+  SUSPENDED
+  CANCELLED
+}
+
+enum ImpersonationMode {
+  READ_ONLY
+  WRITE
+}
+
+enum BillingProviderId {
+  stripe
+  local
+}
+
+enum EmailTemplate {
+  onboarding_complete
+  plan_change
+  payment_success
+  payment_failure
+  past_due
+  suspend
+  activate
+  quota_warn
+  impersonation_start
+}
+
+enum EmailOutboxStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+model Plan {
+  id              String   @id @default(uuid()) @db.Uuid
+  code            PlanCode @unique
+  nameEn          String   @map("name_en")
+  nameAr          String   @map("name_ar")
+  descriptionEn   String?  @map("description_en")
+  descriptionAr   String?  @map("description_ar")
+  documentQuota   Int      @map("document_quota")
+  branchQuota     Int      @map("branch_quota")
+  deviceQuota     Int      @map("device_quota")
+  selfServe       Boolean  @default(true) @map("self_serve")
+  isActive        Boolean  @default(true) @map("is_active")
+  sortOrder       Int      @default(0) @map("sort_order")
+  stripePriceId   String?  @map("stripe_price_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id                      String             @id @default(uuid()) @db.Uuid
+  tenantId                String             @unique @map("tenant_id") @db.Uuid
+  planId                  String             @map("plan_id") @db.Uuid
+  status                  SubscriptionStatus @default(ACTIVE)
+  graceEndsAt             DateTime?          @map("grace_ends_at")
+  currentPeriodStart      DateTime?          @map("current_period_start")
+  currentPeriodEnd        DateTime?          @map("current_period_end")
+  cancelAtPeriodEnd       Boolean            @default(false) @map("cancel_at_period_end")
+  provider                BillingProviderId? 
+  providerSubscriptionId  String?            @map("provider_subscription_id")
+  createdAt               DateTime           @default(now()) @map("created_at")
+  updatedAt               DateTime           @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan   Plan   @relation(fields: [planId], references: [id])
+
+  @@index([status, graceEndsAt])
+  @@map("subscriptions")
+}
+
+model QuotaOverride {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  documentQuota    Int?      @map("document_quota")
+  branchQuota      Int?      @map("branch_quota")
+  deviceQuota      Int?      @map("device_quota")
+  reason           String
+  createdByUserId  String    @map("created_by_user_id") @db.Uuid
+  expiresAt        DateTime? @map("expires_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@map("quota_overrides")
+}
+
+model PaymentCustomer {
+  id                 String            @id @default(uuid()) @db.Uuid
+  tenantId           String            @map("tenant_id") @db.Uuid
+  provider           BillingProviderId
+  providerCustomerId String            @map("provider_customer_id")
+  createdAt          DateTime          @default(now()) @map("created_at")
+  updatedAt          DateTime          @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, provider])
+  @@map("payment_customers")
+}
+
+model InvoiceRef {
+  id                String            @id @default(uuid()) @db.Uuid
+  tenantId          String            @map("tenant_id") @db.Uuid
+  provider          BillingProviderId
+  providerInvoiceId String            @map("provider_invoice_id")
+  status            String
+  amountCents       Int               @map("amount_cents")
+  currency          String
+  periodStart       DateTime?         @map("period_start")
+  periodEnd         DateTime?         @map("period_end")
+  hostedInvoiceUrl  String?           @map("hosted_invoice_url")
+  createdAt         DateTime          @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerInvoiceId])
+  @@index([tenantId, createdAt])
+  @@map("invoice_refs")
+}
+
+model BillingWebhookEvent {
+  id              String            @id @default(uuid()) @db.Uuid
+  provider        BillingProviderId
+  providerEventId String            @map("provider_event_id")
+  type            String
+  payloadJson     Json              @map("payload_json")
+  processedAt     DateTime?         @map("processed_at")
+  outcome         String?
+  createdAt       DateTime          @default(now()) @map("created_at")
+
+  @@unique([provider, providerEventId])
+  @@map("billing_webhook_events")
+}
+
+model ImpersonationSession {
+  id                String            @id @default(uuid()) @db.Uuid
+  operatorUserId    String            @map("operator_user_id") @db.Uuid
+  targetUserId      String            @map("target_user_id") @db.Uuid
+  tenantId          String            @map("tenant_id") @db.Uuid
+  reason            String
+  mode              ImpersonationMode @default(READ_ONLY)
+  breakGlassReason  String?           @map("break_glass_reason")
+  expiresAt         DateTime          @map("expires_at")
+  endedAt           DateTime?         @map("ended_at")
+  createdAt         DateTime          @default(now()) @map("created_at")
+
+  operator User   @relation("ImpersonationOperator", fields: [operatorUserId], references: [id])
+  target   User   @relation("ImpersonationTarget", fields: [targetUserId], references: [id])
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, expiresAt])
+  @@index([operatorUserId, endedAt])
+  @@map("impersonation_sessions")
+}
+
+model EmailOutbox {
+  id          String            @id @default(uuid()) @db.Uuid
+  tenantId    String?           @map("tenant_id") @db.Uuid
+  template    EmailTemplate
+  locale      String
+  toEmail     String            @map("to_email")
+  dedupeKey   String            @unique @map("dedupe_key")
+  status      EmailOutboxStatus @default(PENDING)
+  payloadJson Json              @map("payload_json")
+  sentAt      DateTime?         @map("sent_at")
+  error       String?
+  createdAt   DateTime          @default(now()) @map("created_at")
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@map("email_outbox")
 }

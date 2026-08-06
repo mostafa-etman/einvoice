@@ -134,6 +134,119 @@ export function taxesForMode(
 }
 
 /**
+ * How a tax type moves the amount due in ETA's item-total equation.
+ *
+ * Source: ETA SDK "Main Calculations" rule 17 and the "Document validation
+ * rules" line-total equation:
+ *
+ *   total = netTotal + T3 + Sum(T5..T12) + T2 + T1 + Sum(T13..T20)
+ *           - itemsDiscount - T4
+ *
+ * Every declared tax raises the amount due except withholding tax (T4,
+ * "الخصم تحت حساب الضريبة"), which ETA subtracts. Direction belongs to the tax
+ * TYPE: the T4 subtypes (W001..W0xx) never change it.
+ */
+export type EtaTaxDirection = 'additive' | 'deductible';
+
+export const ETA_DEDUCTIBLE_TAX_TYPES = ['T4'] as const;
+
+/** Taxable fees whose sum ETA reports as the line's totalTaxableFees. */
+export const ETA_TAXABLE_FEE_TAX_TYPES = [
+  'T5',
+  'T6',
+  'T7',
+  'T8',
+  'T9',
+  'T10',
+  'T11',
+  'T12',
+] as const;
+
+/** Non-taxable fees (T13-T20): charged on netTotal, outside the T1/T2 base. */
+export const ETA_NON_TAXABLE_FEE_TAX_TYPES = [
+  'T13',
+  'T14',
+  'T15',
+  'T16',
+  'T17',
+  'T18',
+  'T19',
+  'T20',
+] as const;
+
+/**
+ * Fixed-amount tax types: ETA requires rate 0 and the amount supplied directly.
+ * Per Document validation rules: T3 (table tax fixed) and T6 (stamping amount).
+ */
+export const ETA_FIXED_AMOUNT_TAX_TYPES = ['T3', 'T6'] as const;
+
+const DEDUCTIBLE_SET = new Set<string>(ETA_DEDUCTIBLE_TAX_TYPES);
+const TAXABLE_FEE_SET = new Set<string>(ETA_TAXABLE_FEE_TAX_TYPES);
+const NON_TAXABLE_FEE_SET = new Set<string>(ETA_NON_TAXABLE_FEE_TAX_TYPES);
+const FIXED_AMOUNT_SET = new Set<string>(ETA_FIXED_AMOUNT_TAX_TYPES);
+
+export function normalizeTaxTypeCode(taxType: string): string {
+  return taxType.trim().toUpperCase();
+}
+
+export function etaTaxDirection(taxType: string): EtaTaxDirection {
+  return DEDUCTIBLE_SET.has(normalizeTaxTypeCode(taxType))
+    ? 'deductible'
+    : 'additive';
+}
+
+export function isDeductibleTaxType(taxType: string): boolean {
+  return etaTaxDirection(taxType) === 'deductible';
+}
+
+/** +1 for taxes that raise the total, -1 for withholding-style taxes. */
+export function etaTaxSign(taxType: string): 1 | -1 {
+  return isDeductibleTaxType(taxType) ? -1 : 1;
+}
+
+export function isTaxableFeeTaxType(taxType: string): boolean {
+  return TAXABLE_FEE_SET.has(normalizeTaxTypeCode(taxType));
+}
+
+export function isNonTaxableFeeTaxType(taxType: string): boolean {
+  return NON_TAXABLE_FEE_SET.has(normalizeTaxTypeCode(taxType));
+}
+
+export function isFixedAmountTaxType(taxType: string): boolean {
+  return FIXED_AMOUNT_SET.has(normalizeTaxTypeCode(taxType));
+}
+
+/** A row of ETA's TaxTypes.json / NonTaxableTaxTypes.json catalog. */
+export type EtaTaxTypeCatalogEntry = {
+  code: string;
+  descEn?: string | null;
+  descAr?: string | null;
+};
+
+const WITHHOLDING_EN = /withholding|\bwht\b/i;
+const WITHHOLDING_AR = /الخصم\s*تحت\s*حساب/;
+
+/** ETA labels withholding types "Withholding tax (WHT)" / "الخصم تحت حساب الضريبه". */
+export function isWithholdingCatalogEntry(entry: EtaTaxTypeCatalogEntry): boolean {
+  return (
+    WITHHOLDING_EN.test(entry.descEn ?? '') || WITHHOLDING_AR.test(entry.descAr ?? '')
+  );
+}
+
+/**
+ * Deductible tax types implied by an ETA catalog snapshot. Compared against
+ * ETA_DEDUCTIBLE_TAX_TYPES in tests so a catalog refresh that introduces
+ * another withholding type fails loudly instead of being silently added.
+ */
+export function deductibleTaxTypesFromCatalog(
+  entries: EtaTaxTypeCatalogEntry[],
+): string[] {
+  return entries
+    .filter(isWithholdingCatalogEntry)
+    .map((e) => normalizeTaxTypeCode(e.code));
+}
+
+/**
  * ETA rule: each TaxType must be unique within a single invoice line.
  * Returns duplicate taxType codes (empty if all unique).
  */

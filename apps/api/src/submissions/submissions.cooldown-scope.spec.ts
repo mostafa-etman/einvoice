@@ -85,6 +85,14 @@ function makeService(rows: DocRow[]) {
     tenantPrisma as never,
     { getAccessToken: jest.fn() } as never,
     { write: jest.fn() } as never,
+    {
+      emitIssued: jest.fn(),
+      emitDocumentOutcome: jest.fn(),
+    } as never,
+    {
+      checkTenantWritable: jest.fn().mockResolvedValue(undefined),
+      assertWithinLimits: jest.fn().mockResolvedValue(undefined),
+    } as never,
   );
   const gate = (ids: string[]) =>
     (

@@ -3,9 +3,58 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import {
+  missingIssuerAddressFields,
+  type IssuerAddress,
+} from '@einvoice/eta-core';
 import { TenantPrismaService } from '../../prisma/tenant-prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { QuotaService } from '../../billing/quota.service';
+
+export type BranchAddressInput = IssuerAddress;
+
+/** Branch column ⇄ ETA issuer address field. */
+const ADDRESS_COLUMNS = {
+  country: 'addressCountry',
+  governate: 'addressGovernate',
+  regionCity: 'addressRegionCity',
+  street: 'addressStreet',
+  buildingNumber: 'addressBuildingNumber',
+  postalCode: 'addressPostalCode',
+  floor: 'addressFloor',
+  room: 'addressRoom',
+  landmark: 'addressLandmark',
+  additionalInformation: 'addressAdditionalInformation',
+} as const;
+
+type BranchAddressColumns = {
+  [K in (typeof ADDRESS_COLUMNS)[keyof typeof ADDRESS_COLUMNS]]?: string | null;
+};
+
+export function branchAddressToIssuerAddress(
+  branch: BranchAddressColumns,
+): IssuerAddress {
+  const address: IssuerAddress = {};
+  for (const [field, column] of Object.entries(ADDRESS_COLUMNS)) {
+    const value = branch[column];
+    if (typeof value === 'string' && value.trim()) {
+      address[field as keyof IssuerAddress] = value.trim();
+    }
+  }
+  return address;
+}
+
+function addressToColumns(address: BranchAddressInput): BranchAddressColumns {
+  const data: BranchAddressColumns = {};
+  for (const [field, column] of Object.entries(ADDRESS_COLUMNS)) {
+    const value = address[field as keyof IssuerAddress];
+    if (value === undefined) continue;
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+    data[column] = trimmed || null;
+  }
+  return data;
+}
 
 @Injectable()
 export class BranchesSettingsService {
@@ -13,12 +62,26 @@ export class BranchesSettingsService {
     private readonly tenantPrisma: TenantPrismaService,
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly quota: QuotaService,
   ) {}
 
-  list(tenantId: string) {
-    return this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.branch.findMany({ orderBy: { createdAt: 'asc' } }),
+  async list(tenantId: string) {
+    const branches = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.branch.findMany({
+        where: { tenantId },
+        orderBy: { createdAt: 'asc' },
+      }),
     );
+    return branches.map((b) => this.toDto(b));
+  }
+
+  private toDto<T extends BranchAddressColumns>(branch: T) {
+    const address = branchAddressToIssuerAddress(branch);
+    return {
+      ...branch,
+      address,
+      addressComplete: missingIssuerAddressFields(address).length === 0,
+    };
   }
 
   async create(
@@ -30,11 +93,16 @@ export class BranchesSettingsService {
       etaBranchCode?: string;
       activityCode?: string;
       defaultCurrencyCode?: string;
+      address?: BranchAddressInput;
     },
   ) {
     if (input.defaultCurrencyCode) {
       await this.assertCurrency(input.defaultCurrencyCode);
     }
+    this.assertCompleteAddress(input.address ?? {});
+
+    await this.quota.checkTenantWritable(tenantId);
+    await this.quota.assertWithinLimits(tenantId, 'branches');
 
     const branch = await this.tenantPrisma.withTenant(tenantId, async (tx) => {
       if (input.isDefault) {
@@ -52,6 +120,10 @@ export class BranchesSettingsService {
           etaBranchCode: input.etaBranchCode,
           activityCode: input.activityCode,
           defaultCurrencyCode: input.defaultCurrencyCode,
+          ...addressToColumns({
+            country: 'EG',
+            ...(input.address ?? {}),
+          }),
         },
       });
     });
@@ -65,7 +137,7 @@ export class BranchesSettingsService {
       resourceId: branch.id,
       metadata: { name: branch.name, isDefault: branch.isDefault },
     });
-    return branch;
+    return this.toDto(branch);
   }
 
   async update(
@@ -79,6 +151,7 @@ export class BranchesSettingsService {
       etaBranchCode?: string | null;
       activityCode?: string | null;
       defaultCurrencyCode?: string | null;
+      address?: BranchAddressInput;
     },
   ) {
     if (input.defaultCurrencyCode) {
@@ -91,6 +164,15 @@ export class BranchesSettingsService {
       });
       if (!existing) {
         throw new NotFoundException('Branch not found');
+      }
+
+      // Validate the merged result so an address can be completed field by
+      // field, but never blanked back out once documents depend on it.
+      if (input.address) {
+        this.assertCompleteAddress({
+          ...branchAddressToIssuerAddress(existing),
+          ...input.address,
+        });
       }
 
       if (input.isActive === false && existing.isDefault) {
@@ -139,6 +221,7 @@ export class BranchesSettingsService {
           ...(input.defaultCurrencyCode !== undefined
             ? { defaultCurrencyCode: input.defaultCurrencyCode }
             : {}),
+          ...(input.address ? addressToColumns(input.address) : {}),
         },
       });
     });
@@ -160,7 +243,22 @@ export class BranchesSettingsService {
         isActive: branch.isActive,
       },
     });
-    return branch;
+    return this.toDto(branch);
+  }
+
+  /**
+   * The issuer address is company-level: an incomplete one would make every
+   * document issued from this branch fail ETA validation.
+   */
+  private assertCompleteAddress(address: BranchAddressInput) {
+    const missing = missingIssuerAddressFields(address);
+    if (missing.length) {
+      throw new BadRequestException({
+        code: 'ISSUER_ADDRESS_INCOMPLETE',
+        message: `Branch issuer address is incomplete. Missing: ${missing.join(', ')}`,
+        missing,
+      });
+    }
   }
 
   private async assertCurrency(code: string) {

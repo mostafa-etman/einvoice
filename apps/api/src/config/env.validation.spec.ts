@@ -14,6 +14,12 @@ describe('loadEnv', () => {
     ETA_IDENTITY_BASE_URL: 'https://id.preprod.eta.gov.eg',
     ETA_API_BASE_URL: 'https://api.preprod.invoicing.eta.gov.eg',
     JWT_ACCESS_SECRET: 'test-access-secret-min-16',
+    SECRETS_MASTER_KEY: Buffer.from(
+      'test-secrets-master-key-32bytes!',
+    ).toString('base64'),
+    BACKUP_ARCHIVE_MASTER_KEY: Buffer.from(
+      'test-backup-archive-key-32bytes!',
+    ).toString('base64'),
   };
 
   it('loads valid configuration', () => {
@@ -23,6 +29,10 @@ describe('loadEnv', () => {
     expect(env.ETA_IDENTITY_BASE_URL).toBe('https://id.preprod.eta.gov.eg');
     expect(env.ETA_API_BASE_URL).toBe(
       'https://api.preprod.invoicing.eta.gov.eg',
+    );
+    expect(env.ETA_PRODUCTION_IDENTITY_BASE_URL).toBe('https://id.eta.gov.eg');
+    expect(env.ETA_PRODUCTION_API_BASE_URL).toBe(
+      'https://api.invoicing.eta.gov.eg',
     );
   });
 

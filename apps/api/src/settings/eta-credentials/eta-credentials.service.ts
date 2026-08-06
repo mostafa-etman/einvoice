@@ -3,10 +3,15 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { TenantEtaCredential } from '@prisma/client';
+import type { EtaEnvironment, TenantEtaCredential } from '@prisma/client';
+import {
+  ETA_ISSUER_TYPES,
+  isIssuerNameComplete,
+} from '@einvoice/eta-core';
 import { TenantPrismaService } from '../../prisma/tenant-prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import { SecretsEncryptionService } from '../../crypto/secrets-encryption.service';
+import { PrismaService } from '../../prisma/prisma.service';
 
 const MASK = '••••••••';
 
@@ -15,9 +20,21 @@ function asBytes(value: Buffer | Uint8Array): Buffer {
   return Buffer.from(value);
 }
 
+function parseEnvironment(
+  value?: string | null,
+): EtaEnvironment {
+  if (!value || value === 'SANDBOX') return 'SANDBOX';
+  if (value === 'PRODUCTION') return 'PRODUCTION';
+  throw new BadRequestException({
+    code: 'INVALID_ETA_ENVIRONMENT',
+    message: 'environment must be SANDBOX or PRODUCTION',
+  });
+}
+
 export type EtaCredentialsView = {
   id: string;
   branchId: string | null;
+  environment: EtaEnvironment;
   clientId: string;
   hasClientSecret: boolean;
   clientSecretMasked: string;
@@ -26,20 +43,67 @@ export type EtaCredentialsView = {
   isIntermediary: boolean;
   onBehalfOfRegistrationNumber: string | null;
   onBehalfOfName: string | null;
+  /** Taxpayer legal name → ETA issuer.name (tenant-level, not branch). */
+  taxpayerLegalName: string | null;
+  /** ETA issuer.type: B | P | F */
+  issuerType: string;
+  /** False when legal name is blank (required before issuing). */
+  issuerIdentityComplete: boolean;
+  lastValidatedAt: string | null;
+  /** Tenant's currently active ETA host profile. */
+  activeEnvironment: EtaEnvironment;
 };
 
 @Injectable()
 export class EtaCredentialsService {
   constructor(
     private readonly tenantPrisma: TenantPrismaService,
+    private readonly prisma: PrismaService,
     private readonly crypto: SecretsEncryptionService,
     private readonly audit: AuditService,
   ) {}
 
-  async get(tenantId: string, branchId?: string): Promise<EtaCredentialsView | null> {
+  async get(
+    tenantId: string,
+    opts?: { branchId?: string; environment?: string },
+  ): Promise<EtaCredentialsView | null> {
     await this.crypto.ensureReady();
-    const row = await this.resolveRow(tenantId, branchId);
-    return row ? this.toView(row) : null;
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+    });
+    if (!tenant) return null;
+
+    const environment = parseEnvironment(
+      opts?.environment ?? tenant.activeEtaEnvironment,
+    );
+    const row = await this.resolveRow(tenantId, environment, opts?.branchId);
+
+    if (!row) {
+      return {
+        id: '',
+        branchId: null,
+        environment,
+        clientId: '',
+        hasClientSecret: false,
+        clientSecretMasked: MASK,
+        registrationNumber: null,
+        activityCode: null,
+        isIntermediary: false,
+        onBehalfOfRegistrationNumber: null,
+        onBehalfOfName: null,
+        taxpayerLegalName: tenant.legalName,
+        issuerType: tenant.issuerType || 'B',
+        issuerIdentityComplete: isIssuerNameComplete(tenant.legalName),
+        lastValidatedAt: null,
+        activeEnvironment: tenant.activeEtaEnvironment,
+      };
+    }
+    return this.toView(
+      row,
+      tenant.legalName ?? null,
+      tenant.issuerType ?? 'B',
+      tenant.activeEtaEnvironment,
+    );
   }
 
   async upsert(
@@ -47,6 +111,7 @@ export class EtaCredentialsService {
     actorUserId: string,
     input: {
       branchId?: string | null;
+      environment?: string;
       clientId: string;
       clientSecret?: string;
       registrationNumber?: string;
@@ -54,17 +119,59 @@ export class EtaCredentialsService {
       isIntermediary?: boolean;
       onBehalfOfRegistrationNumber?: string;
       onBehalfOfName?: string;
+      taxpayerLegalName?: string;
+      issuerType?: string;
     },
   ): Promise<EtaCredentialsView> {
     await this.crypto.ensureReady();
     const branchId = input.branchId ?? null;
     this.assertIntermediary(input);
 
+    const tenantRow = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+    });
+    if (!tenantRow) throw new NotFoundException('Tenant not found');
+
+    const environment = parseEnvironment(
+      input.environment ?? tenantRow.activeEtaEnvironment,
+    );
+
+    const legalName =
+      input.taxpayerLegalName !== undefined
+        ? input.taxpayerLegalName.trim() || null
+        : (tenantRow.legalName ?? null);
+    const issuerType = this.normalizeIssuerType(
+      input.issuerType !== undefined
+        ? input.issuerType
+        : (tenantRow.issuerType ?? 'B'),
+    );
+    if (!isIssuerNameComplete(legalName)) {
+      throw new BadRequestException({
+        code: 'ISSUER_NAME_INCOMPLETE',
+        message:
+          'Taxpayer legal name is required. It appears as issuer.name on every ETA invoice — do not use the branch name.',
+      });
+    }
+    if (
+      input.registrationNumber !== undefined &&
+      !input.registrationNumber.trim()
+    ) {
+      throw new BadRequestException({
+        code: 'ISSUER_ID_INCOMPLETE',
+        message: 'ETA registration number (issuer.id) is required.',
+      });
+    }
+
+    await this.prisma.tenant.update({
+      where: { id: tenantId },
+      data: { legalName, issuerType },
+    });
+
     const row = await this.tenantPrisma.withTenant(tenantId, async (tx) => {
       const existing = await tx.tenantEtaCredential.findFirst({
         where: branchId
-          ? { tenantId, branchId }
-          : { tenantId, branchId: null },
+          ? { tenantId, environment, branchId }
+          : { tenantId, environment, branchId: null },
       });
 
       const secretProvided =
@@ -100,6 +207,8 @@ export class EtaCredentialsService {
         onBehalfOfRegistrationNumber:
           input.onBehalfOfRegistrationNumber ?? null,
         onBehalfOfName: input.onBehalfOfName ?? null,
+        // Secret change invalidates prior validation for that environment.
+        lastValidatedAt: secretProvided ? null : existing?.lastValidatedAt,
       };
 
       if (existing) {
@@ -112,6 +221,7 @@ export class EtaCredentialsService {
         data: {
           tenantId,
           branchId,
+          environment,
           ...data,
         } as never,
       });
@@ -126,32 +236,46 @@ export class EtaCredentialsService {
       resourceId: row.id,
       metadata: {
         branchId: row.branchId,
+        environment: row.environment,
         clientId: row.clientId,
         secretSet: Boolean(input.clientSecret),
         isIntermediary: row.isIntermediary,
       },
     });
 
-    return this.toView(row);
+    return this.toView(
+      row,
+      legalName,
+      issuerType,
+      tenantRow.activeEtaEnvironment,
+    );
   }
 
   async rotateSecret(
     tenantId: string,
     actorUserId: string,
     clientSecret: string,
-    branchId?: string | null,
+    opts?: { branchId?: string | null; environment?: string },
   ): Promise<EtaCredentialsView> {
     await this.crypto.ensureReady();
     if (!clientSecret) {
       throw new BadRequestException('clientSecret is required');
     }
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+    });
+    if (!tenant) throw new NotFoundException('Tenant not found');
+    const environment = parseEnvironment(
+      opts?.environment ?? tenant.activeEtaEnvironment,
+    );
+    const branchId = opts?.branchId;
     const enc = this.crypto.encrypt(clientSecret);
 
     const row = await this.tenantPrisma.withTenant(tenantId, async (tx) => {
       const existing = await tx.tenantEtaCredential.findFirst({
         where: branchId
-          ? { tenantId, branchId }
-          : { tenantId, branchId: null },
+          ? { tenantId, environment, branchId }
+          : { tenantId, environment, branchId: null },
       });
       if (!existing) {
         throw new NotFoundException('ETA credentials not found');
@@ -161,6 +285,7 @@ export class EtaCredentialsService {
         data: {
           clientSecretCiphertext: asBytes(enc.ciphertext),
           clientSecretNonce: asBytes(enc.nonce),
+          lastValidatedAt: null,
         } as never,
       });
     });
@@ -172,30 +297,49 @@ export class EtaCredentialsService {
       tenantId,
       resourceType: 'tenant_eta_credential',
       resourceId: row.id,
-      metadata: { branchId: row.branchId, rotated: true },
+      metadata: {
+        branchId: row.branchId,
+        environment: row.environment,
+        rotated: true,
+      },
     });
 
-    return this.toView(row);
+    return this.toView(
+      row,
+      tenant.legalName ?? null,
+      tenant.issuerType ?? 'B',
+      tenant.activeEtaEnvironment,
+    );
   }
 
-  private async resolveRow(tenantId: string, branchId?: string) {
+  private async resolveRow(
+    tenantId: string,
+    environment: EtaEnvironment,
+    branchId?: string,
+  ) {
     return this.tenantPrisma.withTenant(tenantId, async (tx) => {
       if (branchId) {
         const override = await tx.tenantEtaCredential.findFirst({
-          where: { tenantId, branchId },
+          where: { tenantId, environment, branchId },
         });
         if (override) return override;
       }
       return tx.tenantEtaCredential.findFirst({
-        where: { tenantId, branchId: null },
+        where: { tenantId, environment, branchId: null },
       });
     });
   }
 
-  private toView(row: TenantEtaCredential): EtaCredentialsView {
+  private toView(
+    row: TenantEtaCredential,
+    legalName: string | null,
+    issuerType: string,
+    activeEnvironment: EtaEnvironment,
+  ): EtaCredentialsView {
     return {
       id: row.id,
       branchId: row.branchId,
+      environment: row.environment,
       clientId: row.clientId,
       hasClientSecret: row.clientSecretCiphertext.length > 0,
       clientSecretMasked: MASK,
@@ -204,7 +348,22 @@ export class EtaCredentialsService {
       isIntermediary: row.isIntermediary,
       onBehalfOfRegistrationNumber: row.onBehalfOfRegistrationNumber,
       onBehalfOfName: row.onBehalfOfName,
+      taxpayerLegalName: legalName,
+      issuerType: issuerType || 'B',
+      issuerIdentityComplete: isIssuerNameComplete(legalName),
+      lastValidatedAt: row.lastValidatedAt?.toISOString() ?? null,
+      activeEnvironment,
     };
+  }
+
+  private normalizeIssuerType(value?: string): string {
+    const t = (value ?? 'B').trim().toUpperCase();
+    if (!(ETA_ISSUER_TYPES as readonly string[]).includes(t)) {
+      throw new BadRequestException(
+        `issuerType must be one of ${ETA_ISSUER_TYPES.join(', ')}`,
+      );
+    }
+    return t;
   }
 
   private assertIntermediary(input: {

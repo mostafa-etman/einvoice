@@ -4,9 +4,11 @@ import {
   OnModuleDestroy,
   UnauthorizedException,
 } from '@nestjs/common';
+import type { EtaEnvironment } from '@prisma/client';
 import Redis from 'ioredis';
 import { loadEnv } from '../config/env';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { SecretsEncryptionService } from '../crypto/secrets-encryption.service';
 import { AuditService } from '../audit/audit.service';
 import { EtaAuthClient } from './eta-auth.client';
@@ -17,68 +19,93 @@ import {
   ETA_SETUP_CODE,
   type EtaConnectionStatus,
 } from './eta-service.types';
+import {
+  etaEnvironmentLabel,
+  resolveEtaHostUrls,
+  type EtaHostUrls,
+} from './eta-environment';
 
 @Injectable()
 export class EtaService implements OnModuleDestroy {
   private readonly redis: Redis;
-  private readonly auth: EtaAuthClient;
   private readonly tokens: EtaTokenCache;
-  private readonly docTypes: EtaDocTypesClient;
-  private readonly identityBaseUrl: string;
-  private readonly apiBaseUrl: string;
+  private readonly envConfig = loadEnv();
   private lastTest = new Map<
     string,
-    { outcome: 'success' | 'failure'; message: string }
+    { outcome: 'success' | 'failure'; message: string; environment: EtaEnvironment }
   >();
 
   constructor(
     private readonly tenantPrisma: TenantPrismaService,
+    private readonly prisma: PrismaService,
     private readonly crypto: SecretsEncryptionService,
     private readonly audit: AuditService,
   ) {
-    const env = loadEnv();
-    this.identityBaseUrl = env.ETA_IDENTITY_BASE_URL;
-    this.apiBaseUrl = env.ETA_API_BASE_URL;
-    this.redis = new Redis(env.REDIS_URL, {
+    this.redis = new Redis(this.envConfig.REDIS_URL, {
       maxRetriesPerRequest: 1,
       enableReadyCheck: false,
       lazyConnect: true,
     });
-    this.auth = new EtaAuthClient(this.identityBaseUrl);
     this.tokens = new EtaTokenCache(this.redis);
-    this.docTypes = new EtaDocTypesClient(this.apiBaseUrl, this.redis);
   }
 
   async onModuleDestroy() {
     await this.redis.quit().catch(() => undefined);
   }
 
-  private environmentLabel(): string {
-    const host = this.identityBaseUrl.toLowerCase();
-    if (host.includes('preprod') || host.includes('sandbox')) return 'sandbox';
-    if (host.includes('eta.gov')) return 'production';
-    return 'custom';
+  async getActiveEnvironment(tenantId: string): Promise<EtaEnvironment> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { activeEtaEnvironment: true },
+    });
+    return tenant?.activeEtaEnvironment ?? 'SANDBOX';
+  }
+
+  async resolveHosts(
+    tenantId: string,
+    environment?: EtaEnvironment,
+  ): Promise<EtaHostUrls> {
+    const env = environment ?? (await this.getActiveEnvironment(tenantId));
+    return resolveEtaHostUrls(env, this.envConfig);
+  }
+
+  async getApiBaseUrl(
+    tenantId: string,
+    environment?: EtaEnvironment,
+  ): Promise<string> {
+    return (await this.resolveHosts(tenantId, environment)).apiBaseUrl;
   }
 
   async getConnectionStatus(
     tenantId: string,
-    branchId?: string,
+    opts?: { branchId?: string; environment?: EtaEnvironment },
   ): Promise<EtaConnectionStatus> {
-    const creds = await this.loadCredentialMaterial(tenantId, branchId);
+    const hosts = await this.resolveHosts(tenantId, opts?.environment);
+    const creds = await this.loadCredentialMaterial(
+      tenantId,
+      hosts.environment,
+      opts?.branchId,
+    );
     if (!creds.ok) {
       return {
         connected: false,
         setupRequired: true,
         expiresAt: null,
         scope: null,
-        environment: this.environmentLabel(),
+        environment: hosts.label,
+        activeEnvironment: hosts.environment,
         lastTestOutcome: 'never',
         lastTestMessage: creds.message,
         settingsPath: ETA_SETTINGS_PATH,
       };
     }
-    const cached = await this.tokens.get(tenantId, creds.onBehalfOf);
-    const last = this.lastTest.get(tenantId);
+    const cached = await this.tokens.get({
+      tenantId,
+      clientId: creds.clientId,
+      onBehalfOf: creds.onBehalfOf,
+      environment: hosts.environment,
+    });
+    const last = this.lastTest.get(`${tenantId}:${hosts.environment}`);
     const connected = Boolean(cached && cached.accessToken);
     return {
       connected,
@@ -87,7 +114,8 @@ export class EtaService implements OnModuleDestroy {
         ? new Date(cached.obtainedAt + cached.expiresIn * 1000).toISOString()
         : null,
       scope: cached?.scope ?? null,
-      environment: this.environmentLabel(),
+      environment: hosts.label,
+      activeEnvironment: hosts.environment,
       lastTestOutcome: last?.outcome ?? (connected ? 'success' : 'never'),
       lastTestMessage: last?.message ?? null,
       settingsPath: ETA_SETTINGS_PATH,
@@ -95,14 +123,22 @@ export class EtaService implements OnModuleDestroy {
   }
 
   /**
-   * Obtain/cached access token. Returns real access_token string for callers/tests.
-   * Does not use ETA_CLIENT_ID / ETA_CLIENT_SECRET env globals.
+   * Obtain a cached access token for the tenant's active (or override) ETA host.
    */
   async getAccessToken(
     tenantId: string,
-    opts?: { branchId?: string; forceRefresh?: boolean },
+    opts?: {
+      branchId?: string;
+      forceRefresh?: boolean;
+      environment?: EtaEnvironment;
+    },
   ): Promise<string> {
-    const creds = await this.loadCredentialMaterial(tenantId, opts?.branchId);
+    const hosts = await this.resolveHosts(tenantId, opts?.environment);
+    const creds = await this.loadCredentialMaterial(
+      tenantId,
+      hosts.environment,
+      opts?.branchId,
+    );
     if (!creds.ok) {
       throw new BadRequestException({
         code: ETA_SETUP_CODE,
@@ -111,49 +147,109 @@ export class EtaService implements OnModuleDestroy {
       });
     }
 
+    const identity = {
+      tenantId,
+      clientId: creds.clientId,
+      onBehalfOf: creds.onBehalfOf,
+      environment: hosts.environment,
+    };
+
     if (opts?.forceRefresh) {
-      await this.tokens.invalidate(tenantId, creds.onBehalfOf);
+      await this.tokens.invalidate(identity);
     }
 
-    const entry = await this.tokens.getOrRefresh(
-      tenantId,
-      creds.onBehalfOf,
-      async () => {
-        const token = await this.auth.requestToken({
-          clientId: creds.clientId,
-          clientSecret: creds.clientSecret,
-          onBehalfOf: creds.onBehalfOf,
-        });
-        return {
-          accessToken: token.access_token,
-          expiresIn: token.expires_in,
-          obtainedAt: Date.now(),
-          scope: token.scope,
-          tokenType: token.token_type,
-          onBehalfOf: creds.onBehalfOf,
-        } satisfies CachedToken;
-      },
-    );
+    const auth = new EtaAuthClient(hosts.identityBaseUrl);
+    const entry = await this.tokens.getOrRefresh(identity, async () => {
+      const token = await auth.requestToken({
+        clientId: creds.clientId,
+        clientSecret: creds.clientSecret,
+        onBehalfOf: creds.onBehalfOf,
+      });
+      return {
+        accessToken: token.access_token,
+        expiresIn: token.expires_in,
+        obtainedAt: Date.now(),
+        scope: token.scope,
+        tokenType: token.token_type,
+        onBehalfOf: creds.onBehalfOf,
+        clientId: creds.clientId,
+      } satisfies CachedToken;
+    });
     return entry.accessToken;
+  }
+
+  async withAccessToken<T>(
+    tenantId: string,
+    opts: { branchId?: string; environment?: EtaEnvironment } | undefined,
+    fn: (accessToken: string) => Promise<T>,
+  ): Promise<T> {
+    const token = await this.getAccessToken(tenantId, opts);
+    try {
+      return await fn(token);
+    } catch (err) {
+      if (!isEtaUnauthorized(err)) throw err;
+      const fresh = await this.getAccessToken(tenantId, {
+        ...opts,
+        forceRefresh: true,
+      });
+      return await fn(fresh);
+    }
   }
 
   async testConnection(
     tenantId: string,
     actorUserId: string | undefined,
-    branchId?: string,
+    opts?: { branchId?: string; environment?: EtaEnvironment },
   ): Promise<EtaConnectionStatus> {
+    const hosts = await this.resolveHosts(tenantId, opts?.environment);
     try {
       const accessToken = await this.getAccessToken(tenantId, {
-        branchId,
+        branchId: opts?.branchId,
+        environment: hosts.environment,
         forceRefresh: true,
       });
       if (!accessToken) {
         throw new Error('No access_token acquired');
       }
-      const status = await this.getConnectionStatus(tenantId, branchId);
-      this.lastTest.set(tenantId, {
+
+      await this.tenantPrisma.withTenant(tenantId, async (tx) => {
+        const row = await tx.tenantEtaCredential.findFirst({
+          where: {
+            tenantId,
+            environment: hosts.environment,
+            branchId: opts?.branchId ?? null,
+          },
+        });
+        if (row) {
+          await tx.tenantEtaCredential.update({
+            where: { id: row.id },
+            data: { lastValidatedAt: new Date() },
+          });
+        } else if (!opts?.branchId) {
+          const tenantWide = await tx.tenantEtaCredential.findFirst({
+            where: {
+              tenantId,
+              environment: hosts.environment,
+              branchId: null,
+            },
+          });
+          if (tenantWide) {
+            await tx.tenantEtaCredential.update({
+              where: { id: tenantWide.id },
+              data: { lastValidatedAt: new Date() },
+            });
+          }
+        }
+      });
+
+      const status = await this.getConnectionStatus(tenantId, {
+        branchId: opts?.branchId,
+        environment: hosts.environment,
+      });
+      this.lastTest.set(`${tenantId}:${hosts.environment}`, {
         outcome: 'success',
         message: 'Token acquired from ETA identity',
+        environment: hosts.environment,
       });
       await this.audit.write({
         action: 'eta.test_connection.success',
@@ -161,7 +257,10 @@ export class EtaService implements OnModuleDestroy {
         actorUserId,
         tenantId,
         resourceType: 'eta_connection',
-        metadata: { environment: this.environmentLabel() },
+        metadata: {
+          environment: hosts.label,
+          etaEnvironment: hosts.environment,
+        },
       });
       return {
         ...status,
@@ -171,20 +270,29 @@ export class EtaService implements OnModuleDestroy {
         accessToken,
       };
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Test Connection failed';
+      const message =
+        err instanceof Error ? err.message : 'Test Connection failed';
       const code =
         err instanceof BadRequestException
           ? ((err.getResponse() as { code?: string })?.code ?? 'bad_request')
           : (err as { etaCode?: string })?.etaCode;
 
-      this.lastTest.set(tenantId, { outcome: 'failure', message });
+      this.lastTest.set(`${tenantId}:${hosts.environment}`, {
+        outcome: 'failure',
+        message,
+        environment: hosts.environment,
+      });
       await this.audit.write({
         action: 'eta.test_connection.failure',
         outcome: 'failure',
         actorUserId,
         tenantId,
         resourceType: 'eta_connection',
-        metadata: { code: code ?? 'error' },
+        metadata: {
+          code: code ?? 'error',
+          environment: hosts.label,
+          etaEnvironment: hosts.environment,
+        },
       });
 
       if (err instanceof BadRequestException) throw err;
@@ -203,9 +311,14 @@ export class EtaService implements OnModuleDestroy {
     tenantId: string,
     opts?: { refresh?: boolean; branchId?: string },
   ) {
-    const token = await this.getAccessToken(tenantId, { branchId: opts?.branchId });
-    const result = await this.docTypes.listDocumentTypes(tenantId, token, {
+    const hosts = await this.resolveHosts(tenantId);
+    const token = await this.getAccessToken(tenantId, {
+      branchId: opts?.branchId,
+    });
+    const docTypes = new EtaDocTypesClient(hosts.apiBaseUrl, this.redis);
+    const result = await docTypes.listDocumentTypes(tenantId, token, {
       refresh: opts?.refresh,
+      environment: hosts.environment,
     });
     if (opts?.refresh) {
       await this.audit.write({
@@ -213,6 +326,7 @@ export class EtaService implements OnModuleDestroy {
         outcome: 'success',
         tenantId,
         resourceType: 'eta_document_types',
+        metadata: { etaEnvironment: hosts.environment },
       });
     }
     return result;
@@ -223,14 +337,41 @@ export class EtaService implements OnModuleDestroy {
     typeId: string,
     opts?: { refresh?: boolean; branchId?: string },
   ) {
-    const token = await this.getAccessToken(tenantId, { branchId: opts?.branchId });
-    return this.docTypes.getDocumentTypeVersions(tenantId, typeId, token, {
-      refresh: opts?.refresh,
+    const hosts = await this.resolveHosts(tenantId);
+    const token = await this.getAccessToken(tenantId, {
+      branchId: opts?.branchId,
     });
+    const docTypes = new EtaDocTypesClient(hosts.apiBaseUrl, this.redis);
+    return docTypes.getDocumentTypeVersions(tenantId, typeId, token, {
+      refresh: opts?.refresh,
+      environment: hosts.environment,
+    });
+  }
+
+  /** Drop cached tokens for a tenant environment (e.g. after switch or secret rotate). */
+  async invalidateTokensForEnvironment(
+    tenantId: string,
+    environment: EtaEnvironment,
+    clientId?: string,
+    onBehalfOf?: string | null,
+  ): Promise<void> {
+    if (clientId) {
+      await this.tokens.invalidate({
+        tenantId,
+        clientId,
+        onBehalfOf: onBehalfOf ?? null,
+        environment,
+      });
+      return;
+    }
+    // Best-effort: wipe known pattern via Redis SCAN is overkill; callers
+    // pass clientId when available. Switching env uses a different cache key.
+    void etaEnvironmentLabel(environment);
   }
 
   private async loadCredentialMaterial(
     tenantId: string,
+    environment: EtaEnvironment,
     branchId?: string,
   ): Promise<
     | {
@@ -245,20 +386,19 @@ export class EtaService implements OnModuleDestroy {
     const row = await this.tenantPrisma.withTenant(tenantId, async (tx) => {
       if (branchId) {
         const override = await tx.tenantEtaCredential.findFirst({
-          where: { tenantId, branchId },
+          where: { tenantId, environment, branchId },
         });
         if (override) return override;
       }
       return tx.tenantEtaCredential.findFirst({
-        where: { tenantId, branchId: null },
+        where: { tenantId, environment, branchId: null },
       });
     });
 
     if (!row?.clientId || !row.clientSecretCiphertext?.length) {
       return {
         ok: false,
-        message:
-          'ETA Client ID and Client Secret are not configured. Open Settings → ETA credentials.',
+        message: `ETA Client ID and Client Secret are not configured for ${etaEnvironmentLabel(environment)}. Open Settings → ETA credentials.`,
       };
     }
     if (row.isIntermediary && !row.onBehalfOfRegistrationNumber) {
@@ -282,4 +422,17 @@ export class EtaService implements OnModuleDestroy {
         : null,
     };
   }
+}
+
+/** True when an ETA API call failed because the bearer token was rejected. */
+export function isEtaUnauthorized(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const status =
+    (err as { httpStatus?: number }).httpStatus ??
+    (err as { status?: number }).status;
+  if (status === 401) return true;
+  const code =
+    (err as { code?: string; etaCode?: string }).code ??
+    (err as { etaCode?: string }).etaCode;
+  return code === 'unauthorized' || code === 'invalid_token';
 }

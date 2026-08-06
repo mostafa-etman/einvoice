@@ -1,4 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import {
+  forwardRef,
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleInit,
+} from '@nestjs/common';
 import {
   DEFAULT_ROLE_NAMES,
   PERMISSIONS,
@@ -8,14 +14,39 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { SubscriptionService } from '../billing/subscription.service';
 
 @Injectable()
-export class TenantService {
+export class TenantService implements OnModuleInit {
+  private readonly log = new Logger(TenantService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantPrisma: TenantPrismaService,
     private readonly audit: AuditService,
+    // BillingModule <-> TenantModule is circular (billing controllers need
+    // PermissionsGuard from TenantModule; onboarding needs a Free subscription
+    // here) — forwardRef on both module and constructor param breaks the cycle.
+    @Inject(forwardRef(() => SubscriptionService))
+    private readonly subscriptions: SubscriptionService,
   ) {}
+
+  async onModuleInit() {
+    try {
+      // Catalog upsert is cheap; role-matrix sync can be large — run it in the
+      // background so Nest can listen immediately.
+      await this.ensurePermissionCatalog();
+      void this.syncSystemRolePermissions().catch((err) =>
+        this.log.warn(
+          `Role permission sync failed: ${err instanceof Error ? err.message : err}`,
+        ),
+      );
+    } catch (err) {
+      this.log.warn(
+        `Permission catalog sync skipped: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
 
   async ensurePermissionCatalog() {
     const codes = Object.values(PERMISSIONS);
@@ -24,6 +55,45 @@ export class TenantService {
         where: { code },
         create: { code, description: code },
         update: {},
+      });
+    }
+  }
+
+  /**
+   * Idempotent: grants ROLE_PERMISSION_MATRIX codes missing on system roles.
+   * Batched createMany so startup is not blocked by per-row upserts.
+   */
+  async syncSystemRolePermissions() {
+    const permissions = await this.prisma.permission.findMany();
+    const byCode = new Map(permissions.map((p) => [p.code, p.id]));
+    const roles = await this.prisma.role.findMany({
+      where: { isSystem: true, name: { in: [...DEFAULT_ROLE_NAMES] } },
+      select: { id: true, tenantId: true, name: true },
+    });
+    const rows: Array<{
+      tenantId: string;
+      roleId: string;
+      permissionId: string;
+    }> = [];
+    for (const role of roles) {
+      const matrix =
+        ROLE_PERMISSION_MATRIX[role.name as (typeof DEFAULT_ROLE_NAMES)[number]];
+      if (!matrix) continue;
+      for (const code of matrix) {
+        const permissionId = byCode.get(code);
+        if (!permissionId) continue;
+        rows.push({
+          tenantId: role.tenantId,
+          roleId: role.id,
+          permissionId,
+        });
+      }
+    }
+    const chunk = 500;
+    for (let i = 0; i < rows.length; i += chunk) {
+      await this.prisma.rolePermission.createMany({
+        data: rows.slice(i, i + chunk),
+        skipDuplicates: true,
       });
     }
   }
@@ -71,6 +141,10 @@ export class TenantService {
 
       return { tenant, branch, membership, roles };
     });
+
+    // Every tenant gets an ACTIVE Free subscription (100 docs/mo, 1 branch, 1 device)
+    // so quota checks and /billing/subscription work immediately (013-saas-layer US1).
+    await this.subscriptions.ensureFreeSubscription(result.tenant.id);
 
     await this.audit.write({
       action: 'tenant.create.success',
@@ -122,13 +196,17 @@ export class TenantService {
 
   listBranches(tenantId: string) {
     return this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.branch.findMany({ orderBy: { createdAt: 'asc' } }),
+      tx.branch.findMany({
+        where: { tenantId },
+        orderBy: { createdAt: 'asc' },
+      }),
     );
   }
 
   listRoles(tenantId: string) {
     return this.tenantPrisma.withTenant(tenantId, (tx) =>
       tx.role.findMany({
+        where: { tenantId },
         include: { rolePermissions: { include: { permission: true } } },
         orderBy: { name: 'asc' },
       }),
@@ -138,6 +216,7 @@ export class TenantService {
   listMembers(tenantId: string) {
     return this.tenantPrisma.withTenant(tenantId, (tx) =>
       tx.membership.findMany({
+        where: { tenantId },
         include: { user: true, role: true },
         orderBy: { createdAt: 'asc' },
       }),
@@ -173,13 +252,19 @@ export class TenantService {
     membershipId: string,
     roleId: string,
   ) {
-    const membership = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.membership.update({
+    const membership = await this.tenantPrisma.withTenant(tenantId, async (tx) => {
+      const existing = await tx.membership.findFirst({
+        where: { id: membershipId, tenantId },
+      });
+      if (!existing) {
+        throw new Error('Membership not found');
+      }
+      return tx.membership.update({
         where: { id: membershipId },
         data: { roleId },
         include: { user: true, role: true },
-      }),
-    );
+      });
+    });
     await this.audit.write({
       action: 'members.role.update',
       outcome: 'success',

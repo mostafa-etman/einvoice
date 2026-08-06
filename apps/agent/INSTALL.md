@@ -47,7 +47,7 @@ Absolute path on this machine (after publish):
 | Windows 10/11 x64 | |
 | USB eSeal token | Plugged in when using the agent |
 | CA middleware / PKCS#11 DLL | e.g. `eps2003csp11.dll` or `SignatureP11.dll` in System32 or vendor path — **not** bundled with the agent |
-| Network to your API | Default `http://localhost:3001`; set `EINVOICE_API_BASE_URL` for production |
+| Network to your API | HTTPS cloud API; set `EINVOICE_API_BASE_URL` (or enter URL in Pairing dialog). Default placeholder: `https://api.example.com` |
 
 **.NET runtime is not required** (self-contained publish).
 
@@ -56,7 +56,8 @@ Absolute path on this machine (after publish):
 1. Ensure the API is reachable and the web app can create a **device pairing code**.
 2. On the Windows PC with the token + middleware installed:
    ```powershell
-   $env:EINVOICE_API_BASE_URL = "http://localhost:3001"   # or your API URL
+   $env:EINVOICE_API_BASE_URL = "https://api.yourdomain.com"   # production HTTPS API
+   # Local/dev example once Traefik is up: https://api.localhost (mkcert TLS)
    # SIGNING_PROVIDER=pkcs11 is optional: Desktop auto-switches when a known DLL is found
    & "c:\xampp\htdocs\einvoice\apps\agent\dist\win-x64\Einvoice.Agent.exe"
    ```

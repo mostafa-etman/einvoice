@@ -293,11 +293,19 @@ public partial class App
     private async void PairDevice()
     {
         if (_settings is null || _api is null) return;
-        var dlg = new PairingDialog(_settings.DeviceLabel);
+        var dlg = new PairingDialog(_settings.DeviceLabel, _settings.ApiBaseUrl);
         if (dlg.ShowDialog() != true) return;
 
         try
         {
+            var apiBase = AgentSettings.NormalizeApiBaseUrl(dlg.ApiBaseUrl);
+            _settings.ApiBaseUrl = apiBase;
+            _api.SetBaseUrl(apiBase);
+
+            var local = LocalAgentConfig.Load(_settings.LocalConfigPath);
+            local.ApiBaseUrl = apiBase;
+            local.Save(_settings.LocalConfigPath);
+
             var result = await _api.PairAsync(dlg.PairingCode, dlg.DeviceLabel, Environment.MachineName);
             var token = result.Value<string>("deviceToken");
             if (string.IsNullOrWhiteSpace(token))
@@ -307,7 +315,7 @@ public partial class App
             _api.SetDeviceToken(token);
             DeviceTokenStore.Save(_settings.TokenStorePath, token);
             MessageBox.Show(
-                $"Paired successfully.\nDevice: {result.Value<string>("deviceId")}\nTenant: {result.Value<string>("tenantId")}",
+                $"Paired successfully.\nAPI: {apiBase}\nDevice: {result.Value<string>("deviceId")}\nTenant: {result.Value<string>("tenantId")}",
                 "Pairing",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);

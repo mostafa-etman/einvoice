@@ -1,0 +1,308 @@
+openapi: 3.0.3
+info:
+  title: Tenant Backup & Restore API
+  version: 0.1.0
+  description: |
+    Logical per-tenant backup (encrypted archive), cron schedule + retention,
+    portable CSV ZIP export, and restore into empty targets.
+servers:
+  - url: /api
+paths:
+  /backup/jobs:
+    get:
+      summary: List backup jobs for current tenant
+      operationId: listBackupJobs
+      tags: [backup]
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Job list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/BackupJob' }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden }
+      security: [{ bearerAuth: [] }]
+    post:
+      summary: Create on-demand backup job
+      operationId: createBackupJob
+      tags: [backup]
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BackupJob' }
+        '409':
+          description: Active backup already running for tenant
+      security: [{ bearerAuth: [] }]
+  /backup/jobs/{id}:
+    get:
+      summary: Get backup job
+      operationId: getBackupJob
+      tags: [backup]
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BackupJob' }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /backup/jobs/{id}/download:
+    get:
+      summary: Download completed encrypted backup archive (ciphertext)
+      operationId: downloadBackupJob
+      tags: [backup]
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Application octet-stream (encrypted archive)
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '400': { description: Job not downloadable }
+        '403': { description: Forbidden }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /backup/schedule:
+    get:
+      summary: Get tenant backup schedule
+      operationId: getBackupSchedule
+      tags: [backup-schedule]
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BackupSchedule' }
+        '404': { description: No schedule configured }
+      security: [{ bearerAuth: [] }]
+    put:
+      summary: Create or update cron schedule
+      operationId: upsertBackupSchedule
+      tags: [backup-schedule]
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BackupScheduleUpsert' }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BackupSchedule' }
+        '400': { description: Invalid cron }
+      security: [{ bearerAuth: [] }]
+  /backup/exports:
+    post:
+      summary: Start portable tenant data export (ZIP of CSV; no secrets)
+      operationId: createTenantExport
+      tags: [tenant-export]
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                includeFiles: { type: boolean, default: false }
+      responses:
+        '202':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantExportJob' }
+      security: [{ bearerAuth: [] }]
+  /backup/exports/{id}:
+    get:
+      summary: Get export job
+      operationId: getTenantExport
+      tags: [tenant-export]
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantExportJob' }
+      security: [{ bearerAuth: [] }]
+  /backup/exports/{id}/download:
+    get:
+      summary: Download portable export ZIP
+      operationId: downloadTenantExport
+      tags: [tenant-export]
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: application/zip
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+      security: [{ bearerAuth: [] }]
+  /backup/restores:
+    post:
+      summary: Restore backup into current empty tenant (Owner/Admin)
+      operationId: createTenantRestore
+      tags: [restore]
+      parameters:
+        - $ref: '#/components/parameters/XTenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TenantRestoreRequest' }
+      responses:
+        '202':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RestoreJob' }
+        '400':
+          description: Failed empty-org, checksum, confirmation, or ownership check
+        '403': { description: Forbidden }
+      security: [{ bearerAuth: [] }]
+  /backup/operator/restores:
+    post:
+      summary: Platform operator restore into empty target tenant (cross-env capable)
+      operationId: createOperatorRestore
+      tags: [restore]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OperatorRestoreRequest' }
+      responses:
+        '202':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RestoreJob' }
+        '403': { description: Not a platform operator }
+      security: [{ bearerAuth: [] }]
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    XTenantId:
+      name: X-Tenant-Id
+      in: header
+      required: true
+      schema: { type: string, format: uuid }
+    JobId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    BackupJobStatus:
+      type: string
+      enum: [QUEUED, RUNNING, COMPLETED, FAILED, EXPIRED]
+    BackupJob:
+      type: object
+      required: [id, tenantId, status, triggerSource, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/BackupJobStatus' }
+        triggerSource:
+          type: string
+          enum: [MANUAL, SCHEDULE]
+        byteSize: { type: integer, format: int64, nullable: true }
+        checksumSha256: { type: string, nullable: true }
+        schemaVersion: { type: string, nullable: true }
+        errorMessage: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+    BackupSchedule:
+      type: object
+      required: [id, tenantId, cronExpression, timezone, paused]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        cronExpression: { type: string, example: '0 2 * * *' }
+        timezone: { type: string, example: Africa/Cairo }
+        paused: { type: boolean }
+        nextRunAt: { type: string, format: date-time, nullable: true }
+        lastRunAt: { type: string, format: date-time, nullable: true }
+    BackupScheduleUpsert:
+      type: object
+      required: [cronExpression, timezone]
+      properties:
+        cronExpression: { type: string }
+        timezone: { type: string }
+        paused: { type: boolean, default: false }
+    TenantExportJob:
+      type: object
+      required: [id, tenantId, status, includeFiles, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [QUEUED, RUNNING, COMPLETED, FAILED, EXPIRED]
+        includeFiles: { type: boolean }
+        byteSize: { type: integer, format: int64, nullable: true }
+        errorMessage: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+    TenantRestoreRequest:
+      type: object
+      required: [backupJobId, confirmation]
+      properties:
+        backupJobId: { type: string, format: uuid }
+        confirmation:
+          type: string
+          description: Must equal RESTORE or typed tenant name per UI contract
+          example: RESTORE
+    OperatorRestoreRequest:
+      type: object
+      required: [targetTenantId, confirmation]
+      properties:
+        targetTenantId: { type: string, format: uuid }
+        backupJobId: { type: string, format: uuid, nullable: true }
+        sourceObjectKey:
+          type: string
+          nullable: true
+          description: MinIO key when archive already staged in this environment
+        expectedChecksumSha256: { type: string }
+        confirmation: { type: string, example: RESTORE }
+    RestoreJob:
+      type: object
+      required: [id, tenantId, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        sourceTenantId: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [QUEUED, RUNNING, COMPLETED, FAILED]
+        ownershipCheckPassed: { type: boolean, nullable: true }
+        checksumCheckPassed: { type: boolean, nullable: true }
+        emptyOrgCheckPassed: { type: boolean, nullable: true }
+        errorMessage: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }

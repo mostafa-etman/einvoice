@@ -8,13 +8,59 @@ import {
   downloadExportArtifact,
   getExportJob,
   listExportJobs,
+  packageStepIndex,
+  PACKAGE_STEPS,
   type ExportJob,
 } from '@/lib/api/exports';
+
+function PackageProgress({
+  job,
+  downloaded,
+  label,
+}: {
+  job: ExportJob;
+  downloaded: boolean;
+  label: (key: string) => string;
+}) {
+  const stepLabelKeys: Record<string, string> = {
+    REQUESTED: 'stepRequested',
+    IN_PROGRESS: 'stepInProgress',
+    READY: 'stepReady',
+    DOWNLOADED: 'stepDownloaded',
+  };
+  const reached = packageStepIndex(job, downloaded);
+  const failed = reached < 0;
+  return (
+    <span
+      className="flex flex-wrap items-center gap-token-xs"
+      data-testid={`package-progress-${job.id}`}
+    >
+      {PACKAGE_STEPS.map((step, index) => {
+        const done = !failed && index <= reached;
+        return (
+          <span
+            key={step}
+            aria-current={done && index === reached ? 'step' : undefined}
+            className={
+              done
+                ? 'rounded-full bg-brand px-token-sm py-token-xs text-token-xs text-white'
+                : 'rounded-full border border-border px-token-sm py-token-xs text-token-xs text-foreground/60'
+            }
+          >
+            {label(stepLabelKeys[step]!)}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
 
 export default function ExportsPage() {
   const t = useTranslations('exports');
   const [jobs, setJobs] = useState<ExportJob[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [downloaded, setDownloaded] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [formats, setFormats] = useState<Array<'CSV' | 'XLSX' | 'PDF' | 'JSON'>>([
     'CSV',
@@ -70,38 +116,47 @@ export default function ExportsPage() {
 
   const startPackage = async () => {
     if (!from || !to) {
-      setError('From/To required for ETA package');
+      setError(t('rangeRequired'));
       return;
     }
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       const job = await createEtaPackageExport({
         dateFrom: new Date(from).toISOString(),
-        dateTo: new Date(to).toISOString(),
-        type: 'full',
+        dateTo: new Date(`${to}T23:59:59`).toISOString(),
+        type: 'Full',
         format: 'JSON',
       });
-      await pollUntilReady(job.id);
+      const finished = await pollUntilReady(job.id);
+      if (finished.status === 'FAILED' && finished.errorSummary) {
+        setNotice(finished.errorSummary);
+      }
       reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Package request failed');
+      setError(e instanceof Error ? e.message : t('packageFailed'));
     } finally {
       setBusy(false);
     }
   };
 
   const download = async (job: ExportJob, format?: string) => {
-    const blob = await downloadExportArtifact(job.id, format);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download =
-      job.kind === 'ETA_PACKAGE'
-        ? `eta-package-${job.id}.zip`
-        : `export-${job.id}.${format || 'bin'}`;
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      const blob = await downloadExportArtifact(job.id, format);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download =
+        job.kind === 'ETA_PACKAGE'
+          ? `eta-package-${job.id}.zip`
+          : `export-${job.id}.${format || 'bin'}`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setDownloaded((prev) => ({ ...prev, [job.id]: true }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('downloadFailed'));
+    }
   };
 
   return (
@@ -110,8 +165,19 @@ export default function ExportsPage() {
       <p className="mt-token-sm text-token-md text-foreground/80">{t('intro')}</p>
 
       {error && (
-        <p className="mt-token-md rounded border border-danger/40 bg-danger/10 px-token-md py-token-sm text-token-sm text-danger">
+        <p
+          role="alert"
+          className="mt-token-md rounded border border-danger/40 bg-danger/10 px-token-md py-token-sm text-token-sm text-danger"
+        >
           {error}
+        </p>
+      )}
+      {notice && (
+        <p
+          role="status"
+          className="mt-token-md rounded border border-border bg-brand-muted px-token-md py-token-sm text-token-sm"
+        >
+          {notice}
         </p>
       )}
 
@@ -196,10 +262,12 @@ export default function ExportsPage() {
                 <span>
                   {t('status')}: {j.status}
                 </span>
-                {j.etaPackage && (
-                  <span>
-                    {t('packageStatus')}: {j.etaPackage.localStatus}
-                  </span>
+                {j.kind === 'ETA_PACKAGE' && (
+                  <PackageProgress
+                    job={j}
+                    downloaded={Boolean(downloaded[j.id])}
+                    label={(key) => t(key)}
+                  />
                 )}
                 {j.status === 'READY' && j.kind === 'LOCAL' && (
                   <span className="flex gap-token-sm">
@@ -224,8 +292,10 @@ export default function ExportsPage() {
                     {t('download')} ZIP
                   </button>
                 )}
-                {j.errorSummary && (
-                  <span className="text-danger">{j.errorSummary}</span>
+                {(j.errorSummary || j.etaPackage?.errorSummary) && (
+                  <span className="text-danger">
+                    {j.errorSummary || j.etaPackage?.errorSummary}
+                  </span>
                 )}
               </li>
             ))}

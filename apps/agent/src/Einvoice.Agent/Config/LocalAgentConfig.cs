@@ -38,6 +38,12 @@ public sealed class LocalAgentConfig
     /// <summary>When true, skip auto-detect and use manual library/issuer fields.</summary>
     public bool ManualTokenConfig { get; set; }
 
+    /// <summary>
+    /// Cloud API base URL (HTTPS), e.g. https://api.yourdomain.com.
+    /// Overlay for <see cref="AgentSettings.ApiBaseUrl"/> when env is unset.
+    /// </summary>
+    public string? ApiBaseUrl { get; set; }
+
     public static string DefaultDirectory =>
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

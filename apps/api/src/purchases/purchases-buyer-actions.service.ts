@@ -4,7 +4,6 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { loadEnv } from '../config/env';
 import { AuditService } from '../audit/audit.service';
 import { EtaService } from '../eta/eta.service';
 import {
@@ -61,10 +60,9 @@ export class PurchasesBuyerActionsService {
     this.lifecycle = client;
   }
 
-  private getLifecycle(): EtaDocumentLifecycleClient {
+  private getLifecycle(apiBaseUrl: string): EtaDocumentLifecycleClient {
     if (!this.lifecycle) {
-      const env = loadEnv();
-      this.lifecycle = new EtaDocumentLifecycleClient(env.ETA_API_BASE_URL);
+      this.lifecycle = new EtaDocumentLifecycleClient(apiBaseUrl);
     }
     return this.lifecycle;
   }
@@ -113,7 +111,12 @@ export class PurchasesBuyerActionsService {
 
     try {
       const token = await this.eta.getAccessToken(tenantId);
-      await this.getLifecycle().rejectDocument(token, doc.documentUuid, reason.trim());
+      const apiBaseUrl = await this.eta.getApiBaseUrl(tenantId);
+      await this.getLifecycle(apiBaseUrl).rejectDocument(
+        token,
+        doc.documentUuid,
+        reason.trim(),
+      );
     } catch (err) {
       const message =
         err instanceof EtaDocumentLifecycleError
@@ -175,7 +178,11 @@ export class PurchasesBuyerActionsService {
 
     try {
       const token = await this.eta.getAccessToken(tenantId);
-      await this.getLifecycle().declineCancelation(token, doc.documentUuid);
+      const apiBaseUrl = await this.eta.getApiBaseUrl(tenantId);
+      await this.getLifecycle(apiBaseUrl).declineCancelation(
+        token,
+        doc.documentUuid,
+      );
     } catch (err) {
       const message =
         err instanceof EtaDocumentLifecycleError

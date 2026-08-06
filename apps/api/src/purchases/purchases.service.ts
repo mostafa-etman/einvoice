@@ -1,6 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
+import type { ArtifactStorage } from '../storage/storage.module';
+import {
+  renderLocalInvoicePdf,
+  type LocalInvoicePdfLocale,
+} from '../documents/local-invoice-pdf';
 import type {
   ReceivedDocBuyerRow,
   ReceivedDocumentBuyerStore,
@@ -80,7 +85,10 @@ export type PurchaseListQuery = {
 
 @Injectable()
 export class PurchasesService {
-  constructor(private readonly tenantPrisma: TenantPrismaService) {}
+  constructor(
+    private readonly tenantPrisma: TenantPrismaService,
+    @Inject('ArtifactStorage') private readonly artifacts: ArtifactStorage,
+  ) {}
 
   async list(tenantId: string, query: PurchaseListQuery) {
     const take = Math.min(Math.max(query.limit ?? 50, 1), 100);
@@ -137,6 +145,9 @@ export class PurchasesService {
     if (!row) return null;
     return {
       ...this.toSummary(row),
+      issuerType: row.issuerType,
+      issuerId: row.issuerId,
+      netAmount: row.netAmount,
       issuerJson: row.issuerJson,
       receiverJson: row.receiverJson,
       lines: row.lines,
@@ -147,6 +158,98 @@ export class PurchasesService {
       printoutAvailable: Boolean(row.documentUuid),
       needsAttentionReason: row.needsAttentionReason,
     };
+  }
+
+  /** Local printable PDF (display-only). Distinct from ETA official printout. */
+  async localPrintout(
+    tenantId: string,
+    id: string,
+    locale?: string,
+  ): Promise<{ pdf: Buffer; filename: string }> {
+    const detail = await this.get(tenantId, id);
+    if (!detail) {
+      throw Object.assign(new Error('Purchase not found'), { status: 404 });
+    }
+
+    const issuerJson = asRecord(detail.issuerJson);
+    const receiverJson = asRecord(detail.receiverJson);
+    const lines = Array.isArray(detail.lines) ? detail.lines : [];
+    const logo = await this.loadTenantLogo(tenantId);
+
+    const pdf = await renderLocalInvoicePdf({
+      locale: locale?.toLowerCase().startsWith('ar') ? 'ar' : ('en' as LocalInvoicePdfLocale),
+      kind: String(detail.kind),
+      internalId: String(detail.internalId ?? detail.documentUuid),
+      issueDateTime: String(detail.dateTimeIssued ?? ''),
+      currencyCode: String(detail.currency ?? 'EGP'),
+      issuer: {
+        type: String(detail.issuerType ?? issuerJson?.type ?? ''),
+        id: String(detail.issuerId ?? issuerJson?.id ?? ''),
+        name: String(detail.issuerName ?? issuerJson?.name ?? ''),
+        address: asRecord(issuerJson?.address) ?? null,
+      },
+      receiver: receiverJson
+        ? {
+            type: String(receiverJson.type ?? ''),
+            id: String(receiverJson.id ?? ''),
+            name: String(receiverJson.name ?? ''),
+            address: asRecord(receiverJson.address) ?? null,
+          }
+        : null,
+      lines: lines.map((line) => {
+        const l = line as Record<string, unknown>;
+        const taxesRaw = Array.isArray(l.taxesJson)
+          ? l.taxesJson
+          : Array.isArray(l.taxes)
+            ? l.taxes
+            : [];
+        return {
+          description: String(l.description ?? ''),
+          itemType: String(l.itemType ?? ''),
+          itemCode: String(l.itemCode ?? ''),
+          unitType: String(l.unitType ?? ''),
+          quantity: String(l.quantity ?? ''),
+          unitPrice: String(l.unitPrice ?? ''),
+          discountAmount: '0',
+          taxes: (taxesRaw as Array<Record<string, unknown>>).map((t) => ({
+            taxType: String(t.taxType ?? t.TaxType ?? ''),
+            subType: String(t.subType ?? t.subtype ?? t.SubType ?? ''),
+            rate: String(t.rate ?? t.ratePercent ?? '0'),
+            amount: t.amount != null ? String(t.amount) : undefined,
+          })),
+        };
+      }),
+      totals: {
+        totalSalesAmount: String(detail.totalAmount ?? '0.00'),
+        totalDiscountAmount: '0.00',
+        netAmount: String(detail.netAmount ?? detail.totalAmount ?? '0.00'),
+        totalAmount: String(detail.totalAmount ?? '0.00'),
+      },
+      logo,
+    });
+
+    return {
+      pdf,
+      filename: `purchase-${detail.documentUuid}-preview.pdf`,
+    };
+  }
+
+  private async loadTenantLogo(
+    tenantId: string,
+  ): Promise<{ buffer: Buffer; contentType?: string } | null> {
+    const tenant = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.tenant.findUnique({
+        where: { id: tenantId },
+        select: { logoObjectKey: true, logoContentType: true },
+      }),
+    );
+    if (!tenant?.logoObjectKey) return null;
+    try {
+      const buffer = await this.artifacts.getByKey(tenant.logoObjectKey);
+      return { buffer, contentType: tenant.logoContentType ?? undefined };
+    } catch {
+      return null;
+    }
   }
 
   async patch(
@@ -224,4 +327,11 @@ export class PurchasesService {
       lastSyncedAt: r.lastSyncedAt.toISOString(),
     };
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return null;
 }

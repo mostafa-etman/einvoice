@@ -1,12 +1,16 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import cookieParser from 'cookie-parser';
+import { loadApiDotEnv } from './config/load-api-dotenv';
 import { AppModule } from './app.module';
 import { getCorsOrigins, loadEnv } from './config/env';
 
+loadApiDotEnv();
+
 async function bootstrap() {
   const env = loadEnv();
-  const app = await NestFactory.create(AppModule);
+  // rawBody is required to verify the Stripe webhook signature (billing-webhook.controller.ts).
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   app.use(cookieParser());
 
   const allowedOrigins = getCorsOrigins(env);
@@ -27,8 +31,15 @@ async function bootstrap() {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-Id', 'Accept'],
-    exposedHeaders: [],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Tenant-Id',
+      'Accept',
+      'Idempotency-Key',
+    ],
+    // The printout/source downloads read the filename from this header.
+    exposedHeaders: ['Content-Disposition'],
     optionsSuccessStatus: 204,
   });
 

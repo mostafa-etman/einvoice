@@ -1,4 +1,5 @@
-import { apiFetch } from './client';
+import { apiBase, apiFetch } from './client';
+import { getAccessToken, getActiveTenantId } from '@/lib/session';
 
 export type PurchaseSummary = {
   id: string;
@@ -19,13 +20,33 @@ export type PurchaseSummary = {
   lastSyncedAt: string;
 };
 
+export type PurchaseLine = {
+  id?: string;
+  lineNumber?: number | null;
+  description?: string | null;
+  itemCode?: string | null;
+  itemType?: string | null;
+  unitType?: string | null;
+  quantity?: string | null;
+  unitPrice?: string | null;
+  netTotal?: string | null;
+  total?: string | null;
+  taxesJson?: unknown;
+  taxes?: unknown;
+  rawJson?: unknown;
+};
+
 export type PurchaseDetail = PurchaseSummary & {
+  issuerType?: string | null;
+  issuerId?: string | null;
+  netAmount?: string | null;
   issuerJson?: unknown;
   receiverJson?: unknown;
-  lines?: Array<Record<string, unknown>>;
+  lines?: PurchaseLine[];
   buyerDecisionReason?: string | null;
   reconciliationNote?: string | null;
   purchaseOrderLinkId?: string | null;
+  rawDetailsJson?: unknown;
   printoutAvailable?: boolean;
   needsAttentionReason?: string | null;
 };
@@ -120,6 +141,41 @@ export function patchPurchase(
     tenantScoped: true,
     body,
   });
+}
+
+async function downloadPurchasePdf(
+  path: string,
+  fallbackName: string,
+): Promise<{ blob: Blob; filename: string }> {
+  const token = getAccessToken();
+  const tenantId = getActiveTenantId();
+  const res = await fetch(`${apiBase()}${path}`, {
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
+      Accept: 'application/pdf',
+    },
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    throw new Error((await res.text()) || res.statusText);
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get('Content-Disposition') ?? '';
+  const match = /filename="?([^";]+)"?/i.exec(disposition);
+  return { blob, filename: match?.[1] ?? fallbackName };
+}
+
+export function downloadPurchasePrintout(id: string) {
+  return downloadPurchasePdf(`/purchases/${id}/printout`, `purchase-${id}.pdf`);
+}
+
+export function downloadPurchaseLocalPrintout(id: string, locale?: string) {
+  const q = locale ? `?locale=${encodeURIComponent(locale)}` : '';
+  return downloadPurchasePdf(
+    `/purchases/${id}/local-printout${q}`,
+    `purchase-${id}-preview.pdf`,
+  );
 }
 
 export function purchasePrintoutUrl(id: string) {

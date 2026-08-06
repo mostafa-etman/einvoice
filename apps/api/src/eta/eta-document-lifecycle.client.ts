@@ -36,6 +36,28 @@ export class EtaDocumentLifecycleClient {
     documentUuid: string,
     reason: string,
   ): Promise<void> {
+    await this.putState(accessToken, documentUuid, {
+      status: 'rejected',
+      reason,
+    });
+  }
+
+  async cancelDocument(
+    accessToken: string,
+    documentUuid: string,
+    reason: string,
+  ): Promise<void> {
+    await this.putState(accessToken, documentUuid, {
+      status: 'cancelled',
+      reason,
+    });
+  }
+
+  private async putState(
+    accessToken: string,
+    documentUuid: string,
+    body: { status: string; reason: string },
+  ): Promise<void> {
     const url = `${this.base()}/api/v1.0/documents/state/${encodeURIComponent(documentUuid)}/state`;
     const res = await etaFetch(
       url,
@@ -46,11 +68,11 @@ export class EtaDocumentLifecycleClient {
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
-        body: JSON.stringify({ status: 'rejected', reason }),
+        body: JSON.stringify(body),
       },
       this.fetchImpl,
     );
-    await this.assertOk(res, 'reject');
+    await this.assertOk(res, body.status === 'cancelled' ? 'cancel' : 'reject');
   }
 
   async declineCancelation(

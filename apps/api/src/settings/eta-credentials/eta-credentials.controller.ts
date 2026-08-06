@@ -26,8 +26,9 @@ export class EtaCredentialsController {
   get(
     @Headers('x-tenant-id') tenantHeader: string | undefined,
     @Query('branchId') branchId?: string,
+    @Query('environment') environment?: string,
   ) {
-    return this.eta.get(requireTenant(tenantHeader), branchId);
+    return this.eta.get(requireTenant(tenantHeader), { branchId, environment });
   }
 
   @Put()
@@ -38,6 +39,7 @@ export class EtaCredentialsController {
     @Body()
     body: {
       branchId?: string | null;
+      environment?: 'SANDBOX' | 'PRODUCTION';
       clientId: string;
       clientSecret?: string;
       registrationNumber?: string;
@@ -45,6 +47,8 @@ export class EtaCredentialsController {
       isIntermediary?: boolean;
       onBehalfOfRegistrationNumber?: string;
       onBehalfOfName?: string;
+      taxpayerLegalName?: string;
+      issuerType?: string;
     },
   ) {
     return this.eta.upsert(requireTenant(tenantHeader), user.userId, body);
@@ -56,13 +60,18 @@ export class EtaCredentialsController {
   rotate(
     @Headers('x-tenant-id') tenantHeader: string | undefined,
     @CurrentUser() user: AuthUser,
-    @Body() body: { clientSecret: string; branchId?: string },
+    @Body()
+    body: {
+      clientSecret: string;
+      branchId?: string;
+      environment?: 'SANDBOX' | 'PRODUCTION';
+    },
   ) {
     return this.eta.rotateSecret(
       requireTenant(tenantHeader),
       user.userId,
       body.clientSecret,
-      body.branchId,
+      { branchId: body.branchId, environment: body.environment },
     );
   }
 }
