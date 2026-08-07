@@ -4,10 +4,10 @@
 # Does NOT replace infra/docker-compose.yml (local dev).
 #
 # TLS / reverse proxy: uses the shared host Traefik (traefik-oygi-traefik-1),
-# NOT a Traefik service in this compose. Web + API are discovered via Docker
-# labels (providers.docker). Host-mode Traefik reaches backends via PUBLISHED
-# host ports (same pattern as football-manager); loadbalancer.server.port stays
-# the container port. Host 3000 is taken by fbm → we use 8080/8081.
+# NOT a Traefik service in this compose. Web + API join footballmanager_default
+# (same Docker network as football-manager) so host-mode Traefik can reach them
+# by container IP; they also stay on einvoice-prod for postgres/redis/minio.
+# Published 8080/8081 are for direct debugging only.
 
 name: einvoice-prod
 
@@ -107,11 +107,13 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-    # Published so host-mode Traefik can reach this container (fbm uses 3000).
+    # Published for direct debugging (fbm owns :3000). Traefik uses shared-network IP.
     ports:
       - "8081:3001"
     labels:
       - traefik.enable=true
+      # Prefer shared-network IP when container is on multiple networks
+      - traefik.docker.network=footballmanager_default
       - traefik.http.routers.eta-api.entrypoints=websecure
       - traefik.http.routers.eta-api.rule=Host(`api.eta.erp-esafe.com`)
       - traefik.http.routers.eta-api.tls=true
@@ -119,6 +121,7 @@ services:
       - traefik.http.services.eta-api.loadbalancer.server.port=3001
     networks:
       - einvoice-prod
+      - traefik-shared
     mem_limit: 1536m
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3001/health/live"]
@@ -188,11 +191,13 @@ services:
       HOSTNAME: 0.0.0.0
     depends_on:
       - api
-    # Published so host-mode Traefik can reach this container (fbm already owns :3000).
+    # Published for direct debugging (fbm owns :3000). Traefik uses shared-network IP.
     ports:
       - "8080:3000"
     labels:
       - traefik.enable=true
+      # Prefer shared-network IP when container is on multiple networks
+      - traefik.docker.network=footballmanager_default
       - traefik.http.routers.eta-web.entrypoints=websecure
       - traefik.http.routers.eta-web.rule=Host(`eta.erp-esafe.com`)
       - traefik.http.routers.eta-web.tls=true
@@ -200,6 +205,7 @@ services:
       - traefik.http.services.eta-web.loadbalancer.server.port=3000
     networks:
       - einvoice-prod
+      - traefik-shared
     mem_limit: 768m
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/"]
@@ -212,6 +218,10 @@ networks:
   einvoice-prod:
     name: einvoice-prod
     driver: bridge
+  # Same network football-manager uses — host-mode Traefik can reach it
+  traefik-shared:
+    external: true
+    name: footballmanager_default
 
 volumes:
   postgres_data:
