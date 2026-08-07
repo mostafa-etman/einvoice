@@ -2,41 +2,14 @@
 # Usage:
 #   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 # Does NOT replace infra/docker-compose.yml (local dev).
+#
+# TLS / reverse proxy: uses the shared host Traefik (traefik-oygi-traefik-1),
+# NOT a Traefik service in this compose. Web + API are discovered via Docker
+# labels (providers.docker); host-mode Traefik reaches them by container bridge IP.
 
 name: einvoice-prod
 
 services:
-  traefik:
-    image: traefik:v3.2
-    platform: linux/amd64
-    restart: unless-stopped
-    command:
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
-      - --providers.docker.network=einvoice-prod
-      - --entrypoints.web.address=:80
-      - --entrypoints.websecure.address=:443
-      - --entrypoints.web.http.redirections.entryPoint.to=websecure
-      - --entrypoints.web.http.redirections.entryPoint.scheme=https
-      - --certificatesresolvers.le.acme.httpchallenge=true
-      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
-      - --certificatesresolvers.le.acme.email=${ACME_EMAIL}
-      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
-      - --log.level=INFO
-      - --accesslog=true
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - traefik_acme:/letsencrypt
-    networks:
-      - einvoice-prod
-    mem_limit: 256m
-    depends_on:
-      - web
-      - api
-
   postgres:
     image: postgres:16-alpine
     platform: linux/amd64
@@ -134,12 +107,11 @@ services:
         condition: service_healthy
     labels:
       - traefik.enable=true
-      - traefik.docker.network=einvoice-prod
-      - traefik.http.routers.einvoice-api.rule=Host(`${API_HOST}`)
-      - traefik.http.routers.einvoice-api.entrypoints=websecure
-      - traefik.http.routers.einvoice-api.tls=true
-      - traefik.http.routers.einvoice-api.tls.certresolver=le
-      - traefik.http.services.einvoice-api.loadbalancer.server.port=3001
+      - traefik.http.routers.eta-api.entrypoints=websecure
+      - traefik.http.routers.eta-api.rule=Host(`api.eta.erp-esafe.com`)
+      - traefik.http.routers.eta-api.tls=true
+      - traefik.http.routers.eta-api.tls.certresolver=letsencrypt
+      - traefik.http.services.eta-api.loadbalancer.server.port=3001
     networks:
       - einvoice-prod
     mem_limit: 1536m
@@ -213,12 +185,11 @@ services:
       - api
     labels:
       - traefik.enable=true
-      - traefik.docker.network=einvoice-prod
-      - traefik.http.routers.einvoice-web.rule=Host(`${WEB_HOST}`)
-      - traefik.http.routers.einvoice-web.entrypoints=websecure
-      - traefik.http.routers.einvoice-web.tls=true
-      - traefik.http.routers.einvoice-web.tls.certresolver=le
-      - traefik.http.services.einvoice-web.loadbalancer.server.port=3000
+      - traefik.http.routers.eta-web.entrypoints=websecure
+      - traefik.http.routers.eta-web.rule=Host(`eta.erp-esafe.com`)
+      - traefik.http.routers.eta-web.tls=true
+      - traefik.http.routers.eta-web.tls.certresolver=letsencrypt
+      - traefik.http.services.eta-web.loadbalancer.server.port=3000
     networks:
       - einvoice-prod
     mem_limit: 768m
@@ -241,5 +212,3 @@ volumes:
     name: einvoice_prod_minio
   redis_data:
     name: einvoice_prod_redis
-  traefik_acme:
-    name: einvoice_prod_traefik_acme
