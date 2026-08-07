@@ -5,7 +5,9 @@
 #
 # TLS / reverse proxy: uses the shared host Traefik (traefik-oygi-traefik-1),
 # NOT a Traefik service in this compose. Web + API are discovered via Docker
-# labels (providers.docker); host-mode Traefik reaches them by container bridge IP.
+# labels (providers.docker). Host-mode Traefik reaches backends via PUBLISHED
+# host ports (same pattern as football-manager); loadbalancer.server.port stays
+# the container port. Host 3000 is taken by fbm → we use 8080/8081.
 
 name: einvoice-prod
 
@@ -105,6 +107,9 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    # Published so host-mode Traefik can reach this container (fbm uses 3000).
+    ports:
+      - "8081:3001"
     labels:
       - traefik.enable=true
       - traefik.http.routers.eta-api.entrypoints=websecure
@@ -183,6 +188,9 @@ services:
       HOSTNAME: 0.0.0.0
     depends_on:
       - api
+    # Published so host-mode Traefik can reach this container (fbm already owns :3000).
+    ports:
+      - "8080:3000"
     labels:
       - traefik.enable=true
       - traefik.http.routers.eta-web.entrypoints=websecure
