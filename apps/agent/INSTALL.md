@@ -47,7 +47,7 @@ Absolute path on this machine (after publish):
 | Windows 10/11 x64 | |
 | USB eSeal token | Plugged in when using the agent |
 | CA middleware / PKCS#11 DLL | e.g. `eps2003csp11.dll` or `SignatureP11.dll` in System32 or vendor path — **not** bundled with the agent |
-| Network to your API | HTTPS cloud API; set `EINVOICE_API_BASE_URL` (or enter URL in Pairing dialog). Default placeholder: `https://api.example.com` |
+| Network to your API | HTTPS cloud API at `https://etaapi.erp-esafe.com` by default. Override with `EINVOICE_API_BASE_URL` or the Pairing dialog. |
 
 **.NET runtime is not required** (self-contained publish).
 
@@ -56,8 +56,8 @@ Absolute path on this machine (after publish):
 1. Ensure the API is reachable and the web app can create a **device pairing code**.
 2. On the Windows PC with the token + middleware installed:
    ```powershell
-   $env:EINVOICE_API_BASE_URL = "https://api.yourdomain.com"   # production HTTPS API
-   # Local/dev example once Traefik is up: https://api.localhost (mkcert TLS)
+   $env:EINVOICE_API_BASE_URL = "https://etaapi.erp-esafe.com"   # production (also the shipped default)
+   # Local/dev override once Traefik is up: https://api.localhost (mkcert TLS)
    # SIGNING_PROVIDER=pkcs11 is optional: Desktop auto-switches when a known DLL is found
    & "c:\xampp\htdocs\einvoice\apps\agent\dist\win-x64\Einvoice.Agent.exe"
    ```
@@ -108,6 +108,6 @@ Add `apps/agent/src/Einvoice.Agent.Desktop/agent.ico`, then uncomment `SetupIcon
 1. Install eSeal USB middleware from your CA (Egypt Trust / etc.).
 2. Plug in the USB token.
 3. Install/run the agent (`Einvoice.Agent.exe` or the Setup EXE).
-4. In the web app: **Devices → Create pairing code**.
-5. In the agent: paste the code → confirm detected certificate.
+4. In the web app (https://eta.erp-esafe.com): **Devices → Create pairing code**.
+5. In the agent: paste the code (API URL defaults to `https://etaapi.erp-esafe.com`) → confirm detected certificate.
 6. Sign the first invoice → enter PIN in the agent dialog only.

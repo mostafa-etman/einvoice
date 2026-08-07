@@ -115,7 +115,7 @@ services:
       # Prefer shared-network IP when container is on multiple networks
       - traefik.docker.network=footballmanager_default
       - traefik.http.routers.eta-api.entrypoints=websecure
-      - traefik.http.routers.eta-api.rule=Host(`api.eta.erp-esafe.com`)
+      - traefik.http.routers.eta-api.rule=Host(`etaapi.erp-esafe.com`)
       - traefik.http.routers.eta-api.tls=true
       - traefik.http.routers.eta-api.tls.certresolver=letsencrypt
       - traefik.http.services.eta-api.loadbalancer.server.port=3001

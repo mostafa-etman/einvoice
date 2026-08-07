@@ -1,12 +1,12 @@
 # Publish self-contained single-file Windows agent (no .NET runtime required on client).
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File apps/agent/scripts/publish-win-x64.ps1
-#   powershell -ExecutionPolicy Bypass -File apps/agent/scripts/publish-win-x64.ps1 -ApiBaseUrl https://api.example.com
+#   powershell -ExecutionPolicy Bypass -File apps/agent/scripts/publish-win-x64.ps1 -ApiBaseUrl https://api.localhost
 
 param(
     [string]$Configuration = "Release",
     [string]$OutputDir = "",
-    [string]$ApiBaseUrl = "https://api.example.com"
+    [string]$ApiBaseUrl = "https://etaapi.erp-esafe.com"
 )
 
 $ErrorActionPreference = "Stop"

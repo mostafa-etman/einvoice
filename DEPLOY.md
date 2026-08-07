@@ -2,7 +2,7 @@
 
 **Domains**
 - Web: `https://eta.erp-esafe.com`
-- API: `https://api.eta.erp-esafe.com`
+- API: `https://etaapi.erp-esafe.com`
 
 **Local / existing compose is unchanged**
 - Dev: `infra/docker-compose.yml` + `pnpm infra:up` (mkcert / host.docker.internal)
@@ -54,7 +54,7 @@ nano .env.prod   # fill EVERY CHANGE_ME — strong passwords & keys
 #   COOKIE_SAMESITE=none
 #   COOKIE_PARTITIONED=false
 #   CORS_ORIGINS=https://eta.erp-esafe.com
-#   NEXT_PUBLIC_API_URL=https://api.eta.erp-esafe.com
+#   NEXT_PUBLIC_API_URL=https://etaapi.erp-esafe.com
 
 # 3) Scripts executable
 chmod +x scripts/prod-*.sh infra/postgres/init-prod/*.sh
@@ -80,7 +80,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 
 # 9) Verify
-curl -fsS https://api.eta.erp-esafe.com/health/live
+curl -fsS https://etaapi.erp-esafe.com/health/live
 curl -fsSI https://eta.erp-esafe.com | head
 docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 ```
@@ -100,7 +100,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod build
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 
 docker compose -f docker-compose.prod.yml --env-file .env.prod ps
-curl -fsS https://api.eta.erp-esafe.com/health/ready
+curl -fsS https://etaapi.erp-esafe.com/health/ready
 ```
 
 If `.env.prod.example` gained new keys, merge them into your server `.env.prod` before rebuild.
@@ -117,8 +117,8 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f --tail=20
 docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f api worker web traefik
 
 # Health
-curl -fsS https://api.eta.erp-esafe.com/health/live
-curl -fsS https://api.eta.erp-esafe.com/health/ready
+curl -fsS https://etaapi.erp-esafe.com/health/live
+curl -fsS https://etaapi.erp-esafe.com/health/ready
 docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 ```
 
@@ -189,14 +189,14 @@ Point the agent at the **production API** (not localhost):
 
 | Setting | Value |
 |---------|--------|
-| API base URL | `https://api.eta.erp-esafe.com` |
+| API base URL | `https://etaapi.erp-esafe.com` |
 | TLS | System trust store (Let's Encrypt) — no mkcert |
 | Auth | Same pairing / device flow as staging; use production tenant credentials |
 
 Agent `.env` / config example:
 
 ```env
-API_BASE_URL=https://api.eta.erp-esafe.com
+API_BASE_URL=https://etaapi.erp-esafe.com
 ```
 
 No code change required in this deploy; configure the installed agent on each signing PC.
@@ -209,7 +209,7 @@ Already env-driven in the API (`COOKIE_*`, `CORS_ORIGINS`). Production values in
 
 - Refresh cookie: `Domain=.erp-esafe.com`, `Secure`, `SameSite=None`, `HttpOnly`
 - CORS: `https://eta.erp-esafe.com` with credentials
-- Web calls API at `NEXT_PUBLIC_API_URL=https://api.eta.erp-esafe.com` (build arg)
+- Web calls API at `NEXT_PUBLIC_API_URL=https://etaapi.erp-esafe.com` (build arg)
 
 Local dev continues to use host-only cookies + Partitioned for `*.localhost` via `apps/api/.env`.
 

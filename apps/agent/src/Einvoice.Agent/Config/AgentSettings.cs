@@ -8,7 +8,7 @@ namespace Einvoice.Agent.Config;
 /// </summary>
 public sealed class AgentSettings
 {
-    public const string DefaultApiBaseUrl = "https://api.example.com";
+    public const string DefaultApiBaseUrl = "https://etaapi.erp-esafe.com";
 
     public string Environment { get; init; } = "Development";
     public string ApiBaseUrl { get; set; } = DefaultApiBaseUrl;
