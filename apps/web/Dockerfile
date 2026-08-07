@@ -32,10 +32,16 @@ RUN pnpm --filter @einvoice/shared build \
   && pnpm --filter @einvoice/web build
 
 FROM base AS runner
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_DEFAULT_LOCALE=ar
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 ENV NEXT_TELEMETRY_DISABLED=1
+# Re-declare: multi-stage ARG/ENV does not carry from installer → runner.
+# instrumentation.ts validates these at Node startup; Compose runtime env overrides too.
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_DEFAULT_LOCALE=${NEXT_PUBLIC_DEFAULT_LOCALE}
 WORKDIR /app
 
 # Next standalone output layout for apps/web in a monorepo

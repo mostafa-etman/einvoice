@@ -180,6 +180,7 @@ services:
       platforms:
         - linux/amd64
       args:
+        # Build-time: Next.js inlines NEXT_PUBLIC_* into client bundles
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
         NEXT_PUBLIC_DEFAULT_LOCALE: ${NEXT_PUBLIC_DEFAULT_LOCALE:-ar}
     image: einvoice-web:prod
@@ -189,6 +190,10 @@ services:
       NODE_ENV: production
       PORT: 3000
       HOSTNAME: 0.0.0.0
+      # Runtime: instrumentation.ts → loadWebEnv() requires these on process.env
+      # (build.args alone do NOT become container env in the runner stage)
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+      NEXT_PUBLIC_DEFAULT_LOCALE: ${NEXT_PUBLIC_DEFAULT_LOCALE:-ar}
     depends_on:
       - api
     # Published for direct debugging (fbm owns :3000). Traefik uses shared-network IP.
