@@ -374,7 +374,7 @@ export default function EtaCredentialsPage() {
               {...register('registrationNumber')}
             />
             {errors.registrationNumber ? (
-              <span className="text-token-xs text-danger">Required</span>
+              <span className="text-token-xs text-danger">{t('fieldRequired')}</span>
             ) : null}
           </label>
           <label className="mt-token-sm block text-token-sm">

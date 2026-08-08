@@ -18,6 +18,7 @@ import {
   type PurchaseLineTax,
 } from '@/lib/api/purchases';
 import { partyTypeLabel } from '@/lib/eta-display';
+import { formatMoneyDisplay, formatQuantityDisplay } from '@/lib/format-number';
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
@@ -50,17 +51,6 @@ function formatAddress(party: unknown): string {
   ]
     .filter((v) => typeof v === 'string' && v.trim())
     .join(' · ');
-}
-
-/** Money/amount display — always LTR digits with grouping. */
-function formatMoneyLtr(value: unknown): string {
-  if (value == null || value === '') return '—';
-  const n = Number(String(value).replace(/,/g, ''));
-  if (!Number.isFinite(n)) return String(value);
-  return n.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
 }
 
 function normalizeTax(raw: Record<string, unknown>): PurchaseLineTax | null {
@@ -120,7 +110,7 @@ function formatLineTaxLabel(tx: PurchaseLineTax): string {
   const rate = tx.rate ? `${tx.rate}%` : '';
   const amt =
     tx.amount != null && tx.amount !== ''
-      ? `=${formatMoneyLtr(tx.amount)}`
+      ? `=${formatMoneyDisplay(tx.amount)}`
       : '';
   return [code, rate, amt].filter(Boolean).join(' ');
 }
@@ -342,7 +332,7 @@ export default function PurchaseDetailPage() {
           <dt className="text-foreground/60">{t('netAmount')}</dt>
           <dd>
             <Ltr>
-              {formatMoneyLtr(doc.netAmount)} {doc.currency ?? ''}
+              {formatMoneyDisplay(doc.netAmount)} {doc.currency ?? ''}
             </Ltr>
           </dd>
         </div>
@@ -350,7 +340,7 @@ export default function PurchaseDetailPage() {
           <dt className="text-foreground/60">{t('total')}</dt>
           <dd className="font-medium">
             <Ltr>
-              {formatMoneyLtr(doc.totalAmount)} {doc.currency ?? ''}
+              {formatMoneyDisplay(doc.totalAmount)} {doc.currency ?? ''}
             </Ltr>
           </dd>
         </div>
@@ -474,17 +464,17 @@ export default function PurchaseDetailPage() {
                         {String(line.description ?? '—')}
                       </td>
                       <td className="px-token-sm py-token-xs">
-                        <Ltr>{String(line.quantity ?? '—')}</Ltr>
+                        <Ltr>{formatQuantityDisplay(line.quantity)}</Ltr>
                       </td>
                       <td className="px-token-sm py-token-xs">{String(line.unitType ?? '—')}</td>
                       <td className="px-token-sm py-token-xs">
-                        <Ltr>{formatMoneyLtr(line.unitPrice)}</Ltr>
+                        <Ltr>{formatMoneyDisplay(line.unitPrice)}</Ltr>
                       </td>
                       <td className="px-token-sm py-token-xs">
-                        <Ltr>{formatMoneyLtr(line.netTotal)}</Ltr>
+                        <Ltr>{formatMoneyDisplay(line.netTotal)}</Ltr>
                       </td>
                       <td className="px-token-sm py-token-xs font-medium">
-                        <Ltr>{formatMoneyLtr(line.total)}</Ltr>
+                        <Ltr>{formatMoneyDisplay(line.total)}</Ltr>
                       </td>
                       <td className="px-token-sm py-token-xs">
                         {taxes.length === 0 ? (
@@ -516,7 +506,7 @@ export default function PurchaseDetailPage() {
               <dt className="text-foreground/60">{t('totalSales')}</dt>
               <dd>
                 <Ltr>
-                  {formatMoneyLtr(totalSales)} {doc.currency ?? ''}
+                  {formatMoneyDisplay(totalSales)} {doc.currency ?? ''}
                 </Ltr>
               </dd>
             </div>
@@ -526,7 +516,7 @@ export default function PurchaseDetailPage() {
               <dt className="text-foreground/60">{t('totalDiscount')}</dt>
               <dd>
                 <Ltr>
-                  {formatMoneyLtr(totalDiscount)} {doc.currency ?? ''}
+                  {formatMoneyDisplay(totalDiscount)} {doc.currency ?? ''}
                 </Ltr>
               </dd>
             </div>
@@ -535,7 +525,7 @@ export default function PurchaseDetailPage() {
             <dt className="text-foreground/60">{t('netAmount')}</dt>
             <dd>
               <Ltr>
-                {formatMoneyLtr(doc.netAmount)} {doc.currency ?? ''}
+                {formatMoneyDisplay(doc.netAmount)} {doc.currency ?? ''}
               </Ltr>
             </dd>
           </div>
@@ -548,7 +538,7 @@ export default function PurchaseDetailPage() {
                     <li key={tt.taxType}>
                       {taxSummaryLabel(tt.taxType, t)}:{' '}
                       <Ltr>
-                        {formatMoneyLtr(tt.amount)} {doc.currency ?? ''}
+                        {formatMoneyDisplay(tt.amount)} {doc.currency ?? ''}
                       </Ltr>
                     </li>
                   ))}
@@ -560,7 +550,7 @@ export default function PurchaseDetailPage() {
             <dt className="text-foreground/60">{t('total')}</dt>
             <dd className="font-medium">
               <Ltr>
-                {formatMoneyLtr(doc.totalAmount)} {doc.currency ?? ''}
+                {formatMoneyDisplay(doc.totalAmount)} {doc.currency ?? ''}
               </Ltr>
             </dd>
           </div>
@@ -576,9 +566,9 @@ export default function PurchaseDetailPage() {
             value={recon}
             onChange={(e) => setRecon(e.target.value)}
           >
-            <option value="PENDING_REVIEW">PENDING_REVIEW</option>
-            <option value="RECONCILED">RECONCILED</option>
-            <option value="DISPUTED">DISPUTED</option>
+            <option value="PENDING_REVIEW">{t('reconPending')}</option>
+            <option value="RECONCILED">{t('reconReconciled')}</option>
+            <option value="DISPUTED">{t('reconDisputed')}</option>
           </select>
         </label>
         <label className="block text-token-sm">

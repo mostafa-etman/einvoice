@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import PDFDocument from 'pdfkit';
 import { ArabicShaper } from 'arabic-persian-reshaper';
-import { formatMoney } from '@einvoice/eta-core';
+import { formatMoneyDisplay, formatQuantityDisplay } from '@einvoice/eta-core';
 
 export type LocalInvoicePdfLocale = 'en' | 'ar';
 
@@ -205,20 +205,8 @@ export function shapeForPdf(text: string, _rtl = false): string {
   }
 }
 
-/** Money with thousands separators + 2 decimals (always LTR). */
-export function formatMoneyDisplay(value: unknown): string {
-  let fixed = '0.00';
-  try {
-    fixed = formatMoney(String(value ?? '0'));
-  } catch {
-    fixed = '0.00';
-  }
-  const neg = fixed.startsWith('-');
-  const raw = neg ? fixed.slice(1) : fixed;
-  const [intPart, frac = '00'] = raw.split('.');
-  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return `${neg ? '-' : ''}${grouped}.${frac}`;
-}
+/** Re-export shared display money helper (UI/PDF only — never for ETA payloads). */
+export { formatMoneyDisplay } from '@einvoice/eta-core';
 
 /** Display date as yyyy-MM-dd HH:mm (UTC, always LTR). */
 export function formatDateDisplay(input: string): string {
@@ -572,7 +560,7 @@ export async function renderLocalInvoicePdf(
     const row: Record<(typeof cols)[number]['key'], string> = {
       code: `${line.itemType}:${line.itemCode}`,
       description: line.description || '',
-      qty: String(line.quantity ?? ''),
+      qty: formatQuantityDisplay(line.quantity),
       unit: String(line.unitType ?? ''),
       unitPrice: formatMoneyDisplay(line.unitPrice),
       discount: formatMoneyDisplay(line.discountAmount ?? '0'),

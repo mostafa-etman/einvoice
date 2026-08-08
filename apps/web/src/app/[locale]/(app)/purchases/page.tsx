@@ -12,6 +12,7 @@ import {
   type PurchaseSummary,
   type SyncRun,
 } from '@/lib/api/purchases';
+import { formatMoneyDisplay } from '@/lib/format-number';
 
 type SortBy =
   | 'dateTimeIssued'
@@ -30,16 +31,6 @@ function formatIssueDate(iso: string | null | undefined): string {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
-}
-
-function formatAmount(value: string | null | undefined): string {
-  if (value == null || value === '') return '—';
-  const n = Number(value);
-  if (Number.isNaN(n)) return value;
-  return n.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
 }
 
 function isSyncBusy(status: string | null | undefined) {
@@ -324,14 +315,14 @@ export default function PurchasesPage() {
           >
             <option value="">{t('filterAll')}</option>
             {[
-              'Valid',
-              'Invalid',
-              'Rejected',
-              'Cancelled',
-              'Submitted',
+              { value: 'Valid', label: t('etaStatusValid') },
+              { value: 'Invalid', label: t('etaStatusInvalid') },
+              { value: 'Rejected', label: t('etaStatusRejected') },
+              { value: 'Cancelled', label: t('etaStatusCancelled') },
+              { value: 'Submitted', label: t('etaStatusSubmitted') },
             ].map((s) => (
-              <option key={s} value={s}>
-                {s}
+              <option key={s.value} value={s.value}>
+                {s.label}
               </option>
             ))}
           </select>
@@ -458,14 +449,29 @@ export default function PurchasesPage() {
                   </td>
                   <td className={tdClass}>
                     <span dir="ltr" className="tabular-nums">
-                      {formatAmount(row.totalAmount)}
+                      {formatMoneyDisplay(row.totalAmount)}
                     </span>
                   </td>
                   <td className={tdClass}>
                     <span dir="ltr">{row.currency || '—'}</span>
                   </td>
                   <td className={tdClass}>
-                    <span dir="ltr">{row.etaStatus || row.buyerDecision}</span>
+                    {(() => {
+                      const status = String(row.etaStatus ?? '').toLowerCase();
+                      const label =
+                        status === 'valid'
+                          ? t('etaStatusValid')
+                          : status === 'invalid'
+                            ? t('etaStatusInvalid')
+                            : status === 'rejected'
+                              ? t('etaStatusRejected')
+                              : status === 'cancelled'
+                                ? t('etaStatusCancelled')
+                                : status === 'submitted'
+                                  ? t('etaStatusSubmitted')
+                                  : row.etaStatus || row.buyerDecision || '—';
+                      return <span>{label}</span>;
+                    })()}
                   </td>
                   <td className={tdClass}>
                     <span className="rounded bg-amber-100 px-token-xs text-token-xs text-amber-900">

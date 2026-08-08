@@ -2,6 +2,7 @@
 
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { checkLateSubmission } from '@einvoice/eta-core';
 import { ApiError } from '@/lib/api/client';
@@ -26,6 +27,7 @@ import {
   type StatusRefreshBatchResult,
 } from '@/lib/api/submissions';
 import { LocalPdfPreviewModal } from '@/components/local-pdf-preview-modal';
+import { formatMoneyDisplay } from '@/lib/format-number';
 
 type DocRow = DocumentListItem;
 
@@ -85,16 +87,6 @@ function formatIssueDate(iso: string | null | undefined): string {
   return `${y}-${m}-${day}`;
 }
 
-function formatAmount(value: string | null | undefined): string {
-  if (value == null || value === '') return '—';
-  const n = Number(value);
-  if (Number.isNaN(n)) return value;
-  return n.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
 function statusBadgeClass(status: string): string {
   switch (status) {
     case 'VALID':
@@ -120,6 +112,7 @@ function statusBadgeClass(status: string): string {
 export default function DocumentsPage() {
   const t = useTranslations('documents');
   const locale = useLocale();
+  const router = useRouter();
   const [items, setItems] = useState<DocRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -1038,7 +1031,7 @@ export default function DocumentsPage() {
                   </td>
                   <td className={tdClass}>
                     <span dir="ltr" className="tabular-nums">
-                      {formatAmount(doc.totalAmount)}
+                      {formatMoneyDisplay(doc.totalAmount)}
                     </span>
                   </td>
                   <td className={tdClass}>
@@ -1066,72 +1059,41 @@ export default function DocumentsPage() {
                     )}
                   </td>
                   <td className={tdClass}>
-                    <div className="flex flex-wrap gap-token-xs">
-                      <Link
-                        href={`/${locale}/documents/${doc.id}`}
-                        className="text-token-xs text-brand hover:underline"
-                      >
-                        {t('view')}
-                      </Link>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        className="text-token-xs text-brand disabled:opacity-50"
-                        onClick={() => setPreviewId(doc.id)}
-                      >
-                        {t('previewPrint')}
-                      </button>
-                      {isSigned(doc.status) && doc.origin !== 'ETA_SYNC' ? (
-                        <button
-                          type="button"
-                          disabled={busy}
-                          className="text-token-xs text-brand disabled:opacity-50"
-                          onClick={() => void runSubmitOne(doc.id)}
-                        >
-                          {t('submitOne')}
-                        </button>
-                      ) : null}
-                      {isPendingEta(doc.status, doc.etaUuid) ||
-                      doc.status === 'VALID' ||
-                      doc.status === 'INVALID' ? (
-                        <button
-                          type="button"
-                          disabled={busy}
-                          className="text-token-xs text-brand disabled:opacity-50"
-                          onClick={() => void runRefreshOne(doc.id)}
-                        >
-                          {t('refreshStatus')}
-                        </button>
-                      ) : null}
-                      {canDownloadEta(doc.status, doc.etaUuid) ? (
-                        <button
-                          type="button"
-                          disabled={busy}
-                          className="text-token-xs text-brand disabled:opacity-50"
-                          onClick={() => void runDownloadPrintout(doc.id)}
-                        >
-                          {t('downloadPrintout')}
-                        </button>
-                      ) : null}
-                      {canCancel(doc.status, doc.etaUuid) ? (
-                        <button
-                          type="button"
-                          disabled={busy}
-                          className="text-token-xs text-danger disabled:opacity-50"
-                          onClick={() => void runCancelOne(doc.id)}
-                        >
-                          {t('cancelDocument')}
-                        </button>
-                      ) : null}
-                      {doc.origin !== 'ETA_SYNC' &&
-                      (doc.status === 'DRAFT' ||
-                        doc.status === 'READY' ||
-                        doc.status === 'SIGNED') ? (
-                        <button
-                          type="button"
-                          className="text-token-xs text-danger disabled:opacity-50"
-                          disabled={busy}
-                          onClick={async () => {
+                    <select
+                      className="max-w-[10rem] border border-border bg-background px-token-xs py-token-xs text-token-xs"
+                      disabled={busy}
+                      defaultValue=""
+                      aria-label={t('actionsMenu')}
+                      onChange={(e) => {
+                        const action = e.target.value;
+                        e.target.value = '';
+                        if (!action) return;
+                        if (action === 'view') {
+                          router.push(`/${locale}/documents/${doc.id}`);
+                          return;
+                        }
+                        if (action === 'preview') {
+                          setPreviewId(doc.id);
+                          return;
+                        }
+                        if (action === 'submit') {
+                          void runSubmitOne(doc.id);
+                          return;
+                        }
+                        if (action === 'refresh') {
+                          void runRefreshOne(doc.id);
+                          return;
+                        }
+                        if (action === 'printout') {
+                          void runDownloadPrintout(doc.id);
+                          return;
+                        }
+                        if (action === 'cancel') {
+                          void runCancelOne(doc.id);
+                          return;
+                        }
+                        if (action === 'delete') {
+                          void (async () => {
                             await deleteDocument(doc.id);
                             setSelected((prev) => {
                               const next = new Set(prev);
@@ -1139,12 +1101,34 @@ export default function DocumentsPage() {
                               return next;
                             });
                             await reload();
-                          }}
-                        >
-                          {t('delete')}
-                        </button>
+                          })();
+                        }
+                      }}
+                    >
+                      <option value="">{t('actionsMenu')}</option>
+                      <option value="view">{t('view')}</option>
+                      <option value="preview">{t('previewPrint')}</option>
+                      {isSigned(doc.status) && doc.origin !== 'ETA_SYNC' ? (
+                        <option value="submit">{t('submitOne')}</option>
                       ) : null}
-                    </div>
+                      {isPendingEta(doc.status, doc.etaUuid) ||
+                      doc.status === 'VALID' ||
+                      doc.status === 'INVALID' ? (
+                        <option value="refresh">{t('refreshStatus')}</option>
+                      ) : null}
+                      {canDownloadEta(doc.status, doc.etaUuid) ? (
+                        <option value="printout">{t('downloadPrintout')}</option>
+                      ) : null}
+                      {canCancel(doc.status, doc.etaUuid) ? (
+                        <option value="cancel">{t('cancelDocument')}</option>
+                      ) : null}
+                      {doc.origin !== 'ETA_SYNC' &&
+                      (doc.status === 'DRAFT' ||
+                        doc.status === 'READY' ||
+                        doc.status === 'SIGNED') ? (
+                        <option value="delete">{t('delete')}</option>
+                      ) : null}
+                    </select>
                   </td>
                 </tr>
               ))}

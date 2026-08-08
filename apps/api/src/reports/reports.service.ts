@@ -35,6 +35,12 @@ import {
   toTaxLineIn,
   toVatReturnLineIn,
 } from './report-tax-sources';
+import {
+  attachTaxNames,
+  loadItemNamesByCode,
+  loadTaxCatalogNames,
+  periodBucketLabels,
+} from './report-catalog-labels';
 
 type Tx = Prisma.TransactionClient;
 
@@ -52,6 +58,7 @@ type IssuedRow = {
   receiverName: string | null;
   lines: Array<{
     itemCode: string;
+    itemType: string;
     description: string;
     quantity: string;
     total: string;
@@ -82,6 +89,7 @@ type ReceivedRow = {
   rawDetailsJson: Prisma.JsonValue | null;
   lines: Array<{
     itemCode: string | null;
+    itemType: string | null;
     description: string | null;
     quantity: string | null;
     total: string | null;
@@ -118,7 +126,8 @@ export class ReportsService {
   private async runInTx(tx: Tx, reportId: ReportId, f: ReportFilters) {
     switch (reportId) {
       case 'S1':
-        return this.salesTotal(tx, f);
+        // Total sales is always monthly for readable period labels.
+        return this.salesTotal(tx, { ...f, grain: 'month' });
       case 'S2':
         return this.salesByCustomer(tx, f);
       case 'S3':
@@ -188,6 +197,7 @@ export class ReportsService {
         lines: {
           select: {
             itemCode: true,
+            itemType: true,
             description: true,
             quantity: true,
             total: true,
@@ -241,6 +251,7 @@ export class ReportsService {
         lines: {
           select: {
             itemCode: true,
+            itemType: true,
             description: true,
             quantity: true,
             total: true,
@@ -262,7 +273,15 @@ export class ReportsService {
     const docs = await this.loadIssued(tx, f);
     const seriesMap = new Map<
       string,
-      { bucket: string; currencyCode: string; net: string; grossPositive: string; creditReduction: string }
+      {
+        bucket: string;
+        bucketLabelEn: string;
+        bucketLabelAr: string;
+        currencyCode: string;
+        net: string;
+        grossPositive: string;
+        creditReduction: string;
+      }
     >();
     let net = '0.00';
     let grossPositive = '0.00';
@@ -275,9 +294,12 @@ export class ReportsService {
       creditReduction = add(creditReduction, parts.creditReduction);
       const cur = this.currencyKey(d.currencyCode, f.perCurrency);
       const bucket = bucketKey(d.issueDateTime, f.grain);
+      const labels = periodBucketLabels(bucket, f.grain);
       const key = `${bucket}|${cur}`;
       const prev = seriesMap.get(key) ?? {
         bucket,
+        bucketLabelEn: labels.bucketLabelEn,
+        bucketLabelAr: labels.bucketLabelAr,
         currencyCode: cur,
         net: '0.00',
         grossPositive: '0.00',
@@ -293,7 +315,7 @@ export class ReportsService {
     );
     return {
       reportId: 'S1' as const,
-      filters: this.publicFilters(f),
+      filters: this.publicFilters({ ...f, grain: 'month' }),
       summary: {
         net,
         ...(f.showGross ? { grossPositive, creditReduction } : {}),
@@ -301,7 +323,7 @@ export class ReportsService {
       },
       series,
       rows: series,
-      chart: { type: 'line', dataKey: 'net', xKey: 'bucket' },
+      chart: { type: 'line', dataKey: 'net', xKey: 'bucketLabel' },
     };
   }
 
@@ -364,15 +386,26 @@ export class ReportsService {
         map.set(key, prev);
       }
     }
-    const rows = [...map.values()]
+    const baseRows = [...map.values()]
       .sort((a, b) => Number(b.net) - Number(a.net))
       .slice(0, f.limit);
+    const names = await loadItemNamesByCode(
+      tx,
+      baseRows.map((r) => r.itemCode).filter(Boolean),
+    );
+    const rows = baseRows.map((r) => ({
+      itemName: names.get(r.itemCode) ?? null,
+      itemCode: r.itemCode,
+      description: r.description,
+      quantity: r.quantity,
+      net: r.net,
+    }));
     return {
       reportId: 'S3' as const,
       filters: this.publicFilters(f),
       summary: { rowCount: rows.length },
       rows,
-      chart: { type: 'bar', dataKey: 'net', xKey: 'itemCode' },
+      chart: { type: 'bar', dataKey: 'net', xKey: 'itemName' },
     };
   }
 
@@ -405,6 +438,10 @@ export class ReportsService {
   private async outputVat(tx: Tx, f: ReportFilters) {
     const docs = await this.loadIssued(tx, f);
     const split = this.taxBundleFromIssued(docs);
+    const catalogs = await loadTaxCatalogNames(tx);
+    const vat = attachTaxNames(split.vat, catalogs);
+    const withholding = attachTaxNames(split.withholding, catalogs);
+    const other = attachTaxNames(split.other, catalogs);
     return {
       reportId: 'S4' as const,
       filters: this.publicFilters(f),
@@ -413,9 +450,9 @@ export class ReportsService {
         withholding: split.withholdingTotal,
         otherTaxes: split.otherTotal,
       },
-      vat: split,
-      rows: split.vat,
-      chart: { type: 'bar', dataKey: 'amount', xKey: 'rate' },
+      vat: { ...split, vat, withholding, other },
+      rows: vat,
+      chart: { type: 'bar', dataKey: 'amount', xKey: 'taxTypeNameEn' },
     };
   }
 
@@ -423,7 +460,15 @@ export class ReportsService {
     const docs = await this.loadReceived(tx, f);
     const seriesMap = new Map<
       string,
-      { bucket: string; currencyCode: string; net: string; grossPositive: string; creditReduction: string }
+      {
+        bucket: string;
+        bucketLabelEn: string;
+        bucketLabelAr: string;
+        currencyCode: string;
+        net: string;
+        grossPositive: string;
+        creditReduction: string;
+      }
     >();
     let net = '0.00';
     let grossPositive = '0.00';
@@ -437,9 +482,12 @@ export class ReportsService {
       const cur = this.currencyKey(d.currency, f.perCurrency);
       const when = d.dateTimeIssued ?? f.rangeStart;
       const bucket = bucketKey(when, f.grain);
+      const labels = periodBucketLabels(bucket, f.grain);
       const key = `${bucket}|${cur}`;
       const prev = seriesMap.get(key) ?? {
         bucket,
+        bucketLabelEn: labels.bucketLabelEn,
+        bucketLabelAr: labels.bucketLabelAr,
         currencyCode: cur,
         net: '0.00',
         grossPositive: '0.00',
@@ -463,7 +511,7 @@ export class ReportsService {
       },
       series,
       rows: series,
-      chart: { type: 'line', dataKey: 'net', xKey: 'bucket' },
+      chart: { type: 'line', dataKey: 'net', xKey: 'bucketLabel' },
     };
   }
 
@@ -503,6 +551,10 @@ export class ReportsService {
   private async inputVat(tx: Tx, f: ReportFilters) {
     const docs = await this.loadReceived(tx, f);
     const split = this.taxBundleFromReceived(docs);
+    const catalogs = await loadTaxCatalogNames(tx);
+    const vat = attachTaxNames(split.vat, catalogs);
+    const withholding = attachTaxNames(split.withholding, catalogs);
+    const other = attachTaxNames(split.other, catalogs);
     return {
       reportId: 'P3' as const,
       filters: this.publicFilters(f),
@@ -511,9 +563,9 @@ export class ReportsService {
         withholding: split.withholdingTotal,
         otherTaxes: split.otherTotal,
       },
-      vat: split,
-      rows: split.vat,
-      chart: { type: 'bar', dataKey: 'amount', xKey: 'rate' },
+      vat: { ...split, vat, withholding, other },
+      rows: vat,
+      chart: { type: 'bar', dataKey: 'amount', xKey: 'taxTypeNameEn' },
     };
   }
 
@@ -534,7 +586,7 @@ export class ReportsService {
     const netVat = sub(outputVat, inputVat);
     const total = {
       branchId: null as string | null,
-      branchName: 'Total',
+      branchName: '__TOTAL__',
       outputVat,
       inputVat,
       netVat,
@@ -566,7 +618,7 @@ export class ReportsService {
         const nv = sub(o.vatTotal, i.vatTotal);
         return {
           branchId: isUn ? null : bid,
-          branchName: isUn ? 'Unassigned' : nameById.get(bid) || bid,
+          branchName: isUn ? '__UNASSIGNED__' : nameById.get(bid) || bid,
           outputVat: o.vatTotal,
           inputVat: i.vatTotal,
           netVat: nv,
@@ -681,6 +733,12 @@ export class ReportsService {
       (r) => r.category === 'withholding',
     );
 
+    const catalogs = await loadTaxCatalogNames(tx);
+    const namedOutput = attachTaxNames(outputRows, catalogs);
+    const namedInput = attachTaxNames(inputRows, catalogs);
+    const namedWithholding = attachTaxNames(withholdingRows, catalogs);
+    const namedFiltered = attachTaxNames(filtered, catalogs);
+
     return {
       reportId: 'C4' as const,
       filters: this.publicFilters(f),
@@ -701,19 +759,21 @@ export class ReportsService {
         salesDocumentCount: issued.length,
         purchasesDocumentCount: received.length,
         taxTypeFilter: f.taxType ?? null,
-        disclaimer:
-          'Reporting aid only — verify figures with your accountant / ETA before filing.',
       },
       taxTypes: availableTaxTypes(allRows),
       sections: {
-        output: outputRows,
-        input: inputRows,
-        withholding: withholdingRows,
+        output: namedOutput,
+        input: namedInput,
+        withholding: namedWithholding,
       },
-      rows: filtered.map((r) => ({
+      rows: namedFiltered.map((r) => ({
         side: r.side,
         taxType: r.taxType,
+        taxTypeNameEn: r.taxTypeNameEn,
+        taxTypeNameAr: r.taxTypeNameAr,
         subType: r.subType,
+        subTypeNameEn: r.subTypeNameEn,
+        subTypeNameAr: r.subTypeNameAr,
         rate: r.rate,
         category: r.category,
         taxableValue: r.taxableValue,
@@ -737,11 +797,20 @@ export class ReportsService {
     const p1 = await this.purchasesTotal(tx, f);
     const map = new Map<
       string,
-      { bucket: string; sales: string; purchases: string }
+      {
+        bucket: string;
+        bucketLabelEn: string;
+        bucketLabelAr: string;
+        sales: string;
+        purchases: string;
+      }
     >();
     for (const row of s1.series) {
+      const labels = periodBucketLabels(row.bucket, f.grain);
       const prev = map.get(row.bucket) ?? {
         bucket: row.bucket,
+        bucketLabelEn: row.bucketLabelEn ?? labels.bucketLabelEn,
+        bucketLabelAr: row.bucketLabelAr ?? labels.bucketLabelAr,
         sales: '0.00',
         purchases: '0.00',
       };
@@ -749,8 +818,11 @@ export class ReportsService {
       map.set(row.bucket, prev);
     }
     for (const row of p1.series) {
+      const labels = periodBucketLabels(row.bucket, f.grain);
       const prev = map.get(row.bucket) ?? {
         bucket: row.bucket,
+        bucketLabelEn: row.bucketLabelEn ?? labels.bucketLabelEn,
+        bucketLabelAr: row.bucketLabelAr ?? labels.bucketLabelAr,
         sales: '0.00',
         purchases: '0.00',
       };
@@ -769,7 +841,7 @@ export class ReportsService {
       },
       series,
       rows: series,
-      chart: { type: 'dual-line', xKey: 'bucket' },
+      chart: { type: 'dual-line', xKey: 'bucketLabel' },
     };
   }
 

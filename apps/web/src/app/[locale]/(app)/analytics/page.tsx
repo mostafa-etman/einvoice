@@ -23,6 +23,7 @@ import {
   type AnalyticsSummary,
   type MeterTotals,
 } from '@/lib/api/analytics';
+import { formatQuantityDisplay } from '@/lib/format-number';
 import { useTenant } from '@/lib/tenant-provider';
 
 function todayCairo(): string {
@@ -138,7 +139,7 @@ export default function AnalyticsPage() {
       (key) => ({
         key,
         label: t(`meters.${key}`),
-        value: summary.totals[key],
+        value: formatQuantityDisplay(summary.totals[key]),
       }),
     );
   }, [summary, t]);
@@ -277,7 +278,7 @@ export default function AnalyticsPage() {
                 data-meter={c.key}
               >
                 <div className="text-sm text-muted-foreground">{c.label}</div>
-                <div className="text-2xl font-semibold tabular-nums">
+                <div className="text-2xl font-semibold tabular-nums" dir="ltr">
                   {c.value}
                 </div>
               </div>

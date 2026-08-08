@@ -24,6 +24,7 @@ import {
   type ReportPayload,
 } from '@/lib/api/reports';
 import { useTenant } from '@/lib/tenant-provider';
+import { formatMoneyDisplay, formatQuantityDisplay } from '@/lib/format-number';
 
 function todayCairo(): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -49,20 +50,28 @@ const PDF_IDS = new Set(['S1', 'P1', 'S4', 'P3', 'C1', 'C4']);
 
 const FIELD_KEYS = new Set([
   'bucket',
+  'bucketLabel',
   'net',
   'gross',
+  'grossPositive',
+  'creditReduction',
   'sales',
   'purchases',
   'customerName',
   'supplierName',
+  'itemName',
   'itemCode',
+  'description',
+  'quantity',
   'amount',
   'rate',
   'count',
   'status',
   'name',
   'taxType',
+  'taxTypeName',
   'subType',
+  'subTypeName',
   'side',
   'category',
   'taxableValue',
@@ -70,27 +79,142 @@ const FIELD_KEYS = new Set([
   'branchId',
   'branchName',
   'currency',
+  'currencyCode',
   'outputVat',
   'inputVat',
   'netVat',
   'withholding',
+  'withholdingOutput',
+  'withholdingInput',
   'documentCount',
+  'rowCount',
+  'otherTaxes',
+  'salesNet',
+  'purchasesNet',
   'empty',
+  'position',
 ]);
 
-function formatLtrAmount(value: unknown): string {
-  if (value == null || value === '') return '—';
-  const n = Number(value);
-  if (Number.isNaN(n)) return String(value);
-  return n.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+const HIDDEN_ROW_KEYS = new Set([
+  'bucketLabelEn',
+  'bucketLabelAr',
+  'taxTypeNameEn',
+  'taxTypeNameAr',
+  'subTypeNameEn',
+  'subTypeNameAr',
+  'customerKey',
+  'supplierKey',
+]);
 
 function monthStartCairo(): string {
   const today = todayCairo();
   return `${today.slice(0, 7)}-01`;
+}
+
+function pickLocaleName(
+  locale: string,
+  nameEn: unknown,
+  nameAr: unknown,
+  fallback: unknown,
+): string {
+  const en = String(nameEn ?? '').trim();
+  const ar = String(nameAr ?? '').trim();
+  const fb = String(fallback ?? '').trim();
+  if (locale === 'ar') return ar || en || fb;
+  return en || ar || fb;
+}
+
+function localizeReportRows(
+  rows: Array<Record<string, unknown>>,
+  locale: string,
+): Array<Record<string, unknown>> {
+  return rows.map((row) => {
+    const out: Record<string, unknown> = {};
+    const bucketLabel = pickLocaleName(
+      locale,
+      row.bucketLabelEn,
+      row.bucketLabelAr,
+      row.bucket,
+    );
+    const taxTypeName = pickLocaleName(
+      locale,
+      row.taxTypeNameEn,
+      row.taxTypeNameAr,
+      '',
+    );
+    const subTypeName = pickLocaleName(
+      locale,
+      row.subTypeNameEn,
+      row.subTypeNameAr,
+      '',
+    );
+
+    for (const [k, v] of Object.entries(row)) {
+      if (HIDDEN_ROW_KEYS.has(k)) continue;
+      if (k === 'bucket' && bucketLabel) {
+        out.bucket = bucketLabel;
+        continue;
+      }
+      if (k === 'taxType') {
+        const code = String(v ?? '');
+        out.taxType = taxTypeName && code ? `${taxTypeName} (${code})` : code;
+        continue;
+      }
+      if (k === 'subType') {
+        const code = String(v ?? '');
+        out.subType =
+          subTypeName && code ? `${subTypeName} (${code})` : code || '—';
+        continue;
+      }
+      out[k] = v;
+    }
+    if (!('bucket' in out) && bucketLabel) out.bucket = bucketLabel;
+    if ('itemCode' in row) {
+      const name = String(row.itemName ?? '').trim();
+      const desc = String(row.description ?? '').trim();
+      const code = String(row.itemCode ?? '').trim();
+      out.itemName = name || desc || code || '—';
+    }
+    return out;
+  });
+}
+
+function cellDisplayValue(
+  col: string,
+  value: unknown,
+  labels: { total: string; unassigned: string },
+): string {
+  if (col === 'branchName') {
+    if (value === '__TOTAL__') return labels.total;
+    if (value === '__UNASSIGNED__') return labels.unassigned;
+  }
+  if (col === 'quantity' || col === 'rate' || col === 'count' || col === 'documentCount' || col === 'rowCount') {
+    return formatQuantityDisplay(value);
+  }
+  if (
+    col === 'net' ||
+    col === 'gross' ||
+    col === 'grossPositive' ||
+    col === 'creditReduction' ||
+    col === 'amount' ||
+    col === 'sales' ||
+    col === 'purchases' ||
+    col === 'outputVat' ||
+    col === 'inputVat' ||
+    col === 'netVat' ||
+    col === 'withholding' ||
+    col === 'withholdingOutput' ||
+    col === 'withholdingInput' ||
+    col === 'taxableValue' ||
+    col === 'taxAmount' ||
+    col === 'otherTaxes' ||
+    col === 'salesNet' ||
+    col === 'purchasesNet'
+  ) {
+    return formatMoneyDisplay(value);
+  }
+  if (value == null || value === '') return '—';
+  return String(value);
 }
 
 export default function ReportDetailPage() {
@@ -106,7 +230,9 @@ export default function ReportDetailPage() {
   const [to, setTo] = useState(todayCairo);
   const [branchId, setBranchId] = useState('');
   const [currencyCode, setCurrencyCode] = useState('');
-  const [grain, setGrain] = useState<'day' | 'month'>('day');
+  const [grain, setGrain] = useState<'day' | 'month'>(() =>
+    reportId === 'S1' ? 'month' : 'day',
+  );
   const [showGross, setShowGross] = useState(false);
   const [includeOthers, setIncludeOthers] = useState(false);
   const [perBranch, setPerBranch] = useState(false);
@@ -118,6 +244,10 @@ export default function ReportDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+
+  useEffect(() => {
+    if (reportId === 'S1') setGrain('month');
+  }, [reportId]);
 
   useEffect(() => {
     if (reportId === 'C1') setPerBranch(true);
@@ -190,15 +320,43 @@ export default function ReportDetailPage() {
     }
   };
 
-  const chartRows = (
-    Array.isArray(data?.chart?.data)
-      ? data!.chart!.data
-      : (data?.series ?? data?.rows ?? [])
-  ) as Array<Record<string, unknown>>;
+  const chartRows = useMemo(() => {
+    const raw = (
+      Array.isArray(data?.chart?.data)
+        ? data!.chart!.data
+        : (data?.series ?? data?.rows ?? [])
+    ) as Array<Record<string, unknown>>;
+    return localizeReportRows(raw, locale).map((row) => {
+      const name = row.name;
+      if (typeof name === 'string' && FIELD_KEYS.has(name)) {
+        return { ...row, name: t(`fields.${name}` as 'fields.net') };
+      }
+      return row;
+    });
+  }, [data, locale, t]);
+
+  const tableRows = useMemo(
+    () => localizeReportRows((data?.rows ?? []) as Array<Record<string, unknown>>, locale),
+    [data, locale],
+  );
+
+  const branchLabels = useMemo(
+    () => ({
+      total: t('fields.total'),
+      unassigned: t('fields.unassigned'),
+    }),
+    [t],
+  );
 
   const summaryEntries = Object.entries(data?.summary ?? {}).filter(
-    ([, v]) => typeof v !== 'object' || v === null,
+    ([k, v]) =>
+      k !== 'period' &&
+      k !== 'taxTypeFilter' &&
+      (typeof v !== 'object' || v === null),
   );
+
+  const fieldLabel = (col: string) =>
+    FIELD_KEYS.has(col) ? t(`fields.${col}` as 'fields.net') : col;
 
   return (
     <div className="space-y-token-lg p-token-lg">
@@ -291,14 +449,20 @@ export default function ReportDetailPage() {
         {(reportId === 'S1' || reportId === 'P1' || reportId === 'C2') && (
           <label className="text-sm">
             {t('grain')}
-            <select
-              className="ms-2 rounded border border-border bg-background px-2 py-1"
-              value={grain}
-              onChange={(e) => setGrain(e.target.value as 'day' | 'month')}
-            >
-              <option value="day">{t('grainDay')}</option>
-              <option value="month">{t('grainMonth')}</option>
-            </select>
+            {reportId === 'S1' ? (
+              <span className="ms-2 rounded border border-border bg-background px-2 py-1">
+                {t('grainMonth')}
+              </span>
+            ) : (
+              <select
+                className="ms-2 rounded border border-border bg-background px-2 py-1"
+                value={grain}
+                onChange={(e) => setGrain(e.target.value as 'day' | 'month')}
+              >
+                <option value="day">{t('grainDay')}</option>
+                <option value="month">{t('grainMonth')}</option>
+              </select>
+            )}
           </label>
         )}
         <label className="flex items-center gap-2 text-sm">
@@ -380,7 +544,7 @@ export default function ReportDetailPage() {
                 >
                   <div className="text-xs text-muted">{t(labelKey)}</div>
                   <div className="text-lg font-semibold tabular-nums" dir="ltr">
-                    {formatLtrAmount(value)}
+                    {formatMoneyDisplay(value)}
                   </div>
                 </div>
               ))}
@@ -444,16 +608,49 @@ export default function ReportDetailPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((row, i) => (
+                    {rows.map((row, i) => {
+                      const taxLabel = pickLocaleName(
+                        locale,
+                        row.taxTypeNameEn,
+                        row.taxTypeNameAr,
+                        row.taxType,
+                      );
+                      const subLabel = pickLocaleName(
+                        locale,
+                        row.subTypeNameEn,
+                        row.subTypeNameAr,
+                        row.subType,
+                      );
+                      const taxCode = String(row.taxType ?? '');
+                      const subCode = String(row.subType ?? '');
+                      return (
                       <tr
                         key={`${sectionKey}-${i}`}
                         className="odd:bg-background even:bg-surface/40"
                       >
-                        <td className="border-b border-border px-3 py-2" dir="ltr">
-                          {String(row.taxType ?? '')}
+                        <td className="border-b border-border px-3 py-2">
+                          {taxLabel && taxCode && taxLabel !== taxCode
+                            ? `${taxLabel} `
+                            : null}
+                          <span dir="ltr">
+                            {taxLabel !== taxCode ? `(${taxCode})` : taxCode}
+                          </span>
                         </td>
-                        <td className="border-b border-border px-3 py-2" dir="ltr">
-                          {String(row.subType ?? '')}
+                        <td className="border-b border-border px-3 py-2">
+                          {subCode ? (
+                            <>
+                              {subLabel && subLabel !== subCode
+                                ? `${subLabel} `
+                                : null}
+                              <span dir="ltr">
+                                {subLabel !== subCode
+                                  ? `(${subCode})`
+                                  : subCode}
+                              </span>
+                            </>
+                          ) : (
+                            '—'
+                          )}
                         </td>
                         <td
                           className="border-b border-border px-3 py-2 tabular-nums"
@@ -465,13 +662,13 @@ export default function ReportDetailPage() {
                           className="border-b border-border px-3 py-2 tabular-nums"
                           dir="ltr"
                         >
-                          {formatLtrAmount(row.taxableValue)}
+                          {formatMoneyDisplay(row.taxableValue)}
                         </td>
                         <td
                           className="border-b border-border px-3 py-2 tabular-nums"
                           dir="ltr"
                         >
-                          {formatLtrAmount(row.taxAmount)}
+                          {formatMoneyDisplay(row.taxAmount)}
                         </td>
                         <td
                           className="border-b border-border px-3 py-2 tabular-nums"
@@ -480,7 +677,8 @@ export default function ReportDetailPage() {
                           {String(row.documentCount ?? '')}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </section>
@@ -497,9 +695,14 @@ export default function ReportDetailPage() {
                 key={k}
                 className="rounded-md border border-border bg-surface px-token-md py-token-sm"
               >
-                <div className="text-xs text-muted">{k}</div>
-                <div className="text-lg font-semibold tabular-nums">
-                  {String(v)}
+                <div className="text-xs text-muted">{fieldLabel(k)}</div>
+                <div className="text-lg font-semibold tabular-nums" dir="ltr">
+                  {typeof v === 'number' ||
+                  (typeof v === 'string' && v !== '' && !Number.isNaN(Number(v)))
+                    ? /count|Count$/i.test(k) || k === 'rate'
+                      ? formatQuantityDisplay(v)
+                      : formatMoneyDisplay(v)
+                    : String(v ?? '—')}
                 </div>
               </div>
             ))}
@@ -525,15 +728,16 @@ export default function ReportDetailPage() {
                     <Legend />
                     {reportId === 'C2' ? (
                       <>
-                        <Line type="monotone" dataKey="sales" stroke="#0f766e" />
+                        <Line type="monotone" dataKey="sales" stroke="#0f766e" name={t('fields.sales')} />
                         <Line
                           type="monotone"
                           dataKey="purchases"
                           stroke="#b45309"
+                          name={t('fields.purchases')}
                         />
                       </>
                     ) : (
-                      <Line type="monotone" dataKey="net" stroke="#0f766e" />
+                      <Line type="monotone" dataKey="net" stroke="#0f766e" name={t('fields.net')} />
                     )}
                   </LineChart>
                 ) : (
@@ -546,12 +750,14 @@ export default function ReportDetailPage() {
                           : reportId === 'P2'
                             ? 'supplierName'
                             : reportId === 'S3'
-                              ? 'itemCode'
+                              ? 'itemName'
                               : reportId === 'C1'
                                 ? 'name'
                                 : reportId === 'C3'
                                   ? 'status'
-                                  : 'rate'
+                                  : reportId === 'S4' || reportId === 'P3'
+                                    ? 'taxType'
+                                    : 'rate'
                       }
                     />
                     <YAxis />
@@ -567,6 +773,7 @@ export default function ReportDetailPage() {
                             : 'net'
                       }
                       fill="#0f766e"
+                      name={t('fields.amount')}
                     />
                   </BarChart>
                 )}
@@ -578,29 +785,33 @@ export default function ReportDetailPage() {
             <table className="min-w-full text-sm">
               <thead className="bg-surface">
                 <tr>
-                  {Object.keys((data.rows ?? [])[0] ?? { empty: '' }).map(
-                    (col) => (
-                      <th
-                        key={col}
-                        className="border-b border-border px-3 py-2 text-start font-medium"
-                      >
-                        {FIELD_KEYS.has(col)
-                          ? t(`fields.${col}` as 'fields.net')
-                          : col}
-                      </th>
-                    ),
-                  )}
+                  {Object.keys(tableRows[0] ?? { empty: '' }).map((col) => (
+                    <th
+                      key={col}
+                      className="border-b border-border px-3 py-2 text-start font-medium"
+                    >
+                      {fieldLabel(col)}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {(data.rows ?? []).map((row, i) => (
+                {tableRows.map((row, i) => (
                   <tr key={i} className="odd:bg-background even:bg-surface/40">
-                    {Object.keys((data.rows ?? [])[0] ?? {}).map((col) => (
+                    {Object.keys(tableRows[0] ?? {}).map((col) => (
                       <td
                         key={col}
                         className="border-b border-border px-3 py-2 tabular-nums"
+                        dir={
+                          col === 'itemCode' ||
+                          col === 'currency' ||
+                          col === 'currencyCode' ||
+                          col === 'rate'
+                            ? 'ltr'
+                            : undefined
+                        }
                       >
-                        {String(row[col] ?? '')}
+                        {cellDisplayValue(col, row[col], branchLabels)}
                       </td>
                     ))}
                   </tr>

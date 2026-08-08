@@ -125,7 +125,7 @@ export default function ImportsPage() {
       setMapping((job.mappingJson as Record<string, string>) || {});
       reloadJobs();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Upload failed');
+      setError(e instanceof Error ? e.message : t('uploadFailed'));
     } finally {
       setBusy(false);
     }
@@ -152,7 +152,7 @@ export default function ImportsPage() {
       if (!job) setError(t('stuckHint'));
       reloadJobs();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Validate failed');
+      setError(e instanceof Error ? e.message : t('validateFailed'));
     } finally {
       setBusy(false);
     }
@@ -173,7 +173,7 @@ export default function ImportsPage() {
       if (!job) setError(t('stuckHint'));
       reloadJobs();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Run failed');
+      setError(e instanceof Error ? e.message : t('runFailed'));
     } finally {
       setBusy(false);
     }

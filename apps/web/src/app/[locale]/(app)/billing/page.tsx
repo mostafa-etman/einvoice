@@ -12,6 +12,7 @@ import {
   requestEnterprise,
   startCheckout,
 } from '@/lib/api/billing';
+import { formatQuantityDisplay } from '@/lib/format-number';
 
 function QuotaBar({
   label,
@@ -28,8 +29,8 @@ function QuotaBar({
     <div className="space-y-1">
       <div className="flex items-center justify-between text-sm">
         <span>{label}</span>
-        <span className="tabular-nums text-muted-foreground">
-          {used} / {limit}
+        <span className="tabular-nums text-muted-foreground" dir="ltr">
+          {formatQuantityDisplay(used)} / {formatQuantityDisplay(limit)}
         </span>
       </div>
       <div className="h-2 w-full overflow-hidden rounded bg-muted">

@@ -20,6 +20,8 @@ export {
   mul,
   div,
   formatMoney,
+  formatMoneyDisplay,
+  formatQuantityDisplay,
   toDecimalString,
   type DecimalInput,
 } from './money.js';

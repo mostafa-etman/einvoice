@@ -33,6 +33,7 @@ import {
 import { listEtaCodes, type EtaCodeEntry } from '@/lib/api/eta-codes';
 import { listItemCodes, type ItemCode } from '@/lib/api/item-codes';
 import { apiFetch, ApiError } from '@/lib/api/client';
+import { formatMoneyDisplay } from '@/lib/format-number';
 import { newIdempotencyKey, putDraft } from '@/lib/offline/draft-queue';
 import {
   removeRowByKey,
@@ -914,8 +915,8 @@ export default function DocumentEditorPage() {
     : [
         {
           code: 'T1',
-          nameEn: 'Value added tax',
-          nameAr: '',
+          nameEn: t('taxTypeVatFallbackEn'),
+          nameAr: t('taxTypeVatFallbackAr'),
           parentCode: null,
           meta: null,
         },
@@ -1177,12 +1178,12 @@ export default function DocumentEditorPage() {
               value={kind}
               onChange={(e) => setKind(e.target.value as DocumentUpsert['kind'])}
             >
-              <option value="INVOICE">INVOICE</option>
-              <option value="CREDIT_NOTE">CREDIT_NOTE</option>
-              <option value="DEBIT_NOTE">DEBIT_NOTE</option>
-              <option value="EXPORT_INVOICE">EXPORT_INVOICE</option>
-              <option value="EXPORT_CREDIT_NOTE">EXPORT_CREDIT_NOTE</option>
-              <option value="EXPORT_DEBIT_NOTE">EXPORT_DEBIT_NOTE</option>
+              <option value="INVOICE">{t('kindInvoice')}</option>
+              <option value="CREDIT_NOTE">{t('kindCreditNote')}</option>
+              <option value="DEBIT_NOTE">{t('kindDebitNote')}</option>
+              <option value="EXPORT_INVOICE">{t('kindExportInvoice')}</option>
+              <option value="EXPORT_CREDIT_NOTE">{t('kindExportCreditNote')}</option>
+              <option value="EXPORT_DEBIT_NOTE">{t('kindExportDebitNote')}</option>
             </select>
           </label>
           <label className="block text-token-sm">
@@ -1529,7 +1530,8 @@ export default function DocumentEditorPage() {
                       {c.etaUuid}
                     </span>
                     <span className="ms-token-sm text-foreground/60">
-                      {c.issueDateTime.slice(0, 10)} · {c.totalAmount}
+                      {c.issueDateTime.slice(0, 10)} ·{' '}
+                      <span dir="ltr">{formatMoneyDisplay(c.totalAmount)}</span>
                     </span>
                   </button>
                 ))}
@@ -1979,29 +1981,32 @@ export default function DocumentEditorPage() {
           <h2 className="font-medium text-brand">{t('totals')}</h2>
           <p className="text-token-sm">
             <span className="text-foreground/60">{t('totalSalesAmount')}:</span>{' '}
-            {String(totals?.totalSalesAmount ?? '—')}
+            <span dir="ltr">{formatMoneyDisplay(totals?.totalSalesAmount)}</span>
           </p>
           {totals?.totalDiscountAmount != null ? (
             <p className="text-token-sm">
               <span className="text-foreground/60">{t('totalDiscountAmount')}:</span>{' '}
-              {String(totals.totalDiscountAmount)}
+              <span dir="ltr">{formatMoneyDisplay(totals.totalDiscountAmount)}</span>
             </p>
           ) : null}
           <p className="text-token-sm">
             <span className="text-foreground/60">{t('netAmount')}:</span>{' '}
-            {String(totals?.netAmount ?? '—')}
+            <span dir="ltr">{formatMoneyDisplay(totals?.netAmount)}</span>
           </p>
           {Array.isArray(totals?.taxTotals) && totals.taxTotals.length ? (
             <p className="text-token-sm">
               <span className="text-foreground/60">{t('taxTotals')}:</span>{' '}
               {(totals.taxTotals as Array<{ taxType?: string; amount?: string }>)
-                .map((tt) => `${String(tt.taxType ?? '')} ${String(tt.amount ?? '')}`.trim())
+                .map(
+                  (tt) =>
+                    `${String(tt.taxType ?? '')} ${formatMoneyDisplay(tt.amount)}`.trim(),
+                )
                 .join(' · ')}
             </p>
           ) : null}
           <p className="text-token-md font-medium">
             <span className="text-foreground/60">{t('totalAmount')}:</span>{' '}
-            {String(totals?.totalAmount ?? '—')}
+            <span dir="ltr">{formatMoneyDisplay(totals?.totalAmount)}</span>
           </p>
         </div>
 
