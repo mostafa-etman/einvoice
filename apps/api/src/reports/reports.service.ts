@@ -41,6 +41,10 @@ import {
   loadTaxCatalogNames,
   periodBucketLabels,
 } from './report-catalog-labels';
+import {
+  buildPurchasesDetail,
+  buildSalesDetail,
+} from './report-document-detail';
 
 type Tx = Prisma.TransactionClient;
 
@@ -134,12 +138,16 @@ export class ReportsService {
         return this.salesByItem(tx, f);
       case 'S4':
         return this.outputVat(tx, f);
+      case 'S5':
+        return buildSalesDetail(tx, f);
       case 'P1':
         return this.purchasesTotal(tx, f);
       case 'P2':
         return this.purchasesBySupplier(tx, f);
       case 'P3':
         return this.inputVat(tx, f);
+      case 'P5':
+        return buildPurchasesDetail(tx, f);
       case 'C1':
         return this.netVat(tx, f);
       case 'C2':
@@ -165,8 +173,14 @@ export class ReportsService {
       grain: f.grain,
       perBranch: f.perBranch,
       limit: f.limit,
+      offset: f.offset ?? 0,
       documentKinds: f.documentKinds ?? null,
       taxType: f.taxType ?? null,
+      status: f.status ?? null,
+      counterparty: f.counterparty ?? null,
+      q: f.q ?? null,
+      sortBy: f.sortBy ?? null,
+      sortDir: f.sortDir ?? null,
     };
   }
 

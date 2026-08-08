@@ -6,9 +6,11 @@ export type ReportId =
   | 'S2'
   | 'S3'
   | 'S4'
+  | 'S5'
   | 'P1'
   | 'P2'
   | 'P3'
+  | 'P5'
   | 'C1'
   | 'C2'
   | 'C3'
@@ -25,7 +27,14 @@ export type ReportFiltersInput = {
   grain?: 'day' | 'month';
   perBranch?: boolean;
   limit?: number;
+  offset?: number;
   taxType?: string;
+  status?: string;
+  counterparty?: string;
+  q?: string;
+  sortBy?: string;
+  sortDir?: 'asc' | 'desc';
+  documentKinds?: string[];
 };
 
 export type ReportPayload = {
@@ -38,6 +47,7 @@ export type ReportPayload = {
   vat?: unknown;
   total?: Record<string, unknown>;
   taxTypes?: string[];
+  nextOffset?: number | null;
   sections?: {
     output?: Array<Record<string, unknown>>;
     input?: Array<Record<string, unknown>>;
@@ -53,14 +63,18 @@ export const REPORT_CATALOG: Array<{
   { id: 'S2', group: 'sales' },
   { id: 'S3', group: 'sales' },
   { id: 'S4', group: 'sales' },
+  { id: 'S5', group: 'sales' },
   { id: 'P1', group: 'purchases' },
   { id: 'P2', group: 'purchases' },
   { id: 'P3', group: 'purchases' },
+  { id: 'P5', group: 'purchases' },
   { id: 'C1', group: 'combined' },
   { id: 'C2', group: 'combined' },
   { id: 'C3', group: 'combined' },
   { id: 'C4', group: 'combined' },
 ];
+
+export const DETAIL_REPORT_IDS = new Set<ReportId>(['S5', 'P5']);
 
 function qs(params: ReportFiltersInput): string {
   const q = new URLSearchParams({ from: params.from, to: params.to });
@@ -74,7 +88,16 @@ function qs(params: ReportFiltersInput): string {
   if (params.grain) q.set('grain', params.grain);
   if (params.perBranch) q.set('perBranch', 'true');
   if (params.limit) q.set('limit', String(params.limit));
+  if (params.offset != null) q.set('offset', String(params.offset));
   if (params.taxType) q.set('taxType', params.taxType);
+  if (params.status) q.set('status', params.status);
+  if (params.counterparty) q.set('counterparty', params.counterparty);
+  if (params.q) q.set('q', params.q);
+  if (params.sortBy) q.set('sortBy', params.sortBy);
+  if (params.sortDir) q.set('sortDir', params.sortDir);
+  if (params.documentKinds?.length) {
+    q.set('documentKinds', params.documentKinds.join(','));
+  }
   return q.toString();
 }
 

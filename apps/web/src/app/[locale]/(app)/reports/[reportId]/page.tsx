@@ -17,6 +17,7 @@ import {
   YAxis,
 } from 'recharts';
 import {
+  DETAIL_REPORT_IDS,
   downloadReportExport,
   fetchBranchesForFilter,
   fetchReport,
@@ -25,6 +26,7 @@ import {
 } from '@/lib/api/reports';
 import { useTenant } from '@/lib/tenant-provider';
 import { formatMoneyDisplay, formatQuantityDisplay } from '@/lib/format-number';
+import { ReportDetailDocumentsTable } from './report-detail-table';
 
 function todayCairo(): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -46,7 +48,8 @@ function daysAgoCairo(n: number): string {
   }).format(d);
 }
 
-const PDF_IDS = new Set(['S1', 'P1', 'S4', 'P3', 'C1', 'C4']);
+const PDF_IDS = new Set(['S1', 'P1', 'S4', 'P3', 'C1', 'C4', 'S5', 'P5']);
+const DETAIL_PAGE_SIZE = 50;
 
 const FIELD_KEYS = new Set([
   'bucket',
@@ -237,6 +240,15 @@ export default function ReportDetailPage() {
   const [includeOthers, setIncludeOthers] = useState(false);
   const [perBranch, setPerBranch] = useState(false);
   const [taxType, setTaxType] = useState('');
+  const [status, setStatus] = useState('');
+  const [counterparty, setCounterparty] = useState('');
+  const [searchQ, setSearchQ] = useState('');
+  const [documentKind, setDocumentKind] = useState('');
+  const [sortBy, setSortBy] = useState(() =>
+    reportId === 'P5' ? 'dateTimeIssued' : 'issueDateTime',
+  );
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [loadingMore, setLoadingMore] = useState(false);
   const [branches, setBranches] = useState<Array<{ id: string; name: string }>>(
     [],
   );
@@ -245,6 +257,8 @@ export default function ReportDetailPage() {
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
 
+  const isDetail = DETAIL_REPORT_IDS.has(reportId);
+
   useEffect(() => {
     if (reportId === 'S1') setGrain('month');
   }, [reportId]);
@@ -252,6 +266,10 @@ export default function ReportDetailPage() {
   useEffect(() => {
     if (reportId === 'C1') setPerBranch(true);
   }, [reportId]);
+
+  useEffect(() => {
+    if (isDetail) setIncludeOthers(true);
+  }, [isDetail]);
 
   useEffect(() => {
     if (!tenantId) {
@@ -274,6 +292,18 @@ export default function ReportDetailPage() {
       includeNonFinancialStatuses: includeOthers,
       perBranch: reportId === 'C1' ? perBranch : false,
       taxType: reportId === 'C4' && taxType ? taxType : undefined,
+      ...(isDetail
+        ? {
+            status: status || undefined,
+            counterparty: counterparty.trim() || undefined,
+            q: searchQ.trim() || undefined,
+            documentKinds: documentKind ? [documentKind] : undefined,
+            sortBy,
+            sortDir,
+            limit: DETAIL_PAGE_SIZE,
+            offset: 0,
+          }
+        : {}),
     }),
     [
       from,
@@ -286,6 +316,13 @@ export default function ReportDetailPage() {
       perBranch,
       reportId,
       taxType,
+      isDetail,
+      status,
+      counterparty,
+      searchQ,
+      documentKind,
+      sortBy,
+      sortDir,
     ],
   );
 
@@ -303,6 +340,48 @@ export default function ReportDetailPage() {
       setLoading(false);
     }
   }, [reportId, filters, t]);
+
+  const loadMore = useCallback(async () => {
+    if (!reportId || !isDetail || data?.nextOffset == null) return;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const res = await fetchReport(reportId, {
+        ...filters,
+        offset: data.nextOffset,
+      });
+      setData((prev) => {
+        if (!prev) return res;
+        return {
+          ...res,
+          rows: [...(prev.rows ?? []), ...(res.rows ?? [])],
+          summary: {
+            ...res.summary,
+            pageCount: (prev.rows?.length ?? 0) + (res.rows?.length ?? 0),
+          },
+        };
+      });
+    } catch {
+      setError(t('error'));
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [reportId, isDetail, data?.nextOffset, filters, t]);
+
+  const onDetailSort = (field: string) => {
+    if (sortBy === field) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(field);
+      setSortDir(
+        field === 'issueDateTime' ||
+          field === 'dateTimeIssued' ||
+          field === 'totalAmount'
+          ? 'desc'
+          : 'asc',
+      );
+    }
+  };
 
   useEffect(() => {
     if (!tenantId) return;
@@ -465,14 +544,16 @@ export default function ReportDetailPage() {
             )}
           </label>
         )}
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={showGross}
-            onChange={(e) => setShowGross(e.target.checked)}
-          />
-          {t('showGross')}
-        </label>
+        {!isDetail ? (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={showGross}
+              onChange={(e) => setShowGross(e.target.checked)}
+            />
+            {t('showGross')}
+          </label>
+        ) : null}
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -481,6 +562,64 @@ export default function ReportDetailPage() {
           />
           {t('includeOthers')}
         </label>
+        {isDetail ? (
+          <>
+            <label className="text-sm">
+              {t('detail.docType')}
+              <select
+                className="ms-2 rounded border border-border bg-background px-2 py-1"
+                value={documentKind}
+                onChange={(e) => setDocumentKind(e.target.value)}
+              >
+                <option value="">{t('detail.allTypes')}</option>
+                {reportId === 'S5' ? (
+                  <>
+                    <option value="INVOICE">INVOICE</option>
+                    <option value="CREDIT_NOTE">CREDIT_NOTE</option>
+                    <option value="DEBIT_NOTE">DEBIT_NOTE</option>
+                    <option value="EXPORT_INVOICE">EXPORT_INVOICE</option>
+                    <option value="EXPORT_CREDIT_NOTE">EXPORT_CREDIT_NOTE</option>
+                    <option value="EXPORT_DEBIT_NOTE">EXPORT_DEBIT_NOTE</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="PURCHASE_INVOICE">PURCHASE_INVOICE</option>
+                    <option value="PURCHASE_RETURN">PURCHASE_RETURN</option>
+                    <option value="OTHER_RECEIVED">OTHER_RECEIVED</option>
+                  </>
+                )}
+              </select>
+            </label>
+            <label className="text-sm">
+              {t('fields.status')}
+              <input
+                className="ms-2 w-28 rounded border border-border bg-background px-2 py-1"
+                value={status}
+                placeholder={reportId === 'S5' ? 'VALID' : 'Valid'}
+                onChange={(e) => setStatus(e.target.value)}
+              />
+            </label>
+            <label className="text-sm">
+              {reportId === 'S5'
+                ? t('detail.receiver')
+                : t('detail.seller')}
+              <input
+                className="ms-2 w-40 rounded border border-border bg-background px-2 py-1"
+                value={counterparty}
+                onChange={(e) => setCounterparty(e.target.value)}
+              />
+            </label>
+            <label className="text-sm">
+              {t('detail.search')}
+              <input
+                className="ms-2 w-48 rounded border border-border bg-background px-2 py-1"
+                value={searchQ}
+                placeholder={t('detail.searchPlaceholder')}
+                onChange={(e) => setSearchQ(e.target.value)}
+              />
+            </label>
+          </>
+        ) : null}
         {reportId === 'C1' ? (
           <label className="flex items-center gap-2 text-sm">
             <input
@@ -519,6 +658,20 @@ export default function ReportDetailPage() {
       </div>
 
       {error ? <p className="text-sm text-danger">{error}</p> : null}
+
+      {data && isDetail ? (
+        <ReportDetailDocumentsTable
+          side={reportId === 'S5' ? 'sales' : 'purchases'}
+          rows={(data.rows ?? []) as never}
+          sortBy={sortBy}
+          sortDir={sortDir}
+          onSort={onDetailSort}
+          hasMore={Boolean(data.summary?.hasMore ?? data.nextOffset != null)}
+          loadingMore={loadingMore}
+          onLoadMore={() => void loadMore()}
+          documentCount={Number(data.summary?.documentCount ?? 0)}
+        />
+      ) : null}
 
       {data && reportId === 'C4' ? (
         <>
@@ -687,7 +840,7 @@ export default function ReportDetailPage() {
         </>
       ) : null}
 
-      {data && reportId !== 'C4' ? (
+      {data && reportId !== 'C4' && !isDetail ? (
         <>
           <section className="grid gap-token-sm sm:grid-cols-2 lg:grid-cols-4">
             {summaryEntries.map(([k, v]) => (

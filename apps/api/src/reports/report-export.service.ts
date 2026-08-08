@@ -9,6 +9,8 @@ import {
   type ReportId,
 } from './report-filters';
 import { ReportsService } from './reports.service';
+import { flattenDetailForExport } from './report-document-detail';
+import { formatMoneyDisplay } from '@einvoice/eta-core';
 
 export type ExportFormat = 'CSV' | 'XLSX' | 'PDF';
 
@@ -41,7 +43,10 @@ export class ReportExportService {
     const data = await this.reports.run({
       tenantId: input.tenantId,
       reportId: input.reportId,
-      filters: input.filters,
+      filters:
+        input.reportId === 'S5' || input.reportId === 'P5'
+          ? { ...input.filters, limit: Math.max(input.filters.limit, 2000), offset: 0 }
+          : input.filters,
     });
     const header = await this.loadTenantHeader(input.tenantId);
 
@@ -151,6 +156,42 @@ export class ReportExportService {
     reportId: ReportId,
     header: TenantHeader,
   ): string {
+    if (reportId === 'S5' || reportId === 'P5') {
+      const rows = (data.rows ?? []) as Array<Record<string, unknown>>;
+      const { documents, lines } = flattenDetailForExport(
+        rows,
+        reportId === 'S5' ? 'sales' : 'purchases',
+      );
+      const esc = (v: unknown) => {
+        const s = v == null ? '' : String(v);
+        if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+        return s;
+      };
+      const out: string[] = [
+        `company,${esc(header.legalName)}`,
+        `taxRegistration,${esc(header.registrationNumber)}`,
+        '',
+      ];
+      if (documents.length) {
+        const keys = [...new Set(documents.flatMap((r) => Object.keys(r)))].filter(
+          (k) => k !== 'lines' && k !== 'taxes',
+        );
+        out.push(keys.join(','));
+        for (const row of documents) {
+          out.push(keys.map((k) => esc(row[k])).join(','));
+        }
+      }
+      if (lines.length) {
+        out.push('');
+        const keys = [...new Set(lines.flatMap((r) => Object.keys(r)))];
+        out.push(keys.join(','));
+        for (const row of lines) {
+          out.push(keys.map((k) => esc(row[k])).join(','));
+        }
+      }
+      return out.join('\n') + '\n';
+    }
+
     if (reportId === 'C4') {
       const summaryRows = this.c4SummaryRows(data, header);
       const detail = this.flattenRows(data);
@@ -205,6 +246,46 @@ export class ReportExportService {
     header: TenantHeader,
   ): Buffer {
     const wb = XLSX.utils.book_new();
+    if (reportId === 'S5' || reportId === 'P5') {
+      const meta = XLSX.utils.json_to_sheet([
+        { field: 'Company', value: header.legalName },
+        { field: 'Tax registration number', value: header.registrationNumber },
+        {
+          field: 'Period from',
+          value: (data.filters as Record<string, unknown>)?.from,
+        },
+        {
+          field: 'Period to',
+          value: (data.filters as Record<string, unknown>)?.to,
+        },
+        {
+          field: 'Documents',
+          value: (data.summary as Record<string, unknown>)?.documentCount,
+        },
+      ]);
+      XLSX.utils.book_append_sheet(wb, meta, 'Header');
+      const rows = (data.rows ?? []) as Array<Record<string, unknown>>;
+      const { documents, lines } = flattenDetailForExport(
+        rows,
+        reportId === 'S5' ? 'sales' : 'purchases',
+      );
+      const docSheet = XLSX.utils.json_to_sheet(
+        documents.length
+          ? documents.map(({ lines: _l, taxes: _t, ...rest }) => {
+              void _l;
+              void _t;
+              return rest;
+            })
+          : [{ empty: true }],
+      );
+      XLSX.utils.book_append_sheet(wb, docSheet, 'Documents');
+      const lineSheet = XLSX.utils.json_to_sheet(
+        lines.length ? lines : [{ empty: true }],
+      );
+      XLSX.utils.book_append_sheet(wb, lineSheet, 'Line items');
+      return Buffer.from(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+    }
+
     if (reportId === 'C4') {
       const summarySheet = XLSX.utils.json_to_sheet(
         this.c4SummaryRows(data, header),
@@ -310,6 +391,59 @@ export class ReportExportService {
         doc.fontSize(10).text(`Period: ${filters.from} → ${filters.to}`);
       }
       doc.moveDown();
+
+      if (reportId === 'S5' || reportId === 'P5') {
+        doc
+          .fontSize(12)
+          .text(
+            reportId === 'S5' ? 'Sales Detail' : 'Purchases Detail',
+            { underline: true },
+          );
+        doc
+          .fontSize(10)
+          .text(`Documents: ${String(summary?.documentCount ?? 0)}`);
+        doc.moveDown(0.5);
+        const rows = ((data.rows ?? []) as Array<Record<string, unknown>>).slice(
+          0,
+          200,
+        );
+        for (const row of rows) {
+          const party =
+            reportId === 'S5'
+              ? `${row.receiverName ?? ''} (${row.receiverId ?? ''})`
+              : `${row.issuerName ?? ''} (${row.issuerId ?? ''})`;
+          doc
+            .fontSize(9)
+            .fillColor('#000000')
+            .text(
+              `${row.internalId ?? '—'} | ${row.kind} | ${row.issueDate ?? ''} | ${party}`,
+            );
+          doc
+            .fontSize(8)
+            .text(
+              `Net ${formatMoneyDisplay(row.netAmount)}  Discount ${formatMoneyDisplay(row.totalDiscountAmount)}  Total ${formatMoneyDisplay(row.totalAmount)} ${row.currencyCode ?? ''}  Status ${row.status ?? ''}`,
+            );
+          const taxSum =
+            String(row.taxesSummaryEn ?? row.taxesSummaryAr ?? '') || '—';
+          doc.fontSize(8).text(`Taxes: ${taxSum}`);
+          const lines = Array.isArray(row.lines)
+            ? (row.lines as Array<Record<string, unknown>>)
+            : [];
+          for (const line of lines.slice(0, 40)) {
+            doc
+              .fontSize(7)
+              .fillColor('#333333')
+              .text(
+                `  · ${line.itemName || line.itemCode || '—'} [${line.itemCode ?? ''}] qty ${line.quantity ?? ''} @ ${formatMoneyDisplay(line.unitPrice)} = ${formatMoneyDisplay(line.total)}`,
+              );
+          }
+          doc.moveDown(0.3);
+          if (doc.y > 750) doc.addPage();
+        }
+        doc.end();
+        return;
+      }
+
       if (summary) {
         doc.fontSize(12).text('Summary');
         for (const [k, v] of Object.entries(summary)) {

@@ -5,9 +5,11 @@ export type ReportId =
   | 'S2'
   | 'S3'
   | 'S4'
+  | 'S5'
   | 'P1'
   | 'P2'
   | 'P3'
+  | 'P5'
   | 'C1'
   | 'C2'
   | 'C3'
@@ -18,16 +20,29 @@ export const REPORT_IDS: ReportId[] = [
   'S2',
   'S3',
   'S4',
+  'S5',
   'P1',
   'P2',
   'P3',
+  'P5',
   'C1',
   'C2',
   'C3',
   'C4',
 ];
 
-export const PDF_REPORT_IDS: ReportId[] = ['S1', 'P1', 'S4', 'P3', 'C1', 'C4'];
+export const PDF_REPORT_IDS: ReportId[] = [
+  'S1',
+  'P1',
+  'S4',
+  'P3',
+  'C1',
+  'C4',
+  'S5',
+  'P5',
+];
+
+export const DETAIL_REPORT_IDS: ReportId[] = ['S5', 'P5'];
 
 export type ReportFilters = {
   from: string;
@@ -40,9 +55,18 @@ export type ReportFilters = {
   grain: 'day' | 'month';
   perBranch: boolean;
   limit: number;
+  offset?: number;
   documentKinds?: string[];
   /** Filter VAT return lines to one tax type (e.g. T1, T4). */
   taxType?: string;
+  /** Document status (issued) or ETA status (received). */
+  status?: string;
+  /** Receiver (sales) or seller (purchases) name/tax id filter. */
+  counterparty?: string;
+  /** Free-text: number / name / tax id / uuid. */
+  q?: string;
+  sortBy?: string;
+  sortDir?: 'asc' | 'desc';
   rangeStart: Date;
   rangeEnd: Date;
 };
@@ -78,8 +102,12 @@ export function parseReportFilters(query: Record<string, unknown>): ReportFilter
   const grain = query.grain === 'month' ? 'month' : 'day';
   const limitRaw = Number(query.limit ?? 50);
   const limit = Number.isFinite(limitRaw)
-    ? Math.min(500, Math.max(1, Math.floor(limitRaw)))
+    ? Math.min(2000, Math.max(1, Math.floor(limitRaw)))
     : 50;
+  const offsetRaw = Number(query.offset ?? 0);
+  const offset = Number.isFinite(offsetRaw)
+    ? Math.max(0, Math.floor(offsetRaw))
+    : 0;
   const kindsRaw = query.documentKind ?? query.documentKinds;
   let documentKinds: string[] | undefined;
   if (Array.isArray(kindsRaw)) {
@@ -87,6 +115,10 @@ export function parseReportFilters(query: Record<string, unknown>): ReportFilter
   } else if (typeof kindsRaw === 'string' && kindsRaw.trim()) {
     documentKinds = kindsRaw.split(',').map((s) => s.trim()).filter(Boolean);
   }
+  const sortDir =
+    query.sortDir === 'asc' || query.sortDir === 'desc'
+      ? query.sortDir
+      : undefined;
   return {
     from,
     to,
@@ -102,10 +134,22 @@ export function parseReportFilters(query: Record<string, unknown>): ReportFilter
     grain,
     perBranch: query.perBranch === true || query.perBranch === 'true',
     limit,
+    offset,
     documentKinds,
     taxType: query.taxType
       ? String(query.taxType).trim().toUpperCase()
       : undefined,
+    status: query.status ? String(query.status).trim() : undefined,
+    counterparty: query.counterparty
+      ? String(query.counterparty).trim()
+      : query.receiver
+        ? String(query.receiver).trim()
+        : query.seller
+          ? String(query.seller).trim()
+          : undefined,
+    q: query.q ? String(query.q).trim() : undefined,
+    sortBy: query.sortBy ? String(query.sortBy) : undefined,
+    sortDir,
     rangeStart: start,
     rangeEnd: end,
   };
