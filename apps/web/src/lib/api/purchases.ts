@@ -11,6 +11,8 @@ export type PurchaseSummary = {
   etaStatus: string | null;
   dateTimeIssued: string | null;
   issuerName: string | null;
+  issuerId: string | null;
+  issuerType: string | null;
   totalAmount: string | null;
   currency: string | null;
   buyerDecision: string;
@@ -18,6 +20,14 @@ export type PurchaseSummary = {
   branchId: string | null;
   needsAttention: boolean;
   lastSyncedAt: string;
+  synced?: boolean;
+};
+
+export type PurchaseLineTax = {
+  taxType: string;
+  subType: string;
+  rate: string;
+  amount?: string;
 };
 
 export type PurchaseLine = {
@@ -32,7 +42,7 @@ export type PurchaseLine = {
   netTotal?: string | null;
   total?: string | null;
   taxesJson?: unknown;
-  taxes?: unknown;
+  taxes?: PurchaseLineTax[] | unknown;
   rawJson?: unknown;
 };
 
@@ -43,6 +53,7 @@ export type PurchaseDetail = PurchaseSummary & {
   issuerJson?: unknown;
   receiverJson?: unknown;
   lines?: PurchaseLine[];
+  taxTotals?: Array<{ taxType: string; amount: string }>;
   buyerDecisionReason?: string | null;
   reconciliationNote?: string | null;
   purchaseOrderLinkId?: string | null;
@@ -72,7 +83,13 @@ export function listPurchases(params?: {
   kind?: string;
   buyerDecision?: string;
   reconciliationStatus?: string;
+  etaStatus?: string;
+  seller?: string;
   q?: string;
+  cursor?: string;
+  limit?: number;
+  sortBy?: string;
+  sortDir?: 'asc' | 'desc';
 }) {
   const q = new URLSearchParams();
   if (params?.from) q.set('from', params.from);
@@ -83,7 +100,13 @@ export function listPurchases(params?: {
   if (params?.reconciliationStatus) {
     q.set('reconciliationStatus', params.reconciliationStatus);
   }
+  if (params?.etaStatus) q.set('etaStatus', params.etaStatus);
+  if (params?.seller) q.set('seller', params.seller);
   if (params?.q) q.set('q', params.q);
+  if (params?.cursor) q.set('cursor', params.cursor);
+  if (params?.limit) q.set('limit', String(params.limit));
+  if (params?.sortBy) q.set('sortBy', params.sortBy);
+  if (params?.sortDir) q.set('sortDir', params.sortDir);
   const qs = q.toString();
   return apiFetch<{ items: PurchaseSummary[]; nextCursor: string | null }>(
     `/purchases${qs ? `?${qs}` : ''}`,
@@ -95,15 +118,23 @@ export function getPurchase(id: string) {
   return apiFetch<PurchaseDetail>(`/purchases/${id}`, { tenantScoped: true });
 }
 
-export function syncPurchases() {
+export function syncPurchases(range?: { from?: string; to?: string }) {
   return apiFetch<SyncRun>('/purchases/sync', {
     method: 'POST',
     tenantScoped: true,
+    body: range?.from || range?.to ? range : undefined,
   });
 }
 
 export function latestPurchaseSync() {
   return apiFetch<SyncRun>('/purchases/sync/latest', { tenantScoped: true });
+}
+
+export function resetPurchaseSync() {
+  return apiFetch<{ releasedCount: number; latest: SyncRun }>(
+    '/purchases/sync/reset',
+    { method: 'POST', tenantScoped: true },
+  );
 }
 
 export function acceptPurchase(id: string) {

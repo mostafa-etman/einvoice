@@ -3,66 +3,191 @@
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
+import { ApiError } from '@/lib/api/client';
 import {
   latestPurchaseSync,
   listPurchases,
+  resetPurchaseSync,
   syncPurchases,
   type PurchaseSummary,
   type SyncRun,
 } from '@/lib/api/purchases';
 
+type SortBy =
+  | 'dateTimeIssued'
+  | 'totalAmount'
+  | 'internalId'
+  | 'issuerName'
+  | 'lastSyncedAt';
+
+const PAGE_SIZE = 50;
+
+function formatIssueDate(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function formatAmount(value: string | null | undefined): string {
+  if (value == null || value === '') return '—';
+  const n = Number(value);
+  if (Number.isNaN(n)) return value;
+  return n.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function isSyncBusy(status: string | null | undefined) {
+  return status === 'PENDING' || status === 'RUNNING';
+}
+
+function isAlreadyRunningError(e: unknown): boolean {
+  if (!(e instanceof ApiError) || e.status !== 409) return false;
+  const msg = e.message.toLowerCase();
+  return msg.includes('already running') || msg.includes('in progress');
+}
+
 export default function PurchasesPage() {
   const t = useTranslations('purchases');
   const locale = useLocale();
   const [items, setItems] = useState<PurchaseSummary[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [sync, setSync] = useState<SyncRun | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [kind, setKind] = useState('');
-  const [buyerDecision, setBuyerDecision] = useState('');
-  const [reconciliationStatus, setReconciliationStatus] = useState('');
+  const [etaStatus, setEtaStatus] = useState('');
+  const [seller, setSeller] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [q, setQ] = useState('');
+  const [syncFrom, setSyncFrom] = useState(() => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - 30);
+    return d.toISOString().slice(0, 10);
+  });
+  const [syncTo, setSyncTo] = useState(() =>
+    new Date().toISOString().slice(0, 10),
+  );
+  const [sortBy, setSortBy] = useState<SortBy>('dateTimeIssued');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [showStuckReset, setShowStuckReset] = useState(false);
+
+  const queryParams = useCallback(
+    (cursor?: string) => ({
+      kind: kind || undefined,
+      etaStatus: etaStatus || undefined,
+      from: from ? new Date(`${from}T00:00:00.000Z`).toISOString() : undefined,
+      to: to ? new Date(`${to}T23:59:59.999Z`).toISOString() : undefined,
+      seller: seller.trim() || undefined,
+      q: q.trim() || undefined,
+      sortBy,
+      sortDir,
+      limit: PAGE_SIZE,
+      cursor,
+    }),
+    [kind, etaStatus, from, to, q, seller, sortBy, sortDir],
+  );
 
   const reload = useCallback(() => {
-    listPurchases({
-      kind: kind || undefined,
-      buyerDecision: buyerDecision || undefined,
-      reconciliationStatus: reconciliationStatus || undefined,
-      from: from ? new Date(from).toISOString() : undefined,
-      to: to ? new Date(to).toISOString() : undefined,
-      q: q || undefined,
-    })
-      .then((res) => setItems(res.items))
+    listPurchases(queryParams())
+      .then((res) => {
+        setItems(res.items);
+        setNextCursor(res.nextCursor);
+        setError(null);
+      })
       .catch((e: Error) => setError(e.message));
     latestPurchaseSync()
-      .then(setSync)
+      .then((run) => {
+        setSync(run);
+        setShowStuckReset(isSyncBusy(run.status));
+      })
       .catch(() => undefined);
-  }, [kind, buyerDecision, reconciliationStatus, from, to, q]);
+  }, [queryParams]);
 
   useEffect(() => {
     reload();
   }, [reload]);
 
-  const onSync = async () => {
-    setBusy(true);
-    setError(null);
+  const loadMore = async () => {
+    if (!nextCursor) return;
+    setLoadingMore(true);
     try {
-      const run = await syncPurchases();
-      setSync(run);
-      // Poll briefly for completion
-      for (let i = 0; i < 20; i++) {
-        await new Promise((r) => setTimeout(r, 1000));
-        const latest = await latestPurchaseSync();
-        setSync(latest);
-        if (latest.status === 'SUCCEEDED' || latest.status === 'FAILED') break;
-      }
-      reload();
+      const res = await listPurchases(queryParams(nextCursor));
+      setItems((prev) => [...prev, ...res.items]);
+      setNextCursor(res.nextCursor);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const onSync = async () => {
+    setBusy(true);
+    setError(null);
+    setToast(null);
+    try {
+      const run = await syncPurchases({
+        from: syncFrom ? `${syncFrom}T00:00:00.000Z` : undefined,
+        to: syncTo ? `${syncTo}T23:59:59.999Z` : undefined,
+      });
+      setSync(run);
+      setShowStuckReset(true);
+      for (let i = 0; i < 90; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const latest = await latestPurchaseSync();
+        setSync(latest);
+        if (latest.status === 'SUCCEEDED' || latest.status === 'FAILED') {
+          setShowStuckReset(false);
+          break;
+        }
+      }
+      reload();
+    } catch (e) {
+      if (isAlreadyRunningError(e)) {
+        setShowStuckReset(true);
+        setError(t('syncAlreadyRunning'));
+      } else {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    } finally {
       setBusy(false);
+    }
+  };
+
+  const onResetSync = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await resetPurchaseSync();
+      setSync(res.latest);
+      setShowStuckReset(false);
+      setToast(t('syncResetOk'));
+    } catch (e) {
+      setError(
+        t('syncResetFailed', {
+          message: e instanceof Error ? e.message : String(e),
+        }),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleSort = (col: SortBy) => {
+    if (sortBy === col) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(col);
+      setSortDir(col === 'dateTimeIssued' || col === 'totalAmount' ? 'desc' : 'asc');
     }
   };
 
@@ -72,22 +197,73 @@ export default function PurchasesPage() {
     return t('kindOther');
   };
 
+  const sortIndicator = (col: SortBy) => {
+    if (sortBy !== col) return '';
+    return sortDir === 'asc' ? ' ↑' : ' ↓';
+  };
+
+  const thClass =
+    'whitespace-nowrap border-b border-border px-token-sm py-token-sm text-start text-token-xs font-medium text-foreground/70';
+  const tdClass = 'border-b border-border px-token-sm py-token-sm text-token-sm';
+
   return (
     <div className="space-y-token-lg">
       <div className="flex flex-wrap items-center justify-between gap-token-md">
         <h1 className="font-display text-token-2xl text-brand">{t('title')}</h1>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void onSync()}
-          className="rounded bg-brand px-token-md py-token-sm text-token-sm text-white disabled:opacity-50"
-        >
-          {busy ? t('syncing') : t('syncNow')}
-        </button>
+        <div className="flex flex-wrap items-end gap-token-sm">
+          <label className="block text-token-xs">
+            {t('syncFrom')}
+            <input
+              type="date"
+              className="mt-1 block border border-border bg-background px-2 py-1"
+              value={syncFrom}
+              onChange={(e) => setSyncFrom(e.target.value)}
+              dir="ltr"
+            />
+          </label>
+          <label className="block text-token-xs">
+            {t('syncTo')}
+            <input
+              type="date"
+              className="mt-1 block border border-border bg-background px-2 py-1"
+              value={syncTo}
+              onChange={(e) => setSyncTo(e.target.value)}
+              dir="ltr"
+            />
+          </label>
+          {showStuckReset ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void onResetSync()}
+              className="rounded border border-danger/50 px-token-md py-token-sm text-token-sm text-danger disabled:opacity-50"
+            >
+              {t('syncReset')}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void onSync()}
+            className="rounded bg-brand px-token-md py-token-sm text-token-sm text-white disabled:opacity-50"
+          >
+            {busy ? t('syncing') : t('syncNow')}
+          </button>
+        </div>
       </div>
+      <p className="text-token-xs text-foreground/60">{t('syncRangeHint')}</p>
 
       {sync?.status ? (
-        <p className="text-token-sm text-foreground/70">
+        <p
+          className={
+            sync.status === 'FAILED'
+              ? 'rounded border-2 border-danger bg-danger/10 px-token-md py-token-md text-token-sm font-medium text-danger'
+              : sync.status === 'SUCCEEDED'
+                ? 'rounded border-2 border-green-600 bg-green-50 px-token-md py-token-md text-token-sm font-medium text-green-900'
+                : 'text-token-sm text-foreground/70'
+          }
+          role="status"
+        >
           {t('lastSync', {
             status: sync.status,
             newCount: String(sync.newCount ?? 0),
@@ -95,6 +271,15 @@ export default function PurchasesPage() {
             skippedCount: String(sync.skippedCount ?? 0),
           })}
           {sync.errorSummary ? ` — ${sync.errorSummary}` : ''}
+        </p>
+      ) : null}
+
+      {toast ? (
+        <p
+          className="rounded border-2 border-green-600 bg-green-50 px-token-md py-token-md text-token-sm font-medium text-green-900"
+          role="status"
+        >
+          {toast}
         </p>
       ) : null}
 
@@ -131,31 +316,34 @@ export default function PurchasesPage() {
           </select>
         </label>
         <label className="block text-token-xs">
-          {t('filterDecision')}
+          {t('filterStatus')}
           <select
             className="mt-1 w-full border border-border bg-background px-2 py-1"
-            value={buyerDecision}
-            onChange={(e) => setBuyerDecision(e.target.value)}
+            value={etaStatus}
+            onChange={(e) => setEtaStatus(e.target.value)}
           >
             <option value="">{t('filterAll')}</option>
-            <option value="NONE">NONE</option>
-            <option value="ACCEPTED">ACCEPTED</option>
-            <option value="REJECTED">REJECTED</option>
-            <option value="NEEDS_ATTENTION">NEEDS_ATTENTION</option>
+            {[
+              'Valid',
+              'Invalid',
+              'Rejected',
+              'Cancelled',
+              'Submitted',
+            ].map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
           </select>
         </label>
         <label className="block text-token-xs">
-          {t('filterReconciliation')}
-          <select
+          {t('filterSeller')}
+          <input
             className="mt-1 w-full border border-border bg-background px-2 py-1"
-            value={reconciliationStatus}
-            onChange={(e) => setReconciliationStatus(e.target.value)}
-          >
-            <option value="">{t('filterAll')}</option>
-            <option value="PENDING_REVIEW">PENDING_REVIEW</option>
-            <option value="RECONCILED">RECONCILED</option>
-            <option value="DISPUTED">DISPUTED</option>
-          </select>
+            value={seller}
+            onChange={(e) => setSeller(e.target.value)}
+            placeholder={t('filterSeller')}
+          />
         </label>
         <label className="block text-token-xs">
           {t('filterSearch')}
@@ -163,37 +351,146 @@ export default function PurchasesPage() {
             className="mt-1 w-full border border-border bg-background px-2 py-1"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="uuid / issuer"
+            placeholder={t('filterSearch')}
           />
         </label>
       </div>
 
-      {error ? <p className="text-token-sm text-danger">{error}</p> : null}
+      {error ? (
+        <p
+          role="alert"
+          className="rounded border-2 border-danger bg-danger/10 px-token-md py-token-md text-token-sm font-medium text-danger"
+        >
+          {error}
+        </p>
+      ) : null}
+
       {items.length === 0 ? (
         <p className="text-foreground/70">{t('empty')}</p>
       ) : (
-        <ul className="divide-y divide-border border border-border">
-          {items.map((row) => (
-            <li key={row.id} className="px-token-md py-token-sm">
-              <Link
-                href={`/${locale}/purchases/${row.id}`}
-                className="flex flex-wrap items-baseline justify-between gap-token-sm"
-              >
-                <span>
-                  <span className="font-medium text-brand">
-                    {kindLabel(row.kind)}
-                  </span>{' '}
-                  {row.issuerName ?? row.documentUuid}
-                </span>
-                <span className="text-token-xs text-foreground/60">
-                  {row.buyerDecision} · {row.totalAmount ?? '—'}{' '}
-                  {row.currency ?? ''}
-                </span>
-              </Link>
-            </li>
-          ))}
-        </ul>
+        <div className="overflow-x-auto border border-border">
+          <table className="min-w-full border-collapse text-start">
+            <thead className="bg-background/80">
+              <tr>
+                <th className={thClass}>
+                  <button
+                    type="button"
+                    className="hover:text-brand"
+                    onClick={() => toggleSort('internalId')}
+                    aria-label={
+                      sortDir === 'asc' ? t('sortAsc') : t('sortDesc')
+                    }
+                  >
+                    {t('colInvoice')}
+                    {sortIndicator('internalId')}
+                  </button>
+                </th>
+                <th className={thClass}>{t('colEtaId')}</th>
+                <th className={thClass}>{t('colType')}</th>
+                <th className={thClass}>
+                  <button
+                    type="button"
+                    className="hover:text-brand"
+                    onClick={() => toggleSort('dateTimeIssued')}
+                  >
+                    {t('colIssueDate')}
+                    {sortIndicator('dateTimeIssued')}
+                  </button>
+                </th>
+                <th className={thClass}>
+                  <button
+                    type="button"
+                    className="hover:text-brand"
+                    onClick={() => toggleSort('issuerName')}
+                  >
+                    {t('colSeller')}
+                    {sortIndicator('issuerName')}
+                  </button>
+                </th>
+                <th className={thClass}>{t('colSellerTax')}</th>
+                <th className={thClass}>
+                  <button
+                    type="button"
+                    className="hover:text-brand"
+                    onClick={() => toggleSort('totalAmount')}
+                  >
+                    {t('colAmount')}
+                    {sortIndicator('totalAmount')}
+                  </button>
+                </th>
+                <th className={thClass}>{t('colCurrency')}</th>
+                <th className={thClass}>{t('colStatus')}</th>
+                <th className={thClass}>{t('colSynced')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((row) => (
+                <tr key={row.id} className="hover:bg-brand/5">
+                  <td className={tdClass}>
+                    <Link
+                      href={`/${locale}/purchases/${row.id}`}
+                      className="font-medium text-brand hover:underline"
+                      dir="ltr"
+                    >
+                      {row.internalId || '—'}
+                    </Link>
+                  </td>
+                  <td className={`${tdClass} max-w-[14rem]`}>
+                    <span
+                      className="block truncate font-mono text-token-xs"
+                      dir="ltr"
+                      title={row.etaLongId || row.documentUuid}
+                    >
+                      {row.etaLongId || row.documentUuid}
+                    </span>
+                  </td>
+                  <td className={tdClass}>{kindLabel(row.kind)}</td>
+                  <td className={tdClass}>
+                    <span dir="ltr" className="tabular-nums">
+                      {formatIssueDate(row.dateTimeIssued)}
+                    </span>
+                  </td>
+                  <td className={tdClass}>{row.issuerName || '—'}</td>
+                  <td className={tdClass}>
+                    <span dir="ltr" className="tabular-nums">
+                      {row.issuerId || '—'}
+                    </span>
+                  </td>
+                  <td className={tdClass}>
+                    <span dir="ltr" className="tabular-nums">
+                      {formatAmount(row.totalAmount)}
+                    </span>
+                  </td>
+                  <td className={tdClass}>
+                    <span dir="ltr">{row.currency || '—'}</span>
+                  </td>
+                  <td className={tdClass}>
+                    <span dir="ltr">{row.etaStatus || row.buyerDecision}</span>
+                  </td>
+                  <td className={tdClass}>
+                    <span className="rounded bg-amber-100 px-token-xs text-token-xs text-amber-900">
+                      {t('syncedBadge')}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
+
+      {nextCursor ? (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            disabled={loadingMore}
+            onClick={() => void loadMore()}
+            className="rounded border border-border px-token-md py-token-sm text-token-sm disabled:opacity-50"
+          >
+            {loadingMore ? t('loading') : t('loadMore')}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

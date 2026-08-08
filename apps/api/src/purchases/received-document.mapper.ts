@@ -164,11 +164,54 @@ export function mapDetailsLines(
       null,
     netTotal: pickString(line, 'netTotal', 'NetTotal') || null,
     total: pickString(line, 'total', 'Total') || null,
-    taxesJson: (Array.isArray(line.taxableItems)
-      ? line.taxableItems
-      : Array.isArray(line.TaxableItems)
-        ? line.TaxableItems
-        : []) as Prisma.InputJsonValue,
+    taxesJson: (() => {
+      const fromItems = Array.isArray(line.taxableItems)
+        ? line.taxableItems
+        : Array.isArray(line.TaxableItems)
+          ? line.TaxableItems
+          : Array.isArray(line.lineTaxableItems)
+            ? line.lineTaxableItems
+            : Array.isArray(line.LineTaxableItems)
+              ? line.LineTaxableItems
+              : null;
+      if (fromItems?.length) return fromItems as Prisma.InputJsonValue;
+      // Some ETA payloads nest taxes under taxTotals per line or taxItems.
+      const alt =
+        (Array.isArray(line.taxItems) && line.taxItems) ||
+        (Array.isArray(line.TaxItems) && line.TaxItems) ||
+        (Array.isArray(line.taxes) && line.taxes) ||
+        [];
+      return alt as Prisma.InputJsonValue;
+    })(),
     rawJson: line as Prisma.InputJsonValue,
   }));
+}
+
+/** Prefer non-empty taxesJson, then ETA lineTaxableItems / taxableItems on rawJson. */
+export function extractReceivedLineTaxesRaw(
+  line: Record<string, unknown>,
+): unknown {
+  const taxesJson = line.taxesJson;
+  if (Array.isArray(taxesJson) && taxesJson.length > 0) return taxesJson;
+  if (Array.isArray(line.taxes) && line.taxes.length > 0) return line.taxes;
+
+  const raw =
+    line.rawJson && typeof line.rawJson === 'object' && !Array.isArray(line.rawJson)
+      ? (line.rawJson as Record<string, unknown>)
+      : null;
+  if (raw) {
+    for (const key of [
+      'lineTaxableItems',
+      'LineTaxableItems',
+      'taxableItems',
+      'TaxableItems',
+      'taxItems',
+      'TaxItems',
+      'taxes',
+    ]) {
+      const v = raw[key];
+      if (Array.isArray(v) && v.length > 0) return v;
+    }
+  }
+  return Array.isArray(taxesJson) ? taxesJson : [];
 }

@@ -31,6 +31,8 @@ jest.mock('next-intl', () => ({
       'catalog.C2.desc': 'Comparison',
       'catalog.C3.name': 'Document status',
       'catalog.C3.desc': 'Status overview',
+      'catalog.C4.name': 'Egyptian VAT return',
+      'catalog.C4.desc': 'VAT declaration aid',
     };
     return map[key] ?? key;
   },

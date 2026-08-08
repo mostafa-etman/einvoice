@@ -3,7 +3,8 @@
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { LocalPdfPreviewModal } from '@/components/local-pdf-preview-modal';
 import {
   acceptPurchase,
   declinePurchaseCancelation,
@@ -14,7 +15,9 @@ import {
   rejectPurchase,
   type PurchaseDetail,
   type PurchaseLine,
+  type PurchaseLineTax,
 } from '@/lib/api/purchases';
+import { partyTypeLabel } from '@/lib/eta-display';
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
@@ -49,10 +52,96 @@ function formatAddress(party: unknown): string {
     .join(' · ');
 }
 
-function lineTaxes(line: PurchaseLine): Array<Record<string, unknown>> {
-  if (Array.isArray(line.taxesJson)) return line.taxesJson as Array<Record<string, unknown>>;
-  if (Array.isArray(line.taxes)) return line.taxes as Array<Record<string, unknown>>;
+/** Money/amount display — always LTR digits with grouping. */
+function formatMoneyLtr(value: unknown): string {
+  if (value == null || value === '') return '—';
+  const n = Number(String(value).replace(/,/g, ''));
+  if (!Number.isFinite(n)) return String(value);
+  return n.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function normalizeTax(raw: Record<string, unknown>): PurchaseLineTax | null {
+  const taxType = String(raw.taxType ?? raw.TaxType ?? raw.type ?? '').trim();
+  const subType = String(
+    raw.subType ?? raw.subtype ?? raw.SubType ?? raw.taxSubType ?? '',
+  ).trim();
+  const rate = String(raw.rate ?? raw.ratePercent ?? raw.Rate ?? '').trim();
+  const amount =
+    raw.amount != null
+      ? String(raw.amount)
+      : raw.Amount != null
+        ? String(raw.Amount)
+        : undefined;
+  if (!taxType && !subType && amount == null) return null;
+  return { taxType, subType, rate, amount };
+}
+
+/**
+ * Same sources the PDF uses: normalized `taxes`, non-empty taxesJson,
+ * then ETA lineTaxableItems / taxableItems on rawJson.
+ */
+function lineTaxes(line: PurchaseLine): PurchaseLineTax[] {
+  if (Array.isArray(line.taxes) && line.taxes.length) {
+    return (line.taxes as Array<Record<string, unknown>>)
+      .map(normalizeTax)
+      .filter((t): t is PurchaseLineTax => t != null);
+  }
+  if (Array.isArray(line.taxesJson) && line.taxesJson.length) {
+    return (line.taxesJson as Array<Record<string, unknown>>)
+      .map(normalizeTax)
+      .filter((t): t is PurchaseLineTax => t != null);
+  }
+  const raw = asRecord(line.rawJson);
+  if (raw) {
+    for (const key of [
+      'lineTaxableItems',
+      'LineTaxableItems',
+      'taxableItems',
+      'TaxableItems',
+      'taxItems',
+      'taxes',
+    ]) {
+      const v = raw[key];
+      if (Array.isArray(v) && v.length) {
+        return (v as Array<Record<string, unknown>>)
+          .map(normalizeTax)
+          .filter((t): t is PurchaseLineTax => t != null);
+      }
+    }
+  }
   return [];
+}
+
+function formatLineTaxLabel(tx: PurchaseLineTax): string {
+  const code = [tx.taxType, tx.subType].filter(Boolean).join('/');
+  const rate = tx.rate ? `${tx.rate}%` : '';
+  const amt =
+    tx.amount != null && tx.amount !== ''
+      ? `=${formatMoneyLtr(tx.amount)}`
+      : '';
+  return [code, rate, amt].filter(Boolean).join(' ');
+}
+
+function taxSummaryLabel(
+  taxType: string,
+  t: ReturnType<typeof useTranslations<'purchases'>>,
+): string {
+  if (/^T1$/i.test(taxType)) return `${t('vatSummary')} (${taxType})`;
+  if (/^T4$/i.test(taxType) || /W/i.test(taxType)) {
+    return `${t('withholdingSummary')} (${taxType})`;
+  }
+  return taxType;
+}
+
+function Ltr({ children }: { children: ReactNode }) {
+  return (
+    <span dir="ltr" className="inline-block tabular-nums">
+      {children}
+    </span>
+  );
 }
 
 function PartyCard({
@@ -62,6 +151,7 @@ function PartyCard({
   fallbackType,
   fallbackId,
   t,
+  locale,
 }: {
   title: string;
   party: unknown;
@@ -69,9 +159,11 @@ function PartyCard({
   fallbackType?: string | null;
   fallbackId?: string | null;
   t: ReturnType<typeof useTranslations<'purchases'>>;
+  locale: string;
 }) {
   const name = partyField(party, 'name') || fallbackName || '—';
-  const type = partyField(party, 'type') || fallbackType || '—';
+  const typeCode = partyField(party, 'type') || fallbackType || '';
+  const type = partyTypeLabel(typeCode, locale === 'ar' ? 'ar' : 'en');
   const id = partyField(party, 'id') || fallbackId || '—';
   const address = formatAddress(party);
 
@@ -114,6 +206,7 @@ export default function PurchaseDetailPage() {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const reload = useCallback(() => {
     getPurchase(id)
@@ -176,6 +269,40 @@ export default function PurchaseDetailPage() {
     doc.buyerDecision,
   );
   const lines = (doc.lines ?? []) as PurchaseLine[];
+  const details = asRecord(doc.rawDetailsJson);
+
+  let taxTotals: Array<{ taxType: string; amount: string }> = [];
+  if (Array.isArray(doc.taxTotals) && doc.taxTotals.length) {
+    taxTotals = doc.taxTotals.map((t) => ({
+      taxType: String(t.taxType ?? ''),
+      amount: String(t.amount ?? '0'),
+    }));
+  } else {
+    const fromDetails = details?.taxTotals ?? details?.TaxTotals;
+    if (Array.isArray(fromDetails) && fromDetails.length) {
+      taxTotals = (fromDetails as Array<Record<string, unknown>>).map((row) => ({
+        taxType: String(row.taxType ?? row.TaxType ?? row.type ?? ''),
+        amount: String(row.amount ?? row.Amount ?? '0'),
+      }));
+    } else {
+      const map = new Map<string, number>();
+      for (const line of lines) {
+        for (const tx of lineTaxes(line)) {
+          const key = tx.taxType || 'TAX';
+          const n = Number(String(tx.amount ?? '0').replace(/,/g, ''));
+          if (!Number.isFinite(n)) continue;
+          map.set(key, (map.get(key) ?? 0) + n);
+        }
+      }
+      taxTotals = [...map.entries()].map(([taxType, amount]) => ({
+        taxType,
+        amount: amount.toFixed(2),
+      }));
+    }
+  }
+
+  const totalSales = details?.totalSales ?? details?.totalSalesAmount ?? doc.netAmount;
+  const totalDiscount = details?.totalDiscount ?? details?.totalDiscountAmount;
 
   return (
     <div className="w-full space-y-token-lg">
@@ -214,13 +341,17 @@ export default function PurchaseDetailPage() {
         <div>
           <dt className="text-foreground/60">{t('netAmount')}</dt>
           <dd>
-            {doc.netAmount ?? '—'} {doc.currency ?? ''}
+            <Ltr>
+              {formatMoneyLtr(doc.netAmount)} {doc.currency ?? ''}
+            </Ltr>
           </dd>
         </div>
         <div>
           <dt className="text-foreground/60">{t('total')}</dt>
           <dd className="font-medium">
-            {doc.totalAmount ?? '—'} {doc.currency ?? ''}
+            <Ltr>
+              {formatMoneyLtr(doc.totalAmount)} {doc.currency ?? ''}
+            </Ltr>
           </dd>
         </div>
         <div>
@@ -268,7 +399,7 @@ export default function PurchaseDetailPage() {
           type="button"
           disabled={busy}
           className="rounded border border-border px-token-md py-token-sm text-token-sm disabled:opacity-50"
-          onClick={() => void downloadBlob(() => downloadPurchaseLocalPrintout(id, locale))}
+          onClick={() => setPreviewOpen(true)}
         >
           {t('localPreview')}
         </button>
@@ -301,8 +432,9 @@ export default function PurchaseDetailPage() {
           fallbackType={doc.issuerType}
           fallbackId={doc.issuerId}
           t={t}
+          locale={locale}
         />
-        <PartyCard title={t('receiver')} party={doc.receiverJson} t={t} />
+        <PartyCard title={t('receiver')} party={doc.receiverJson} t={t} locale={locale} />
       </div>
 
       <section className="space-y-token-sm">
@@ -341,12 +473,18 @@ export default function PurchaseDetailPage() {
                       <td className="px-token-sm py-token-xs">
                         {String(line.description ?? '—')}
                       </td>
-                      <td className="px-token-sm py-token-xs">{String(line.quantity ?? '—')}</td>
+                      <td className="px-token-sm py-token-xs">
+                        <Ltr>{String(line.quantity ?? '—')}</Ltr>
+                      </td>
                       <td className="px-token-sm py-token-xs">{String(line.unitType ?? '—')}</td>
-                      <td className="px-token-sm py-token-xs">{String(line.unitPrice ?? '—')}</td>
-                      <td className="px-token-sm py-token-xs">{String(line.netTotal ?? '—')}</td>
+                      <td className="px-token-sm py-token-xs">
+                        <Ltr>{formatMoneyLtr(line.unitPrice)}</Ltr>
+                      </td>
+                      <td className="px-token-sm py-token-xs">
+                        <Ltr>{formatMoneyLtr(line.netTotal)}</Ltr>
+                      </td>
                       <td className="px-token-sm py-token-xs font-medium">
-                        {String(line.total ?? '—')}
+                        <Ltr>{formatMoneyLtr(line.total)}</Ltr>
                       </td>
                       <td className="px-token-sm py-token-xs">
                         {taxes.length === 0 ? (
@@ -355,10 +493,7 @@ export default function PurchaseDetailPage() {
                           <ul className="space-y-token-xs">
                             {taxes.map((tx, ti) => (
                               <li key={ti}>
-                                {String(tx.taxType ?? tx.TaxType ?? '')}/
-                                {String(tx.subType ?? tx.subtype ?? tx.SubType ?? '')}{' '}
-                                {String(tx.rate ?? tx.ratePercent ?? '')}%
-                                {tx.amount != null ? ` = ${String(tx.amount)}` : ''}
+                                <Ltr>{formatLineTaxLabel(tx)}</Ltr>
                               </li>
                             ))}
                           </ul>
@@ -375,17 +510,58 @@ export default function PurchaseDetailPage() {
 
       <section className="space-y-token-sm rounded border border-border bg-surface p-token-sm">
         <h2 className="font-medium text-brand">{t('totals')}</h2>
-        <dl className="grid grid-cols-1 gap-token-sm text-token-sm sm:grid-cols-3">
+        <dl className="grid grid-cols-1 gap-token-sm text-token-sm sm:grid-cols-2 lg:grid-cols-3">
+          {totalSales != null ? (
+            <div>
+              <dt className="text-foreground/60">{t('totalSales')}</dt>
+              <dd>
+                <Ltr>
+                  {formatMoneyLtr(totalSales)} {doc.currency ?? ''}
+                </Ltr>
+              </dd>
+            </div>
+          ) : null}
+          {totalDiscount != null && String(totalDiscount) !== '0' ? (
+            <div>
+              <dt className="text-foreground/60">{t('totalDiscount')}</dt>
+              <dd>
+                <Ltr>
+                  {formatMoneyLtr(totalDiscount)} {doc.currency ?? ''}
+                </Ltr>
+              </dd>
+            </div>
+          ) : null}
           <div>
             <dt className="text-foreground/60">{t('netAmount')}</dt>
             <dd>
-              {doc.netAmount ?? '—'} {doc.currency ?? ''}
+              <Ltr>
+                {formatMoneyLtr(doc.netAmount)} {doc.currency ?? ''}
+              </Ltr>
             </dd>
           </div>
+          {taxTotals.length ? (
+            <div className="sm:col-span-2 lg:col-span-3">
+              <dt className="text-foreground/60">{t('taxTotals')}</dt>
+              <dd>
+                <ul className="mt-token-xs space-y-token-xs">
+                  {taxTotals.map((tt) => (
+                    <li key={tt.taxType}>
+                      {taxSummaryLabel(tt.taxType, t)}:{' '}
+                      <Ltr>
+                        {formatMoneyLtr(tt.amount)} {doc.currency ?? ''}
+                      </Ltr>
+                    </li>
+                  ))}
+                </ul>
+              </dd>
+            </div>
+          ) : null}
           <div>
             <dt className="text-foreground/60">{t('total')}</dt>
             <dd className="font-medium">
-              {doc.totalAmount ?? '—'} {doc.currency ?? ''}
+              <Ltr>
+                {formatMoneyLtr(doc.totalAmount)} {doc.currency ?? ''}
+              </Ltr>
             </dd>
           </div>
         </dl>
@@ -446,6 +622,17 @@ export default function PurchaseDetailPage() {
           ) : null}
         </section>
       ) : null}
+
+      <LocalPdfPreviewModal
+        open={previewOpen}
+        title={t('localPreview')}
+        closeLabel={t('close')}
+        downloadLabel={t('downloadLocalPdf')}
+        loadingLabel={t('loading')}
+        errorFallback={t('loading')}
+        onClose={() => setPreviewOpen(false)}
+        loadPdf={() => downloadPurchaseLocalPrintout(id, locale)}
+      />
     </div>
   );
 }

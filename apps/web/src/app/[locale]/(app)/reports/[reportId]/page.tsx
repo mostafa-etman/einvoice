@@ -45,7 +45,53 @@ function daysAgoCairo(n: number): string {
   }).format(d);
 }
 
-const PDF_IDS = new Set(['S1', 'P1', 'S4', 'P3', 'C1']);
+const PDF_IDS = new Set(['S1', 'P1', 'S4', 'P3', 'C1', 'C4']);
+
+const FIELD_KEYS = new Set([
+  'bucket',
+  'net',
+  'gross',
+  'sales',
+  'purchases',
+  'customerName',
+  'supplierName',
+  'itemCode',
+  'amount',
+  'rate',
+  'count',
+  'status',
+  'name',
+  'taxType',
+  'subType',
+  'side',
+  'category',
+  'taxableValue',
+  'taxAmount',
+  'branchId',
+  'branchName',
+  'currency',
+  'outputVat',
+  'inputVat',
+  'netVat',
+  'withholding',
+  'documentCount',
+  'empty',
+]);
+
+function formatLtrAmount(value: unknown): string {
+  if (value == null || value === '') return '—';
+  const n = Number(value);
+  if (Number.isNaN(n)) return String(value);
+  return n.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function monthStartCairo(): string {
+  const today = todayCairo();
+  return `${today.slice(0, 7)}-01`;
+}
 
 export default function ReportDetailPage() {
   const routeParams = useParams<{ reportId: string }>();
@@ -54,7 +100,9 @@ export default function ReportDetailPage() {
   const locale = useLocale();
   const { tenantId } = useTenant();
 
-  const [from, setFrom] = useState(() => daysAgoCairo(29));
+  const [from, setFrom] = useState(() =>
+    reportId === 'C4' ? monthStartCairo() : daysAgoCairo(29),
+  );
   const [to, setTo] = useState(todayCairo);
   const [branchId, setBranchId] = useState('');
   const [currencyCode, setCurrencyCode] = useState('');
@@ -62,6 +110,7 @@ export default function ReportDetailPage() {
   const [showGross, setShowGross] = useState(false);
   const [includeOthers, setIncludeOthers] = useState(false);
   const [perBranch, setPerBranch] = useState(false);
+  const [taxType, setTaxType] = useState('');
   const [branches, setBranches] = useState<Array<{ id: string; name: string }>>(
     [],
   );
@@ -94,6 +143,7 @@ export default function ReportDetailPage() {
       showGross,
       includeNonFinancialStatuses: includeOthers,
       perBranch: reportId === 'C1' ? perBranch : false,
+      taxType: reportId === 'C4' && taxType ? taxType : undefined,
     }),
     [
       from,
@@ -105,6 +155,7 @@ export default function ReportDetailPage() {
       includeOthers,
       perBranch,
       reportId,
+      taxType,
     ],
   );
 
@@ -276,6 +327,23 @@ export default function ReportDetailPage() {
             {t('perBranch')}
           </label>
         ) : null}
+        {reportId === 'C4' ? (
+          <label className="text-sm">
+            {t('taxType')}
+            <select
+              className="ms-2 rounded border border-border bg-background px-2 py-1"
+              value={taxType}
+              onChange={(e) => setTaxType(e.target.value)}
+            >
+              <option value="">{t('taxTypeAll')}</option>
+              {(data?.taxTypes ?? ['T1', 'T2', 'T3', 'T4']).map((code) => (
+                <option key={code} value={code}>
+                  {code}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <button
           type="button"
           className="rounded-md bg-foreground px-3 py-1.5 text-sm text-background"
@@ -288,7 +356,140 @@ export default function ReportDetailPage() {
 
       {error ? <p className="text-sm text-danger">{error}</p> : null}
 
-      {data ? (
+      {data && reportId === 'C4' ? (
+        <>
+          <p className="rounded border border-amber-300 bg-amber-50 px-token-md py-token-sm text-token-sm text-amber-950">
+            {t('vatReturnDisclaimer')}
+          </p>
+          <section className="space-y-token-sm">
+            <h2 className="text-lg font-semibold">{t('vatReturnTitle')}</h2>
+            <div className="grid gap-token-sm sm:grid-cols-2 lg:grid-cols-3">
+              {(
+                [
+                  ['vatReturnSales', data.summary.salesValue],
+                  ['vatReturnOutputTax', data.summary.outputVat],
+                  ['vatReturnPurchases', data.summary.purchasesValue],
+                  ['vatReturnInputTax', data.summary.inputVat],
+                  ['vatReturnNet', data.summary.netVat],
+                  ['vatReturnWithholding', data.summary.withholdingOutput],
+                ] as const
+              ).map(([labelKey, value]) => (
+                <div
+                  key={labelKey}
+                  className="rounded-md border border-border bg-surface px-token-md py-token-sm"
+                >
+                  <div className="text-xs text-muted">{t(labelKey)}</div>
+                  <div className="text-lg font-semibold tabular-nums" dir="ltr">
+                    {formatLtrAmount(value)}
+                  </div>
+                </div>
+              ))}
+              {data.summary.position ? (
+                <div className="rounded-md border border-border bg-surface px-token-md py-token-sm">
+                  <div className="text-xs text-muted">{t('position')}</div>
+                  <div className="text-lg font-semibold">
+                    {t(`positions.${String(data.summary.position)}`)}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          {(
+            [
+              ['vatReturnOutputSection', 'output'],
+              ['vatReturnInputSection', 'input'],
+              ['vatReturnWithholdingSection', 'withholding'],
+            ] as const
+          ).map(([titleKey, sectionKey]) => {
+            const rows =
+              (data.sections?.[sectionKey] as
+                | Array<Record<string, unknown>>
+                | undefined) ??
+              (data.rows ?? []).filter((r) =>
+                sectionKey === 'withholding'
+                  ? r.category === 'withholding'
+                  : r.side === sectionKey,
+              );
+            if (!rows.length) return null;
+            return (
+              <section
+                key={sectionKey}
+                className="overflow-x-auto rounded-md border border-border"
+              >
+                <h3 className="border-b border-border bg-surface px-3 py-2 text-sm font-medium">
+                  {t(titleKey)}
+                </h3>
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr>
+                      <th className="border-b border-border px-3 py-2 text-start">
+                        {t('colTaxType')}
+                      </th>
+                      <th className="border-b border-border px-3 py-2 text-start">
+                        {t('colSubType')}
+                      </th>
+                      <th className="border-b border-border px-3 py-2 text-start">
+                        {t('colRate')}
+                      </th>
+                      <th className="border-b border-border px-3 py-2 text-start">
+                        {t('colTaxable')}
+                      </th>
+                      <th className="border-b border-border px-3 py-2 text-start">
+                        {t('colTaxAmount')}
+                      </th>
+                      <th className="border-b border-border px-3 py-2 text-start">
+                        {t('colDocs')}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row, i) => (
+                      <tr
+                        key={`${sectionKey}-${i}`}
+                        className="odd:bg-background even:bg-surface/40"
+                      >
+                        <td className="border-b border-border px-3 py-2" dir="ltr">
+                          {String(row.taxType ?? '')}
+                        </td>
+                        <td className="border-b border-border px-3 py-2" dir="ltr">
+                          {String(row.subType ?? '')}
+                        </td>
+                        <td
+                          className="border-b border-border px-3 py-2 tabular-nums"
+                          dir="ltr"
+                        >
+                          {String(row.rate ?? '')}
+                        </td>
+                        <td
+                          className="border-b border-border px-3 py-2 tabular-nums"
+                          dir="ltr"
+                        >
+                          {formatLtrAmount(row.taxableValue)}
+                        </td>
+                        <td
+                          className="border-b border-border px-3 py-2 tabular-nums"
+                          dir="ltr"
+                        >
+                          {formatLtrAmount(row.taxAmount)}
+                        </td>
+                        <td
+                          className="border-b border-border px-3 py-2 tabular-nums"
+                          dir="ltr"
+                        >
+                          {String(row.documentCount ?? '')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
+            );
+          })}
+        </>
+      ) : null}
+
+      {data && reportId !== 'C4' ? (
         <>
           <section className="grid gap-token-sm sm:grid-cols-2 lg:grid-cols-4">
             {summaryEntries.map(([k, v]) => (
@@ -383,7 +584,9 @@ export default function ReportDetailPage() {
                         key={col}
                         className="border-b border-border px-3 py-2 text-start font-medium"
                       >
-                        {col}
+                        {FIELD_KEYS.has(col)
+                          ? t(`fields.${col}` as 'fields.net')
+                          : col}
                       </th>
                     ),
                   )}

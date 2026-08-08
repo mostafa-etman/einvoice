@@ -2,12 +2,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import PDFDocument from 'pdfkit';
 import { ArabicShaper } from 'arabic-persian-reshaper';
-import bidiFactory from 'bidi-js';
 import { formatMoney } from '@einvoice/eta-core';
 
-const bidi = bidiFactory();
-
 export type LocalInvoicePdfLocale = 'en' | 'ar';
+
+export type LocalInvoicePdfTax = {
+  taxType: string;
+  subType: string;
+  rate: string;
+  amount?: string;
+};
 
 export type LocalInvoicePdfInput = {
   locale: LocalInvoicePdfLocale;
@@ -36,12 +40,7 @@ export type LocalInvoicePdfInput = {
     quantity: string;
     unitPrice: string;
     discountAmount?: string;
-    taxes?: Array<{
-      taxType: string;
-      subType: string;
-      rate: string;
-      amount?: string;
-    }>;
+    taxes?: LocalInvoicePdfTax[];
   }>;
   totals: {
     totalSalesAmount: string;
@@ -77,6 +76,8 @@ type Labels = {
   extraDiscount: string;
   net: string;
   taxByType: string;
+  vatSummary: string;
+  withholdingSummary: string;
   total: string;
   address: string;
 };
@@ -86,7 +87,7 @@ const EN: Labels = {
   localNote: 'Local preview — not the official ETA printout',
   issuer: 'Issuer',
   receiver: 'Receiver',
-  taxId: 'Tax registration',
+  taxId: 'Tax Registration Number',
   activity: 'Activity code',
   documentType: 'Document type',
   internalId: 'Internal ID',
@@ -104,6 +105,8 @@ const EN: Labels = {
   extraDiscount: 'Extra discount',
   net: 'Net amount',
   taxByType: 'Taxes by type',
+  vatSummary: 'VAT (output)',
+  withholdingSummary: 'Withholding',
   total: 'Total amount',
   address: 'Address',
 };
@@ -113,7 +116,7 @@ const AR: Labels = {
   localNote: 'معاينة محلية — ليست الطبعة الرسمية لمصلحة الضرائب',
   issuer: 'البائع',
   receiver: 'المشتري',
-  taxId: 'الرقم الضريبي',
+  taxId: 'رقم التسجيل الضريبي',
   activity: 'كود النشاط',
   documentType: 'نوع المستند',
   internalId: 'الرقم الداخلي',
@@ -131,9 +134,13 @@ const AR: Labels = {
   extraDiscount: 'خصم إضافي',
   net: 'الصافي',
   taxByType: 'الضرائب حسب النوع',
+  vatSummary: 'ضريبة القيمة المضافة',
+  withholdingSummary: 'ضريبة الخصم والتحصيل',
   total: 'الإجمالي',
   address: 'العنوان',
 };
+
+type TextSeg = { kind: 'ar' | 'ltr'; text: string };
 
 function resolveFontPaths(): { latin: string; arabic: string } {
   const candidates = [
@@ -156,14 +163,73 @@ function hasArabic(text: string): boolean {
   return /[\u0600-\u06FF]/.test(text);
 }
 
-/** Reshape + reorder Arabic so pdfkit draws glyphs in visual order. */
-export function shapeForPdf(text: string, rtl: boolean): string {
+/** Split mixed strings so Arabic and LTR (digits/latin/codes) never share one RTL font run. */
+export function segmentMixedText(text: string): TextSeg[] {
+  if (!text) return [];
+  const segs: TextSeg[] = [];
+  let buf = '';
+  let kind: TextSeg['kind'] | null = null;
+  const flush = () => {
+    if (!buf || !kind) return;
+    segs.push({ kind, text: buf });
+    buf = '';
+  };
+  for (const ch of text) {
+    const isAr = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(ch);
+    // Keep spaces with the previous run so labels stay glued to values visually.
+    const next: TextSeg['kind'] = isAr ? 'ar' : 'ltr';
+    if (kind == null) kind = next;
+    if (next !== kind && ch !== ' ') {
+      flush();
+      kind = next;
+    }
+    buf += ch;
+  }
+  flush();
+  return segs;
+}
+
+/** Reshape Arabic runs only — never reshape digits/dates/IDs. */
+export function shapeForPdf(text: string, _rtl = false): string {
   if (!text) return '';
-  if (!rtl && !hasArabic(text)) return text;
-  const reshaped = ArabicShaper.convertArabic(text);
-  if (!hasArabic(text) && !rtl) return reshaped;
-  const levels = bidi.getEmbeddingLevels(reshaped, rtl ? 'rtl' : 'ltr');
-  return bidi.getReorderedString(reshaped, levels);
+  if (!hasArabic(text)) return text;
+  try {
+    // Segment so ArabicShaper never touches LTR substrings.
+    return segmentMixedText(text)
+      .map((s) =>
+        s.kind === 'ar' ? ArabicShaper.convertArabic(s.text) : s.text,
+      )
+      .join('');
+  } catch {
+    return text;
+  }
+}
+
+/** Money with thousands separators + 2 decimals (always LTR). */
+export function formatMoneyDisplay(value: unknown): string {
+  let fixed = '0.00';
+  try {
+    fixed = formatMoney(String(value ?? '0'));
+  } catch {
+    fixed = '0.00';
+  }
+  const neg = fixed.startsWith('-');
+  const raw = neg ? fixed.slice(1) : fixed;
+  const [intPart, frac = '00'] = raw.split('.');
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${neg ? '-' : ''}${grouped}.${frac}`;
+}
+
+/** Display date as yyyy-MM-dd HH:mm (UTC, always LTR). */
+export function formatDateDisplay(input: string): string {
+  if (!input) return '';
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) {
+    // Already a display string — keep as-is if it looks sane.
+    return input.length > 16 ? input.slice(0, 16).replace('T', ' ') : input;
+  }
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
 }
 
 function formatAddress(addr?: Record<string, unknown> | null): string {
@@ -185,31 +251,59 @@ function formatAddress(addr?: Record<string, unknown> | null): string {
   return parts.join(', ');
 }
 
-function money(value: unknown): string {
-  try {
-    return formatMoney(String(value ?? '0'));
-  } catch {
-    return '0.00';
+/** Normalize taxableItems / taxes arrays from ETA or Prisma. */
+export function normalizeLineTaxes(raw: unknown): LocalInvoicePdfTax[] {
+  if (!raw) return [];
+  let arr: unknown[] = [];
+  if (Array.isArray(raw)) arr = raw;
+  else if (typeof raw === 'object') {
+    const o = raw as Record<string, unknown>;
+    if (Array.isArray(o.taxableItems)) arr = o.taxableItems;
+    else if (Array.isArray(o.TaxableItems)) arr = o.TaxableItems;
+    else if (Array.isArray(o.taxes)) arr = o.taxes;
   }
+  return arr
+    .map((item): LocalInvoicePdfTax | null => {
+      if (!item || typeof item !== 'object') return null;
+      const t = item as Record<string, unknown>;
+      const taxType = String(t.taxType ?? t.TaxType ?? t.type ?? '').trim();
+      const subType = String(
+        t.subType ?? t.subtype ?? t.SubType ?? t.taxSubType ?? '',
+      ).trim();
+      const rate = String(t.rate ?? t.ratePercent ?? t.Rate ?? '0').trim();
+      const amount =
+        t.amount != null
+          ? String(t.amount)
+          : t.Amount != null
+            ? String(t.Amount)
+            : undefined;
+      if (!taxType && !subType && !amount) return null;
+      return { taxType, subType, rate, amount };
+    })
+    .filter((t): t is LocalInvoicePdfTax => t != null);
 }
 
-function parseTaxTotals(
+export function parseTaxTotals(
   raw: unknown,
 ): Array<{ taxType: string; amount: string }> {
   if (!raw) return [];
   if (Array.isArray(raw)) {
-    return raw.map((t) => {
-      const row = t as Record<string, unknown>;
-      return {
-        taxType: String(row.taxType ?? row.type ?? ''),
-        amount: money(row.amount ?? '0'),
-      };
-    });
+    return raw
+      .map((t) => {
+        const row = t as Record<string, unknown>;
+        const taxType = String(row.taxType ?? row.type ?? row.TaxType ?? '');
+        if (!taxType && row.amount == null) return null;
+        return {
+          taxType,
+          amount: formatMoneyDisplay(row.amount ?? '0'),
+        };
+      })
+      .filter((t): t is { taxType: string; amount: string } => t != null);
   }
   if (typeof raw === 'object') {
     return Object.entries(raw as Record<string, unknown>).map(([k, v]) => ({
       taxType: k,
-      amount: money(
+      amount: formatMoneyDisplay(
         typeof v === 'object' && v && 'amount' in v
           ? (v as { amount: unknown }).amount
           : v,
@@ -217,6 +311,40 @@ function parseTaxTotals(
     }));
   }
   return [];
+}
+
+/** Aggregate tax totals from line taxes when document-level totals are missing. */
+export function aggregateTaxTotalsFromLines(
+  lines: LocalInvoicePdfInput['lines'],
+): Array<{ taxType: string; amount: string }> {
+  const map = new Map<string, number>();
+  for (const line of lines) {
+    for (const t of line.taxes ?? []) {
+      const key = t.taxType || 'TAX';
+      const n = Number(String(t.amount ?? '0').replace(/,/g, ''));
+      if (!Number.isFinite(n)) continue;
+      map.set(key, (map.get(key) ?? 0) + n);
+    }
+  }
+  return [...map.entries()].map(([taxType, amount]) => ({
+    taxType,
+    amount: formatMoneyDisplay(amount),
+  }));
+}
+
+function formatLineTaxes(taxes: LocalInvoicePdfTax[] | undefined): string {
+  if (!taxes?.length) return '—';
+  return taxes
+    .map((t) => {
+      const code = [t.taxType, t.subType].filter(Boolean).join('/');
+      const rate = t.rate ? `${t.rate}%` : '';
+      const amt =
+        t.amount != null && t.amount !== ''
+          ? formatMoneyDisplay(t.amount)
+          : '';
+      return [code, rate, amt ? `=${amt}` : ''].filter(Boolean).join(' ');
+    })
+    .join('; ');
 }
 
 /**
@@ -250,64 +378,104 @@ export async function renderLocalInvoicePdf(
     doc.on('error', reject);
   });
 
-  const fontFor = (text: string) =>
-    rtl || hasArabic(text) ? 'Arabic' : 'Latin';
-
-  const drawText = (
+  /**
+   * Draw mixed Arabic + LTR without reversing numbers/dates/IDs.
+   * Arabic runs: Noto Naskh + reshape. LTR runs: Noto Sans, never reshaped.
+   * RTL paragraphs are composed right-to-left by placing segments from the right edge.
+   */
+  const drawMixed = (
     text: string,
     x: number,
     y: number,
-    opts: { width?: number; align?: 'left' | 'right' | 'center'; size?: number } = {},
+    opts: {
+      width?: number;
+      align?: 'left' | 'right' | 'center';
+      size?: number;
+    } = {},
   ) => {
-    const shaped = shapeForPdf(text, rtl);
-    doc
-      .font(fontFor(text))
-      .fontSize(opts.size ?? 9)
-      .fillColor('#111')
-      .text(shaped, x, y, {
-        width: opts.width ?? contentWidth,
-        align: opts.align ?? (rtl ? 'right' : 'left'),
-        lineBreak: true,
-      });
+    const width = opts.width ?? contentWidth;
+    const size = opts.size ?? 9;
+    const align = opts.align ?? (rtl ? 'right' : 'left');
+    const segs = segmentMixedText(text);
+    if (!segs.length) return y;
+
+    const prepared = segs.map((s) => {
+      const shaped =
+        s.kind === 'ar' ? ArabicShaper.convertArabic(s.text) : s.text;
+      const font = s.kind === 'ar' || (rtl && hasArabic(s.text)) ? 'Arabic' : 'Latin';
+      doc.font(font).fontSize(size);
+      const w = doc.widthOfString(shaped);
+      return { ...s, shaped, font, w };
+    });
+    const totalW = prepared.reduce((a, s) => a + s.w, 0);
+
+    let cursorX: number;
+    if (align === 'center') {
+      cursorX = x + Math.max(0, (width - totalW) / 2);
+    } else if (align === 'right') {
+      cursorX = x + Math.max(0, width - totalW);
+    } else {
+      cursorX = x;
+    }
+
+    // For RTL, draw segments in visual order from right: reverse segment list
+    // so the first logical Arabic label sits on the right and LTR values stay LTR.
+    const drawOrder =
+      align === 'right' && rtl ? [...prepared].reverse() : prepared;
+    if (align === 'right' && rtl) {
+      cursorX = x + Math.max(0, width - totalW);
+    }
+
+    let maxBottom = y + size + 2;
+    for (const s of drawOrder) {
+      doc
+        .font(s.font)
+        .fontSize(size)
+        .fillColor('#111')
+        .text(s.shaped, cursorX, y, {
+          width: s.w + 1,
+          lineBreak: false,
+          features: [],
+        });
+      cursorX += s.w;
+      maxBottom = Math.max(maxBottom, doc.y);
+    }
+    return maxBottom;
   };
 
   let y = margin;
 
-  // Header: logo + title
   if (input.logo?.buffer?.length) {
     try {
       const logoW = 72;
       const logoX = rtl ? pageWidth - margin - logoW : margin;
-      doc.image(input.logo.buffer, logoX, y, {
-        fit: [logoW, 48],
-      });
+      doc.image(input.logo.buffer, logoX, y, { fit: [logoW, 48] });
     } catch {
-      // ignore corrupt logo; still render invoice
+      /* ignore corrupt logo */
     }
   }
-  drawText(L.title, margin, y, {
+  y = drawMixed(L.title, margin, y, {
     width: contentWidth,
     align: 'center',
     size: 16,
   });
-  y += 28;
-  drawText(L.localNote, margin, y, {
+  y += 8;
+  y = drawMixed(L.localNote, margin, y, {
     width: contentWidth,
     align: 'center',
     size: 8,
   });
-  y += 22;
+  y += 14;
 
-  // Meta row
   const metaLines = [
     `${L.documentType}: ${input.kind}`,
     `${L.internalId}: ${input.internalId}`,
-    `${L.date}: ${input.issueDateTime}`,
+    `${L.date}: ${formatDateDisplay(input.issueDateTime)}`,
     `${L.currency}: ${input.currencyCode}`,
   ];
   for (const line of metaLines) {
-    drawText(line, margin, y, { size: 9 });
-    y += 13;
+    y = drawMixed(line, margin, y, { size: 9 });
+    y += 4;
   }
   y += 8;
 
@@ -316,28 +484,33 @@ export async function renderLocalInvoicePdf(
     party: LocalInvoicePdfInput['issuer'],
     activity?: string,
   ) => {
-    drawText(title, margin, y, { size: 11 });
-    y += 14;
+    y = drawMixed(title, margin, y, { size: 11 });
+    y += 4;
     if (party.name) {
-      drawText(String(party.name), margin, y, { size: 10 });
-      y += 13;
+      y = drawMixed(String(party.name), margin, y, { size: 10 });
+      y += 3;
     }
     if (party.id) {
-      drawText(`${L.taxId}: ${party.id}`, margin, y);
-      y += 12;
+      y = drawMixed(`${L.taxId}: ${party.id}`, margin, y, { size: 9 });
+      y += 3;
+    }
+    if (party.type) {
+      y = drawMixed(`${party.type}`, margin, y, { size: 8 });
+      y += 2;
     }
     if (activity) {
-      drawText(`${L.activity}: ${activity}`, margin, y);
-      y += 12;
+      y = drawMixed(`${L.activity}: ${activity}`, margin, y, { size: 9 });
+      y += 3;
     }
     const addr = formatAddress(party.address ?? null);
     if (addr) {
-      drawText(`${L.address}: ${addr}`, margin, y, { width: contentWidth });
-      y = doc.y + 6;
-    } else {
+      y = drawMixed(`${L.address}: ${addr}`, margin, y, {
+        width: contentWidth,
+        size: 8,
+      });
       y += 4;
     }
-    y += 6;
+    y += 8;
   };
 
   partyBlock(L.issuer, input.issuer, input.taxpayerActivityCode);
@@ -345,25 +518,24 @@ export async function renderLocalInvoicePdf(
     partyBlock(L.receiver, input.receiver);
   }
 
-  // Line table header
   const cols = rtl
     ? ([
-        { key: 'taxes', w: 90, label: L.taxes },
-        { key: 'discount', w: 50, label: L.discount },
-        { key: 'unitPrice', w: 55, label: L.unitPrice },
-        { key: 'unit', w: 35, label: L.unit },
-        { key: 'qty', w: 35, label: L.qty },
-        { key: 'description', w: 130, label: L.description },
+        { key: 'taxes', w: 100, label: L.taxes },
+        { key: 'discount', w: 48, label: L.discount },
+        { key: 'unitPrice', w: 52, label: L.unitPrice },
+        { key: 'unit', w: 32, label: L.unit },
+        { key: 'qty', w: 32, label: L.qty },
+        { key: 'description', w: 120, label: L.description },
         { key: 'code', w: 70, label: L.code },
       ] as const)
     : ([
         { key: 'code', w: 70, label: L.code },
-        { key: 'description', w: 130, label: L.description },
-        { key: 'qty', w: 35, label: L.qty },
-        { key: 'unit', w: 35, label: L.unit },
-        { key: 'unitPrice', w: 55, label: L.unitPrice },
-        { key: 'discount', w: 50, label: L.discount },
-        { key: 'taxes', w: 90, label: L.taxes },
+        { key: 'description', w: 120, label: L.description },
+        { key: 'qty', w: 32, label: L.qty },
+        { key: 'unit', w: 32, label: L.unit },
+        { key: 'unitPrice', w: 52, label: L.unitPrice },
+        { key: 'discount', w: 48, label: L.discount },
+        { key: 'taxes', w: 100, label: L.taxes },
       ] as const);
 
   const ensureSpace = (need: number) => {
@@ -376,94 +548,112 @@ export async function renderLocalInvoicePdf(
   ensureSpace(40);
   doc.moveTo(margin, y).lineTo(pageWidth - margin, y).stroke('#999');
   y += 4;
-  let x = margin;
-  for (const col of cols) {
-    drawText(col.label, x, y, { width: col.w, size: 8 });
-    x += col.w;
+  {
+    let x = margin;
+    let headerBottom = y;
+    for (const col of cols) {
+      headerBottom = Math.max(
+        headerBottom,
+        drawMixed(col.label, x, y, { width: col.w - 2, size: 8 }),
+      );
+      x += col.w;
+    }
+    y = headerBottom + 4;
   }
-  y += 14;
   doc.moveTo(margin, y).lineTo(pageWidth - margin, y).stroke('#999');
   y += 6;
 
-  for (const line of input.lines) {
-    const taxText = (line.taxes ?? [])
-      .map(
-        (t) =>
-          `${t.taxType}/${t.subType} ${t.rate}%${t.amount != null && t.amount !== '' ? `=${money(t.amount)}` : ''}`,
-      )
-      .join('; ');
+  const lines = input.lines.map((line) => ({
+    ...line,
+    taxes: normalizeLineTaxes(line.taxes),
+  }));
+
+  for (const line of lines) {
     const row: Record<(typeof cols)[number]['key'], string> = {
       code: `${line.itemType}:${line.itemCode}`,
       description: line.description || '',
       qty: String(line.quantity ?? ''),
       unit: String(line.unitType ?? ''),
-      unitPrice: money(line.unitPrice),
-      discount: money(line.discountAmount ?? '0'),
-      taxes: taxText || '—',
+      unitPrice: formatMoneyDisplay(line.unitPrice),
+      discount: formatMoneyDisplay(line.discountAmount ?? '0'),
+      taxes: formatLineTaxes(line.taxes),
     };
-    const descHeight = Math.max(
-      24,
-      Math.ceil((row.description.length || 1) / 28) * 11,
-    );
-    ensureSpace(descHeight + 8);
-    x = margin;
+    ensureSpace(36);
+    let x = margin;
     let rowBottom = y;
     for (const col of cols) {
-      drawText(row[col.key], x, y, { width: col.w - 2, size: 8 });
-      rowBottom = Math.max(rowBottom, doc.y);
+      rowBottom = Math.max(
+        rowBottom,
+        drawMixed(row[col.key], x, y, { width: col.w - 2, size: 7 }),
+      );
       x += col.w;
     }
     y = rowBottom + 6;
   }
 
   y += 10;
-  ensureSpace(120);
+  ensureSpace(140);
   doc.moveTo(margin, y).lineTo(pageWidth - margin, y).stroke('#999');
   y += 10;
 
-  const totalsBlock = [
-    [L.totalSales, money(input.totals.totalSalesAmount)],
-    [L.totalDiscount, money(input.totals.totalDiscountAmount)],
-    [L.extraDiscount, money(input.totals.extraDiscountAmount ?? '0')],
-    [L.net, money(input.totals.netAmount)],
-  ] as const;
+  const totalsBlock: Array<[string, string]> = [
+    [L.totalSales, formatMoneyDisplay(input.totals.totalSalesAmount)],
+    [L.totalDiscount, formatMoneyDisplay(input.totals.totalDiscountAmount)],
+    [
+      L.extraDiscount,
+      formatMoneyDisplay(input.totals.extraDiscountAmount ?? '0'),
+    ],
+    [L.net, formatMoneyDisplay(input.totals.netAmount)],
+  ];
 
   for (const [label, value] of totalsBlock) {
-    drawText(`${label}: ${value}`, margin, y, {
+    y = drawMixed(`${label}: ${value}`, margin, y, {
       width: contentWidth,
-      align: rtl ? 'left' : 'right',
+      align: rtl ? 'right' : 'right',
       size: 10,
     });
-    y += 14;
+    y += 4;
   }
 
-  const taxTotals = parseTaxTotals(input.totals.taxTotals);
+  let taxTotals = parseTaxTotals(input.totals.taxTotals);
+  if (!taxTotals.length) {
+    taxTotals = aggregateTaxTotalsFromLines(lines);
+  }
+
   if (taxTotals.length) {
-    drawText(L.taxByType, margin, y, {
+    y += 4;
+    y = drawMixed(L.taxByType, margin, y, {
       width: contentWidth,
-      align: rtl ? 'left' : 'right',
+      align: 'right',
       size: 9,
     });
-    y += 13;
+    y += 4;
     for (const t of taxTotals) {
-      drawText(`${t.taxType}: ${t.amount}`, margin, y, {
+      const isWithholding = /^T4$/i.test(t.taxType) || /W/i.test(t.taxType);
+      const label = isWithholding
+        ? `${L.withholdingSummary} (${t.taxType})`
+        : /^T1$/i.test(t.taxType)
+          ? `${L.vatSummary} (${t.taxType})`
+          : t.taxType;
+      y = drawMixed(`${label}: ${t.amount}`, margin, y, {
         width: contentWidth,
-        align: rtl ? 'left' : 'right',
+        align: 'right',
         size: 9,
       });
-      y += 12;
+      y += 3;
     }
   }
 
-  y += 4;
-  drawText(`${L.total}: ${money(input.totals.totalAmount)} ${input.currencyCode}`, margin, y, {
-    width: contentWidth,
-    align: rtl ? 'left' : 'right',
-    size: 12,
-  });
+  y += 6;
+  y = drawMixed(
+    `${L.total}: ${formatMoneyDisplay(input.totals.totalAmount)} ${input.currencyCode}`,
+    margin,
+    y,
+    { width: contentWidth, align: 'right', size: 12 },
+  );
 
-  y += 28;
-  drawText(L.localNote, margin, y, {
+  y += 20;
+  drawMixed(L.localNote, margin, y, {
     width: contentWidth,
     align: 'center',
     size: 8,

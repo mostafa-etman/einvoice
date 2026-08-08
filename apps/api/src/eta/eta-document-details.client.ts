@@ -31,7 +31,14 @@ export class EtaDocumentDetailsClient {
     );
     const text = await res.text();
     if (!res.ok) {
-      throw new Error(mapEtaHttpError(res.status, text).message);
+      const mapped = mapEtaHttpError(res.status, text);
+      const err = new Error(mapped.message) as Error & {
+        status?: number;
+        etaCode?: string;
+      };
+      err.status = mapped.httpStatus;
+      err.etaCode = mapped.code;
+      throw err;
     }
     try {
       return text ? (JSON.parse(text) as Record<string, unknown>) : {};

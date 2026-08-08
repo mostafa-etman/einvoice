@@ -21,6 +21,7 @@ import { PermissionsGuard, RequirePermissions } from '../rbac/permissions.guard'
 import { requireTenant } from '../settings/require-tenant';
 import { DocumentsService, type DocumentUpsertDto } from './documents.service';
 import { IssuedEtaService } from './issued-eta.service';
+import { SalesSyncService } from './sales-sync.service';
 
 @Controller('documents')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -28,6 +29,7 @@ export class DocumentsController {
   constructor(
     private readonly documents: DocumentsService,
     private readonly issuedEta: IssuedEtaService,
+    private readonly salesSync: SalesSyncService,
   ) {}
 
   @Get()
@@ -36,9 +38,42 @@ export class DocumentsController {
     @Headers('x-tenant-id') tenantHeader: string | undefined,
     @Query('status') status?: DocumentStatus,
     @Query('kind') kind?: DocumentKind,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('receiver') receiver?: string,
+    @Query('q') q?: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortDir') sortDir?: string,
   ) {
     const tenantId = requireTenant(tenantHeader);
-    return this.documents.list(tenantId, { status, kind }).then((items) => ({ items }));
+    const allowedSort = new Set([
+      'issueDateTime',
+      'totalAmount',
+      'internalId',
+      'receiverName',
+      'updatedAt',
+    ]);
+    return this.documents.list(tenantId, {
+      status,
+      kind,
+      from,
+      to,
+      receiver,
+      q,
+      cursor,
+      limit: limit ? Number(limit) : undefined,
+      sortBy: allowedSort.has(sortBy ?? '')
+        ? (sortBy as
+            | 'issueDateTime'
+            | 'totalAmount'
+            | 'internalId'
+            | 'receiverName'
+            | 'updatedAt')
+        : undefined,
+      sortDir: sortDir === 'asc' || sortDir === 'desc' ? sortDir : undefined,
+    });
   }
 
   @Post('preview')
@@ -110,6 +145,42 @@ export class DocumentsController {
       user.userId,
       body?.documentIds ?? [],
       body?.reason ?? '',
+    );
+  }
+
+  /** Sync issued (sales) documents from ETA into local read-only historical records. */
+  @Post('sync')
+  @RequirePermissions(PERMISSIONS.DOCUMENTS_MANAGE)
+  syncSales(
+    @Headers('x-tenant-id') tenantHeader: string | undefined,
+    @CurrentUser() user: { userId: string },
+    @Body() body?: { from?: string; to?: string },
+  ) {
+    return this.salesSync.startManualSync(
+      requireTenant(tenantHeader),
+      user.userId,
+      body?.from || body?.to ? { from: body.from, to: body.to } : undefined,
+    );
+  }
+
+  @Get('sync/latest')
+  @RequirePermissions(PERMISSIONS.DOCUMENTS_VIEW)
+  latestSalesSync(
+    @Headers('x-tenant-id') tenantHeader: string | undefined,
+  ) {
+    return this.salesSync.latestSync(requireTenant(tenantHeader));
+  }
+
+  /** Cancel a stuck PENDING/RUNNING sales sync so a new one can start. */
+  @Post('sync/reset')
+  @RequirePermissions(PERMISSIONS.DOCUMENTS_MANAGE)
+  resetSalesSync(
+    @Headers('x-tenant-id') tenantHeader: string | undefined,
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.salesSync.resetStuckSync(
+      requireTenant(tenantHeader),
+      user.userId,
     );
   }
 

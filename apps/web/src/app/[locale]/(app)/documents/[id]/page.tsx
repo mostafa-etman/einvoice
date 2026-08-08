@@ -3,7 +3,8 @@
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { LocalPdfPreviewModal } from '@/components/local-pdf-preview-modal';
 import {
   createDocument,
   downloadLocalPrintoutFromBody,
@@ -43,6 +44,7 @@ import {
 import { getActiveTenantId } from '@/lib/session';
 import { useAuth } from '@/lib/auth-provider';
 import { useTenant } from '@/lib/tenant-provider';
+import { catalogOptionLabel } from '@/lib/eta-display';
 import {
   calculateLine,
   checkLateSubmission,
@@ -347,6 +349,9 @@ export default function DocumentEditorPage() {
   const [issues, setIssues] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [docStatus, setDocStatus] = useState<string>('DRAFT');
+  const [documentOrigin, setDocumentOrigin] = useState<string>('LOCAL');
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const readOnlyHistorical = documentOrigin === 'ETA_SYNC';
   const [needsAttention, setNeedsAttention] = useState(false);
   const [needsAttentionReason, setNeedsAttentionReason] = useState<string | null>(null);
   const [submissionUuid, setSubmissionUuid] = useState<string | null>(null);
@@ -507,7 +512,7 @@ export default function DocumentEditorPage() {
   useEffect(() => {
     const isNote = kind.includes('CREDIT') || kind.includes('DEBIT');
     if (!isNote) return;
-    listDocuments()
+    listDocuments({ limit: 100, sortBy: 'issueDateTime', sortDir: 'desc' })
       .then((res) => {
         const items = (res.items ?? [])
           .filter((d) => {
@@ -550,6 +555,7 @@ export default function DocumentEditorPage() {
   useEffect(() => {
     // Never carry one document's submit state onto another (or onto a new one).
     setDocStatus('DRAFT');
+    setDocumentOrigin('LOCAL');
     setNeedsAttention(false);
     setNeedsAttentionReason(null);
     setSubmissionUuid(null);
@@ -574,6 +580,7 @@ export default function DocumentEditorPage() {
         setIssueDateTime(String(doc.issueDateTime).slice(0, 16));
         setVersion(Number(doc.version));
         setDocStatus(String(doc.status ?? 'DRAFT'));
+        setDocumentOrigin(String((doc as { origin?: string }).origin ?? 'LOCAL'));
         setNeedsAttention(Boolean(doc.needsAttention));
         setNeedsAttentionReason(doc.needsAttentionReason ? String(doc.needsAttentionReason) : null);
         setSubmissionUuid(doc.submissionUuid ? String(doc.submissionUuid) : null);
@@ -965,7 +972,17 @@ export default function DocumentEditorPage() {
           <div className="space-y-token-xs rounded border border-border bg-surface p-token-sm text-token-sm">
             <p>
               <span className="font-medium">{t('status')}:</span> {docStatus}
+              {readOnlyHistorical ? (
+                <span className="ms-token-sm rounded bg-amber-100 px-token-xs py-token-xs text-token-xs text-amber-900">
+                  {t('importedBadge')}
+                </span>
+              ) : null}
             </p>
+            {readOnlyHistorical ? (
+              <p className="text-amber-900" role="status">
+                {t('importedFromEta')}
+              </p>
+            ) : null}
             {submissionUuid ? (
               <p>
                 <span className="font-medium">{t('submissionUuid')}:</span> {submissionUuid}
@@ -1087,8 +1104,12 @@ export default function DocumentEditorPage() {
               </div>
             ) : null}
             {needsAttention && needsAttentionReason ? (
-              <p className="text-danger">
-                <span className="font-medium">{t('submissionError')}:</span> {needsAttentionReason}
+              <p
+                role="alert"
+                className="rounded border-2 border-danger bg-danger/10 px-token-md py-token-md text-token-sm font-medium text-danger"
+              >
+                <span className="font-semibold">{t('submissionError')}:</span>{' '}
+                {needsAttentionReason}
               </p>
             ) : null}
             {cooldownActive && cooldownUntil ? (
@@ -1119,7 +1140,31 @@ export default function DocumentEditorPage() {
             ) : null}
           </div>
         ) : null}
-        {error ? <p className="text-token-sm text-danger">{error}</p> : null}
+        {error ? (
+          <p
+            role="alert"
+            className="rounded border-2 border-danger bg-danger/10 px-token-md py-token-md text-token-sm font-medium text-danger"
+          >
+            {error}
+          </p>
+        ) : null}
+        {docStatus === 'VALID' && etaUuid ? (
+          <p
+            role="status"
+            className="rounded border-2 border-green-600 bg-green-50 px-token-md py-token-md text-token-sm font-medium text-green-900"
+          >
+            {t('submitSuccessBanner', { uuid: etaUuid, status: docStatus })}
+          </p>
+        ) : null}
+        {docStatus === 'SUBMITTED' ? (
+          <p
+            role="status"
+            className="rounded border-2 border-brand bg-brand/10 px-token-md py-token-md text-token-sm font-medium"
+          >
+            {t('submitPendingBanner')}
+            {etaUuid ? ` UUID: ${etaUuid}` : ''}
+          </p>
+        ) : null}
 
         <section className="grid grid-cols-1 gap-token-sm rounded border border-border bg-surface p-token-sm sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           <div className="sm:col-span-2 lg:col-span-3 xl:col-span-4">
@@ -1354,9 +1399,9 @@ export default function DocumentEditorPage() {
                     value={issuer.type}
                     onChange={(e) => setIssuer({ ...issuer, type: e.target.value })}
                   >
-                    <option value="B">B</option>
-                    <option value="P">P</option>
-                    <option value="F">F</option>
+                    <option value="B">{t('partyTypeB')}</option>
+                    <option value="P">{t('partyTypeP')}</option>
+                    <option value="F">{t('partyTypeF')}</option>
                   </select>
                 </label>
                 <label className="block text-token-sm">
@@ -1405,9 +1450,9 @@ export default function DocumentEditorPage() {
                     onChange={(e) => setReceiver({ ...receiver, type: e.target.value })}
                     disabled={isExportKind(kind)}
                   >
-                    <option value="B">B</option>
-                    <option value="P">P</option>
-                    <option value="F">F</option>
+                    <option value="B">{t('partyTypeB')}</option>
+                    <option value="P">{t('partyTypeP')}</option>
+                    <option value="F">{t('partyTypeF')}</option>
                   </select>
                 </label>
                 <label className="block text-token-sm">
@@ -1649,7 +1694,10 @@ export default function DocumentEditorPage() {
                                 : [{ code: 'EA', nameEn: 'Each', nameAr: '', parentCode: null, meta: null }]
                               ).map((u) => (
                                 <option key={u.code} value={u.code}>
-                                  {u.code}
+                                  {catalogOptionLabel(
+                                    u,
+                                    locale === 'ar' ? 'ar' : 'en',
+                                  )}
                                 </option>
                               ))}
                             </select>
@@ -1889,7 +1937,10 @@ export default function DocumentEditorPage() {
         </div>
 
         {issues.length ? (
-          <ul className="text-token-sm text-foreground/80">
+          <ul
+            role="status"
+            className="space-y-token-xs rounded border-2 border-brand bg-brand/10 px-token-md py-token-md text-token-sm font-medium"
+          >
             {issues.map((i) => (
               <li key={i}>{i}</li>
             ))}
@@ -1960,27 +2011,14 @@ export default function DocumentEditorPage() {
             className="rounded border border-border px-token-md py-token-sm text-token-sm"
             title={t('localPrintoutHint')}
             disabled={submitting || !branchId || !internalId}
-            onClick={async () => {
-              try {
-                setSubmitting(true);
-                setError(null);
-                const { blob, filename } = await downloadLocalPrintoutFromBody(
-                  body(),
-                  locale,
-                );
-                triggerBrowserDownload(blob, filename);
-              } catch (e) {
-                setError(e instanceof Error ? e.message : t('downloadFailed'));
-              } finally {
-                setSubmitting(false);
-              }
-            }}
+            onClick={() => setPreviewOpen(true)}
           >
             {t('previewPrint')}
           </button>
           <button
             type="button"
             className="rounded bg-brand px-token-md py-token-sm text-white"
+            disabled={readOnlyHistorical || submitting}
             onClick={async () => {
               try {
                 setError(null);
@@ -2033,6 +2071,7 @@ export default function DocumentEditorPage() {
               <button
                 type="button"
                 className="rounded border border-border px-token-md py-token-sm"
+                disabled={readOnlyHistorical}
                 onClick={async () => {
                   const res = await validateDocument(params.id);
                   const nextErrors: Record<string, string> = {};
@@ -2073,6 +2112,7 @@ export default function DocumentEditorPage() {
                   type="button"
                   className="rounded border border-border px-token-md py-token-sm"
                   title={t('recalculateTotalsHint')}
+                  disabled={readOnlyHistorical}
                   onClick={async () => {
                     try {
                       setError(null);
@@ -2130,6 +2170,7 @@ export default function DocumentEditorPage() {
               <button
                 type="button"
                 className="rounded border border-border px-token-md py-token-sm"
+                disabled={readOnlyHistorical}
                 onClick={async () => {
                   try {
                     await markDocumentReady(params.id);
@@ -2144,6 +2185,7 @@ export default function DocumentEditorPage() {
               <button
                 type="button"
                 className="rounded border border-border px-token-md py-token-sm"
+                disabled={readOnlyHistorical}
                 onClick={async () => {
                   try {
                     setError(null);
@@ -2193,7 +2235,7 @@ export default function DocumentEditorPage() {
                 <>
                   <button
                     type="button"
-                    disabled={submitting || cooldownActive}
+                    disabled={readOnlyHistorical || submitting || cooldownActive}
                     className="rounded bg-brand px-token-md py-token-sm text-white disabled:opacity-50"
                     onClick={async () => {
                       try {
@@ -2267,6 +2309,56 @@ export default function DocumentEditorPage() {
                             ? (refreshed.submitAttemptLog as Array<Record<string, unknown>>)
                             : [],
                         );
+
+                        // Auto-poll until ETA uuid + non-SUBMITTED status (or timeout).
+                        if (
+                          !res.lastErrorMessage &&
+                          !first?.intakeError &&
+                          String(refreshed.status) === 'SUBMITTED'
+                        ) {
+                          for (let i = 0; i < 30; i++) {
+                            await new Promise((r) => setTimeout(r, 2000));
+                            try {
+                              await refreshDocumentStatus(params.id);
+                            } catch {
+                              /* keep polling via getDocument */
+                            }
+                            const again = await getDocument(params.id);
+                            setDocStatus(String(again.status ?? ''));
+                            setEtaUuid(again.etaUuid ? String(again.etaUuid) : null);
+                            setNeedsAttention(Boolean(again.needsAttention));
+                            setNeedsAttentionReason(
+                              again.needsAttentionReason
+                                ? String(again.needsAttentionReason)
+                                : null,
+                            );
+                            const st = String(again.status ?? '');
+                            if (st !== 'SUBMITTED' || again.etaUuid) {
+                              if (st === 'VALID') {
+                                setIssues([
+                                  t('submitSuccessBanner', {
+                                    uuid: String(again.etaUuid ?? '—'),
+                                    status: st,
+                                  }),
+                                ]);
+                              }
+                              if (
+                                st === 'INVALID' ||
+                                st === 'REJECTED' ||
+                                again.needsAttention
+                              ) {
+                                setError(
+                                  t('submitErrorBanner', {
+                                    message:
+                                      String(again.needsAttentionReason ?? again.etaStatus ?? st),
+                                  }),
+                                );
+                              }
+                              if (st !== 'SUBMITTED') break;
+                              if (again.etaUuid && i >= 2) break;
+                            }
+                          }
+                        }
                       } catch (e) {
                         const msg =
                           e instanceof ApiError
@@ -2379,6 +2471,7 @@ export default function DocumentEditorPage() {
             <LineTaxesEditor
               line={taxModalLine}
               lineIndex={taxModalLineIdx}
+              locale={locale === 'ar' ? 'ar' : 'en'}
               taxTypes={taxTypes}
               taxSubtypes={taxSubtypes}
               taxTypeOptions={taxTypeOptions}
@@ -2393,6 +2486,17 @@ export default function DocumentEditorPage() {
           </div>
         </div>
       ) : null}
+
+      <LocalPdfPreviewModal
+        open={previewOpen}
+        title={t('previewPrint')}
+        closeLabel={t('close')}
+        downloadLabel={t('downloadPdf')}
+        loadingLabel={t('previewLoading')}
+        errorFallback={t('downloadFailed')}
+        onClose={() => setPreviewOpen(false)}
+        loadPdf={() => downloadLocalPrintoutFromBody(body(), locale)}
+      />
     </div>
   );
 }

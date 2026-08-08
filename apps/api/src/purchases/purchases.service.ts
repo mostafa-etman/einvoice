@@ -3,9 +3,13 @@ import type { Prisma } from '@prisma/client';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import type { ArtifactStorage } from '../storage/storage.module';
 import {
+  aggregateTaxTotalsFromLines,
+  normalizeLineTaxes,
+  parseTaxTotals,
   renderLocalInvoicePdf,
   type LocalInvoicePdfLocale,
 } from '../documents/local-invoice-pdf';
+import { extractReceivedLineTaxesRaw, mapDetailsLines } from './received-document.mapper';
 import type {
   ReceivedDocBuyerRow,
   ReceivedDocumentBuyerStore,
@@ -78,9 +82,14 @@ export type PurchaseListQuery = {
   kind?: string;
   buyerDecision?: string;
   reconciliationStatus?: string;
+  etaStatus?: string;
+  /** Filter issuer/seller name (AND with free-text q). */
+  seller?: string;
   q?: string;
   cursor?: string;
   limit?: number;
+  sortBy?: 'dateTimeIssued' | 'totalAmount' | 'internalId' | 'issuerName' | 'lastSyncedAt';
+  sortDir?: 'asc' | 'desc';
 };
 
 @Injectable()
@@ -101,6 +110,15 @@ export class PurchasesService {
     if (query.reconciliationStatus) {
       where.reconciliationStatus = query.reconciliationStatus as never;
     }
+    if (query.etaStatus) {
+      where.etaStatus = { equals: query.etaStatus, mode: 'insensitive' };
+    }
+    if (query.seller?.trim()) {
+      where.issuerName = {
+        contains: query.seller.trim(),
+        mode: 'insensitive',
+      };
+    }
     if (query.branchId) where.branchId = query.branchId;
     if (query.unassignedBranch) where.branchId = null;
     if (query.from || query.to) {
@@ -109,17 +127,27 @@ export class PurchasesService {
       if (query.to) where.dateTimeIssued.lte = new Date(query.to);
     }
     if (query.q) {
+      const q = query.q.trim();
       where.OR = [
-        { internalId: { contains: query.q, mode: 'insensitive' } },
-        { issuerName: { contains: query.q, mode: 'insensitive' } },
-        { documentUuid: { contains: query.q, mode: 'insensitive' } },
+        { internalId: { contains: q, mode: 'insensitive' } },
+        { issuerName: { contains: q, mode: 'insensitive' } },
+        { issuerId: { contains: q, mode: 'insensitive' } },
+        { documentUuid: { contains: q, mode: 'insensitive' } },
+        { etaLongId: { contains: q, mode: 'insensitive' } },
       ];
     }
+
+    const sortBy = query.sortBy ?? 'dateTimeIssued';
+    const sortDir = query.sortDir === 'asc' ? 'asc' : 'desc';
+    const orderBy: Prisma.ReceivedDocumentOrderByWithRelationInput[] = [
+      { [sortBy]: sortDir },
+      { createdAt: 'desc' },
+    ];
 
     const rows = await this.tenantPrisma.withTenant(tenantId, (tx) =>
       tx.receivedDocument.findMany({
         where,
-        orderBy: [{ dateTimeIssued: 'desc' }, { createdAt: 'desc' }],
+        orderBy,
         take: take + 1,
         ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
       }),
@@ -143,6 +171,49 @@ export class PurchasesService {
       }),
     );
     if (!row) return null;
+
+    const details = asRecord(row.rawDetailsJson);
+    const sourceLines: Array<Record<string, unknown>> =
+      row.lines.length > 0
+        ? (row.lines as unknown as Array<Record<string, unknown>>)
+        : hydrateLinesFromDetails(details);
+
+    const lines = sourceLines.map((line) => {
+      const taxes = normalizeLineTaxes(extractReceivedLineTaxesRaw(line));
+      return {
+        id: line.id,
+        lineNumber: line.lineNumber ?? null,
+        description: line.description ?? null,
+        itemCode: line.itemCode ?? null,
+        itemType: line.itemType ?? null,
+        unitType: line.unitType ?? null,
+        quantity: line.quantity ?? null,
+        unitPrice: line.unitPrice ?? null,
+        netTotal: line.netTotal ?? null,
+        total: line.total ?? null,
+        rawJson: line.rawJson ?? null,
+        taxes,
+        taxesJson: taxes.length ? taxes : line.taxesJson ?? [],
+      };
+    });
+
+    let taxTotals = parseTaxTotals(
+      details?.taxTotals ?? details?.TaxTotals ?? null,
+    );
+    if (!taxTotals.length) {
+      taxTotals = aggregateTaxTotalsFromLines(
+        lines.map((l) => ({
+          description: String(l.description ?? ''),
+          itemType: String(l.itemType ?? ''),
+          itemCode: String(l.itemCode ?? ''),
+          unitType: String(l.unitType ?? ''),
+          quantity: String(l.quantity ?? ''),
+          unitPrice: String(l.unitPrice ?? ''),
+          taxes: l.taxes,
+        })),
+      );
+    }
+
     return {
       ...this.toSummary(row),
       issuerType: row.issuerType,
@@ -150,7 +221,8 @@ export class PurchasesService {
       netAmount: row.netAmount,
       issuerJson: row.issuerJson,
       receiverJson: row.receiverJson,
-      lines: row.lines,
+      lines,
+      taxTotals,
       buyerDecisionReason: row.buyerDecisionReason,
       reconciliationNote: row.reconciliationNote,
       purchaseOrderLinkId: row.purchaseOrderLinkId,
@@ -176,6 +248,27 @@ export class PurchasesService {
     const lines = Array.isArray(detail.lines) ? detail.lines : [];
     const logo = await this.loadTenantLogo(tenantId);
 
+    const pdfLines = lines.map((line) => {
+      const l = line as Record<string, unknown>;
+      const taxes = Array.isArray(l.taxes)
+        ? normalizeLineTaxes(l.taxes)
+        : normalizeLineTaxes(extractReceivedLineTaxesRaw(l));
+      return {
+        description: String(l.description ?? ''),
+        itemType: String(l.itemType ?? ''),
+        itemCode: String(l.itemCode ?? ''),
+        unitType: String(l.unitType ?? ''),
+        quantity: String(l.quantity ?? ''),
+        unitPrice: String(l.unitPrice ?? ''),
+        discountAmount: '0',
+        taxes,
+      };
+    });
+    const taxTotals =
+      Array.isArray(detail.taxTotals) && detail.taxTotals.length
+        ? detail.taxTotals
+        : aggregateTaxTotalsFromLines(pdfLines);
+
     const pdf = await renderLocalInvoicePdf({
       locale: locale?.toLowerCase().startsWith('ar') ? 'ar' : ('en' as LocalInvoicePdfLocale),
       kind: String(detail.kind),
@@ -196,34 +289,21 @@ export class PurchasesService {
             address: asRecord(receiverJson.address) ?? null,
           }
         : null,
-      lines: lines.map((line) => {
-        const l = line as Record<string, unknown>;
-        const taxesRaw = Array.isArray(l.taxesJson)
-          ? l.taxesJson
-          : Array.isArray(l.taxes)
-            ? l.taxes
-            : [];
-        return {
-          description: String(l.description ?? ''),
-          itemType: String(l.itemType ?? ''),
-          itemCode: String(l.itemCode ?? ''),
-          unitType: String(l.unitType ?? ''),
-          quantity: String(l.quantity ?? ''),
-          unitPrice: String(l.unitPrice ?? ''),
-          discountAmount: '0',
-          taxes: (taxesRaw as Array<Record<string, unknown>>).map((t) => ({
-            taxType: String(t.taxType ?? t.TaxType ?? ''),
-            subType: String(t.subType ?? t.subtype ?? t.SubType ?? ''),
-            rate: String(t.rate ?? t.ratePercent ?? '0'),
-            amount: t.amount != null ? String(t.amount) : undefined,
-          })),
-        };
-      }),
+      lines: pdfLines,
       totals: {
-        totalSalesAmount: String(detail.totalAmount ?? '0.00'),
-        totalDiscountAmount: '0.00',
+        totalSalesAmount: String(
+          (asRecord(detail.rawDetailsJson)?.totalSales as string | undefined) ??
+            detail.netAmount ??
+            detail.totalAmount ??
+            '0.00',
+        ),
+        totalDiscountAmount: String(
+          (asRecord(detail.rawDetailsJson)?.totalDiscount as string | undefined) ??
+            '0.00',
+        ),
         netAmount: String(detail.netAmount ?? detail.totalAmount ?? '0.00'),
         totalAmount: String(detail.totalAmount ?? '0.00'),
+        taxTotals,
       },
       logo,
     });
@@ -300,6 +380,8 @@ export class PurchasesService {
     etaStatus: string | null;
     dateTimeIssued: Date | null;
     issuerName: string | null;
+    issuerId?: string | null;
+    issuerType?: string | null;
     totalAmount: string | null;
     currency: string | null;
     buyerDecision: string;
@@ -318,6 +400,8 @@ export class PurchasesService {
       etaStatus: r.etaStatus,
       dateTimeIssued: r.dateTimeIssued?.toISOString() ?? null,
       issuerName: r.issuerName,
+      issuerId: r.issuerId ?? null,
+      issuerType: r.issuerType ?? null,
       totalAmount: r.totalAmount,
       currency: r.currency,
       buyerDecision: r.buyerDecision,
@@ -325,6 +409,7 @@ export class PurchasesService {
       branchId: r.branchId,
       needsAttention: r.needsAttention,
       lastSyncedAt: r.lastSyncedAt.toISOString(),
+      synced: true,
     };
   }
 }
@@ -334,4 +419,15 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     return value as Record<string, unknown>;
   }
   return null;
+}
+
+function hydrateLinesFromDetails(
+  details: Record<string, unknown> | null,
+): Array<Record<string, unknown>> {
+  if (!details) return [];
+  return mapDetailsLines(details).map((l) => ({
+    ...l,
+    rawJson: l.rawJson,
+    taxesJson: l.taxesJson,
+  }));
 }

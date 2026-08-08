@@ -48,11 +48,22 @@ export class PurchasesController {
     @Query('kind') kind?: string,
     @Query('buyerDecision') buyerDecision?: string,
     @Query('reconciliationStatus') reconciliationStatus?: string,
+    @Query('etaStatus') etaStatus?: string,
+    @Query('seller') seller?: string,
     @Query('q') q?: string,
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortDir') sortDir?: string,
   ) {
     const tenantId = requireTenant(tenantHeader);
+    const allowedSort = new Set([
+      'dateTimeIssued',
+      'totalAmount',
+      'internalId',
+      'issuerName',
+      'lastSyncedAt',
+    ]);
     return this.purchases.list(tenantId, {
       from,
       to,
@@ -61,9 +72,20 @@ export class PurchasesController {
       kind,
       buyerDecision,
       reconciliationStatus,
+      etaStatus,
+      seller,
       q,
       cursor,
       limit: limit ? Number(limit) : undefined,
+      sortBy: allowedSort.has(sortBy ?? '')
+        ? (sortBy as
+            | 'dateTimeIssued'
+            | 'totalAmount'
+            | 'internalId'
+            | 'issuerName'
+            | 'lastSyncedAt')
+        : undefined,
+      sortDir: sortDir === 'asc' || sortDir === 'desc' ? sortDir : undefined,
     });
   }
 
@@ -72,9 +94,14 @@ export class PurchasesController {
   async syncNow(
     @Headers('x-tenant-id') tenantHeader: string | undefined,
     @CurrentUser() user: { userId: string },
+    @Body() body?: { from?: string; to?: string },
   ) {
     const tenantId = requireTenant(tenantHeader);
-    const run = await this.sync.startManualSync(tenantId, user.userId);
+    const run = await this.sync.startManualSync(
+      tenantId,
+      user.userId,
+      body?.from || body?.to ? { from: body.from, to: body.to } : undefined,
+    );
     return run;
   }
 
@@ -82,6 +109,17 @@ export class PurchasesController {
   @RequirePermissions(PERMISSIONS.DOCUMENTS_VIEW)
   latestSync(@Headers('x-tenant-id') tenantHeader: string | undefined) {
     return this.sync.latestSync(requireTenant(tenantHeader));
+  }
+
+  /** Cancel a stuck PENDING/RUNNING purchases sync so a new one can start. */
+  @Post('sync/reset')
+  @RequirePermissions(PERMISSIONS.DOCUMENTS_MANAGE)
+  async resetSync(
+    @Headers('x-tenant-id') tenantHeader: string | undefined,
+    @CurrentUser() user: { userId: string },
+  ) {
+    const tenantId = requireTenant(tenantHeader);
+    return this.sync.resetStuckSync(tenantId, user.userId);
   }
 
   @Get(':id')

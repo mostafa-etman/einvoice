@@ -25,7 +25,7 @@ import {
   type JsonObject,
   type LineInput,
 } from '@einvoice/eta-core';
-import type { DocumentKind, DocumentStatus, Prisma } from '@prisma/client';
+import type { DocumentKind, DocumentOrigin, DocumentStatus, Prisma } from '@prisma/client';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { QuotaService } from '../billing/quota.service';
@@ -33,9 +33,13 @@ import { EtaService } from '../eta/eta.service';
 import { branchAddressToIssuerAddress } from '../settings/branches/branches.service';
 import type { ArtifactStorage } from '../storage/storage.module';
 import {
+  normalizeLineTaxes,
   renderLocalInvoicePdf,
   type LocalInvoicePdfLocale,
 } from './local-invoice-pdf';
+import { assertDocumentMutable } from './documents-mutability';
+
+export { assertDocumentMutable } from './documents-mutability';
 
 /** Issuer identity/address is company-level, so it is fixed in Settings. */
 function isIssuerSettingsPath(path: string): boolean {
@@ -386,6 +390,7 @@ export class DocumentsService {
     id: string;
     kind: DocumentKind;
     status: DocumentStatus;
+    origin?: DocumentOrigin | string;
     branchId: string;
     currencyCode: string;
     exchangeRate: string | null;
@@ -431,6 +436,7 @@ export class DocumentsService {
       id: doc.id,
       kind: doc.kind,
       status: doc.status,
+      origin: doc.origin ?? 'LOCAL',
       branchId: doc.branchId,
       currencyCode: doc.currencyCode,
       exchangeRate: doc.exchangeRate,
@@ -470,34 +476,120 @@ export class DocumentsService {
     };
   }
 
-  list(tenantId: string, filters?: { status?: DocumentStatus; kind?: DocumentKind }) {
-    return this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.document.findMany({
-        where: {
-          ...(filters?.status ? { status: filters.status } : {}),
-          ...(filters?.kind ? { kind: filters.kind } : {}),
-        },
-        orderBy: { updatedAt: 'desc' },
+  list(
+    tenantId: string,
+    query: {
+      status?: DocumentStatus;
+      kind?: DocumentKind;
+      from?: string;
+      to?: string;
+      receiver?: string;
+      q?: string;
+      cursor?: string;
+      limit?: number;
+      sortBy?:
+        | 'issueDateTime'
+        | 'totalAmount'
+        | 'internalId'
+        | 'receiverName'
+        | 'updatedAt';
+      sortDir?: 'asc' | 'desc';
+    } = {},
+  ) {
+    const take = Math.min(Math.max(query.limit ?? 50, 1), 100);
+    const where: Prisma.DocumentWhereInput = { tenantId };
+
+    if (query.status) where.status = query.status;
+    if (query.kind) where.kind = query.kind;
+    if (query.from || query.to) {
+      where.issueDateTime = {};
+      if (query.from) where.issueDateTime.gte = new Date(query.from);
+      if (query.to) where.issueDateTime.lte = new Date(query.to);
+    }
+    if (query.receiver?.trim()) {
+      where.receiverName = {
+        contains: query.receiver.trim(),
+        mode: 'insensitive',
+      };
+    }
+    if (query.q?.trim()) {
+      const q = query.q.trim();
+      where.OR = [
+        { internalId: { contains: q, mode: 'insensitive' } },
+        { receiverName: { contains: q, mode: 'insensitive' } },
+        { receiverId: { contains: q, mode: 'insensitive' } },
+        { etaUuid: { contains: q, mode: 'insensitive' } },
+        { etaLongId: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+
+    const sortBy = query.sortBy ?? 'issueDateTime';
+    const sortDir = query.sortDir === 'asc' ? 'asc' : 'desc';
+    const orderBy: Prisma.DocumentOrderByWithRelationInput[] = [
+      { [sortBy]: sortDir },
+      { updatedAt: 'desc' },
+    ];
+
+    return this.tenantPrisma.withTenant(tenantId, async (tx) => {
+      const rows = await tx.document.findMany({
+        where,
+        orderBy,
+        take: take + 1,
+        ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
         select: {
           id: true,
           kind: true,
           status: true,
+          origin: true,
           internalId: true,
           issueDateTime: true,
           currencyCode: true,
           totalAmount: true,
+          receiverName: true,
+          receiverId: true,
           updatedAt: true,
           needsAttention: true,
           needsAttentionReason: true,
           submissionUuid: true,
           etaUuid: true,
+          etaLongId: true,
           etaStatus: true,
           etaStatusUpdatedAt: true,
           submitInFlight: true,
           submitCooldownUntil: true,
         },
-      }),
-    );
+      });
+
+      const hasMore = rows.length > take;
+      const page = hasMore ? rows.slice(0, take) : rows;
+      const items = page.map((doc) => ({
+        id: doc.id,
+        kind: doc.kind,
+        status: doc.status,
+        origin: doc.origin,
+        internalId: doc.internalId,
+        issueDateTime: doc.issueDateTime.toISOString(),
+        currencyCode: doc.currencyCode,
+        totalAmount: doc.totalAmount,
+        receiverName: doc.receiverName,
+        receiverId: doc.receiverId,
+        updatedAt: doc.updatedAt.toISOString(),
+        needsAttention: doc.needsAttention,
+        needsAttentionReason: doc.needsAttentionReason,
+        submissionUuid: doc.submissionUuid,
+        etaUuid: doc.etaUuid,
+        etaLongId: doc.etaLongId,
+        etaStatus: doc.etaStatus,
+        etaStatusUpdatedAt: doc.etaStatusUpdatedAt?.toISOString() ?? null,
+        submitInFlight: doc.submitInFlight,
+        submitCooldownUntil: doc.submitCooldownUntil?.toISOString() ?? null,
+      }));
+
+      return {
+        items,
+        nextCursor: hasMore ? items[items.length - 1]?.id ?? null : null,
+      };
+    });
   }
 
   async get(tenantId: string, id: string) {
@@ -642,6 +734,7 @@ export class DocumentsService {
     const updated = await this.tenantPrisma.withTenant(tenantId, async (tx) => {
       const existing = await tx.document.findFirst({ where: { id, tenantId } });
       if (!existing) throw new NotFoundException('Document not found');
+      assertDocumentMutable(existing.origin);
       if (existing.version !== dto.version) {
         throw new ConflictException('Stale version');
       }
@@ -734,6 +827,7 @@ export class DocumentsService {
     await this.tenantPrisma.withTenant(tenantId, async (tx) => {
       const existing = await tx.document.findFirst({ where: { id, tenantId } });
       if (!existing) throw new NotFoundException('Document not found');
+      assertDocumentMutable(existing.origin);
       await tx.document.delete({ where: { id } });
     });
     await this.audit.write({
@@ -823,23 +917,36 @@ export class DocumentsService {
       taxpayerActivityCode: String(payload.taxpayerActivityCode ?? ''),
       issuer: (payload.issuer as LocalInvoiceParty) ?? {},
       receiver: (payload.receiver as LocalInvoiceParty) ?? null,
-      lines: (detail.lines as Array<Record<string, unknown>>).map((l) => ({
-        description: String(l.description ?? ''),
-        itemType: String(l.itemType ?? ''),
-        itemCode: String(l.itemCode ?? ''),
-        unitType: String(l.unitType ?? ''),
-        quantity: String(l.quantity ?? ''),
-        unitPrice: String(l.unitPrice ?? ''),
-        discountAmount: String(l.discountAmount ?? '0'),
-        taxes: Array.isArray(l.taxes)
-          ? (l.taxes as Array<Record<string, unknown>>).map((t) => ({
-              taxType: String(t.taxType ?? ''),
-              subType: String(t.subType ?? ''),
-              rate: String(t.rate ?? ''),
-              amount: t.amount != null ? String(t.amount) : undefined,
-            }))
-          : [],
-      })),
+      lines: (detail.lines as Array<Record<string, unknown>>).map((l) => {
+        const fromRelation = Array.isArray(l.taxes) ? l.taxes : [];
+        const payloadLines = Array.isArray(
+          (payload as { invoiceLines?: unknown }).invoiceLines,
+        )
+          ? ((payload as { invoiceLines: Array<Record<string, unknown>> })
+              .invoiceLines)
+          : [];
+        const lineNo = Number(l.lineNumber ?? 0);
+        const payloadLine =
+          payloadLines.find(
+            (pl) => Number(pl.lineNumber ?? pl.LineNumber ?? 0) === lineNo,
+          ) ?? payloadLines[Math.max(0, lineNo - 1)];
+        const taxes =
+          fromRelation.length > 0
+            ? fromRelation
+            : (payloadLine?.taxableItems ??
+              payloadLine?.TaxableItems ??
+              []);
+        return {
+          description: String(l.description ?? ''),
+          itemType: String(l.itemType ?? ''),
+          itemCode: String(l.itemCode ?? ''),
+          unitType: String(l.unitType ?? ''),
+          quantity: String(l.quantity ?? ''),
+          unitPrice: String(l.unitPrice ?? ''),
+          discountAmount: String(l.discountAmount ?? '0'),
+          taxes: normalizeLineTaxes(taxes),
+        };
+      }),
       totals: {
         totalSalesAmount: String(detail.totals.totalSalesAmount),
         totalDiscountAmount: String(detail.totals.totalDiscountAmount),
@@ -891,12 +998,7 @@ export class DocumentsService {
           quantity: String(l.quantity ?? ''),
           unitPrice: String(unitValue.amountEGP ?? unitValue.amountSold ?? '0'),
           discountAmount: String(discount.amount ?? '0'),
-          taxes: taxes.map((t) => ({
-            taxType: String(t.taxType ?? ''),
-            subType: String(t.subType ?? ''),
-            rate: String(t.rate ?? ''),
-            amount: t.amount != null ? String(t.amount) : undefined,
-          })),
+          taxes: normalizeLineTaxes(taxes),
         };
       }),
       totals: {
@@ -936,6 +1038,7 @@ export class DocumentsService {
 
   async markReady(tenantId: string, actorUserId: string, id: string) {
     const detail = await this.get(tenantId, id);
+    assertDocumentMutable(detail.origin);
     const result = await this.runValidation(tenantId, detail);
     if (!result.ok) {
       await this.audit.write({
@@ -988,6 +1091,7 @@ export class DocumentsService {
         },
       });
       if (!existing) throw new NotFoundException('Document not found');
+      assertDocumentMutable(existing.origin);
 
       if (
         !DocumentsService.RECALCULABLE_STATUSES.includes(existing.status) ||

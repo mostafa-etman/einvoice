@@ -249,6 +249,11 @@ export class SubmissionsService implements OnModuleDestroy {
       }
 
       for (const doc of docs) {
+        if (doc.origin === 'ETA_SYNC') {
+          throw new BadRequestException(
+            `Document ${doc.internalId} was imported from ETA and cannot be re-submitted`,
+          );
+        }
         if (doc.status !== 'SIGNED') {
           throw new BadRequestException(
             `Document ${doc.internalId} must be SIGNED to submit (status: ${doc.status})`,

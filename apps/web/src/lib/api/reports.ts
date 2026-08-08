@@ -11,7 +11,8 @@ export type ReportId =
   | 'P3'
   | 'C1'
   | 'C2'
-  | 'C3';
+  | 'C3'
+  | 'C4';
 
 export type ReportFiltersInput = {
   from: string;
@@ -24,6 +25,7 @@ export type ReportFiltersInput = {
   grain?: 'day' | 'month';
   perBranch?: boolean;
   limit?: number;
+  taxType?: string;
 };
 
 export type ReportPayload = {
@@ -35,6 +37,12 @@ export type ReportPayload = {
   chart?: Record<string, unknown>;
   vat?: unknown;
   total?: Record<string, unknown>;
+  taxTypes?: string[];
+  sections?: {
+    output?: Array<Record<string, unknown>>;
+    input?: Array<Record<string, unknown>>;
+    withholding?: Array<Record<string, unknown>>;
+  };
 };
 
 export const REPORT_CATALOG: Array<{
@@ -51,6 +59,7 @@ export const REPORT_CATALOG: Array<{
   { id: 'C1', group: 'combined' },
   { id: 'C2', group: 'combined' },
   { id: 'C3', group: 'combined' },
+  { id: 'C4', group: 'combined' },
 ];
 
 function qs(params: ReportFiltersInput): string {
@@ -65,6 +74,7 @@ function qs(params: ReportFiltersInput): string {
   if (params.grain) q.set('grain', params.grain);
   if (params.perBranch) q.set('perBranch', 'true');
   if (params.limit) q.set('limit', String(params.limit));
+  if (params.taxType) q.set('taxType', params.taxType);
   return q.toString();
 }
 

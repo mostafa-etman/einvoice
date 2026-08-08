@@ -56,6 +56,8 @@ const envSchema = z.object({
   PACKAGE_STALL_HOURS: z.coerce.number().int().positive().default(24),
   SYNC_BACKOFF_INITIAL_MS: z.coerce.number().int().positive().default(1000),
   SYNC_BACKOFF_MAX_MS: z.coerce.number().int().positive().default(60_000),
+  /** Delay between sequential ETA calls during sales/purchases sync (ms). */
+  ETA_SYNC_REQUEST_DELAY_MS: z.coerce.number().int().nonnegative().default(250),
   USAGE_METERING_TIMEZONE: z.string().default('Africa/Cairo'),
   USAGE_EXPORT_TTL_DAYS: z.coerce.number().int().positive().default(14),
   USAGE_ROLLUP_INTERVAL_MS: z.coerce

@@ -4,12 +4,20 @@ import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { checkLateSubmission } from '@einvoice/eta-core';
-import { deleteDocument, listDocuments } from '@/lib/api/documents';
+import { ApiError } from '@/lib/api/client';
+import {
+  deleteDocument,
+  downloadLocalPrintout,
+  latestSalesSync,
+  listDocuments,
+  resetSalesSync,
+  syncSales,
+  type DocumentListItem,
+} from '@/lib/api/documents';
 import {
   cancelDocument,
   cancelDocumentsSelected,
   createSubmission,
-  downloadDocumentEtaSource,
   downloadDocumentPrintout,
   refreshDocumentStatus,
   refreshDocumentsStatus,
@@ -17,23 +25,15 @@ import {
   type BatchSubmitResult,
   type StatusRefreshBatchResult,
 } from '@/lib/api/submissions';
-import { ApiError } from '@/lib/api/client';
+import { LocalPdfPreviewModal } from '@/components/local-pdf-preview-modal';
 
-type DocRow = {
-  id: string;
-  kind: string;
-  status: string;
-  internalId: string;
-  totalAmount: string;
-  issueDateTime?: string | null;
-  needsAttention?: boolean;
-  etaUuid?: string | null;
-  etaStatus?: string | null;
-  etaStatusUpdatedAt?: string | null;
-  submissionUuid?: string | null;
-  submitInFlight?: boolean;
-  submitCooldownUntil?: string | null;
-};
+type DocRow = DocumentListItem;
+
+type SortBy =
+  | 'issueDateTime'
+  | 'totalAmount'
+  | 'internalId'
+  | 'receiverName';
 
 type CancelBatchResult = {
   requested: number;
@@ -49,20 +49,19 @@ type CancelBatchResult = {
   }>;
 };
 
-const AUTO_POLL_MS = 60_000;
+const AUTO_POLL_MS = 5_000;
+const PAGE_SIZE = 50;
 
 function isSigned(status: string) {
   return status === 'SIGNED';
 }
 
 function isPendingEta(status: string, etaUuid?: string | null) {
-  return status === 'SUBMITTED' && Boolean(etaUuid);
+  return status === 'SUBMITTED' || (Boolean(etaUuid) && status === 'SUBMITTED');
 }
 
 function canCancel(status: string, etaUuid?: string | null) {
-  return (
-    Boolean(etaUuid) && (status === 'VALID' || status === 'SUBMITTED')
-  );
+  return Boolean(etaUuid) && (status === 'VALID' || status === 'SUBMITTED');
 }
 
 function canDownloadEta(status: string, etaUuid?: string | null) {
@@ -76,14 +75,46 @@ function canDownloadEta(status: string, etaUuid?: string | null) {
   );
 }
 
-function formatCheckedAt(
-  iso: string | null | undefined,
-  locale: string,
-): string | null {
-  if (!iso) return null;
+function formatIssueDate(iso: string | null | undefined): string {
+  if (!iso) return '—';
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleString(locale);
+  if (Number.isNaN(d.getTime())) return '—';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function formatAmount(value: string | null | undefined): string {
+  if (value == null || value === '') return '—';
+  const n = Number(value);
+  if (Number.isNaN(n)) return value;
+  return n.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function statusBadgeClass(status: string): string {
+  switch (status) {
+    case 'VALID':
+      return 'bg-green-100 text-green-900';
+    case 'INVALID':
+    case 'REJECTED':
+    case 'CANCELLED':
+      return 'bg-red-100 text-red-900';
+    case 'SUBMITTED':
+      return 'bg-blue-100 text-blue-900';
+    case 'SIGNED':
+      return 'bg-emerald-100 text-emerald-900';
+    case 'DRAFT':
+      return 'bg-zinc-100 text-zinc-800';
+    case 'READY':
+    case 'PENDING_SIGNATURE':
+      return 'bg-amber-100 text-amber-900';
+    default:
+      return 'bg-zinc-100 text-zinc-800';
+  }
 }
 
 export default function DocumentsPage() {
@@ -92,52 +123,92 @@ export default function DocumentsPage() {
   const [items, setItems] = useState<DocRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [toastTone, setToastTone] = useState<'ok' | 'err' | 'info'>('info');
   const [busy, setBusy] = useState(false);
+  const [salesSyncing, setSalesSyncing] = useState(false);
+  const [showSalesSyncReset, setShowSalesSyncReset] = useState(false);
+  const [syncFrom, setSyncFrom] = useState(() => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - 90);
+    return d.toISOString().slice(0, 10);
+  });
+  const [syncTo, setSyncTo] = useState(() =>
+    new Date().toISOString().slice(0, 10),
+  );
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [kindFilter, setKindFilter] = useState<string>('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [receiver, setReceiver] = useState('');
+  const [q, setQ] = useState('');
+  const [sortBy, setSortBy] = useState<SortBy>('issueDateTime');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [previewId, setPreviewId] = useState<string | null>(null);
   const [lastBatch, setLastBatch] = useState<BatchSubmitResult | null>(null);
   const [lastRefresh, setLastRefresh] = useState<StatusRefreshBatchResult | null>(
     null,
   );
   const [lastCancel, setLastCancel] = useState<CancelBatchResult | null>(null);
 
+  const queryParams = useCallback(
+    (cursor?: string) => ({
+      ...(statusFilter ? { status: statusFilter } : {}),
+      ...(kindFilter ? { kind: kindFilter } : {}),
+      from: from ? `${from}T00:00:00.000Z` : undefined,
+      to: to ? `${to}T23:59:59.999Z` : undefined,
+      receiver: receiver.trim() || undefined,
+      q: q.trim() || undefined,
+      sortBy,
+      sortDir,
+      limit: PAGE_SIZE,
+      cursor,
+    }),
+    [statusFilter, kindFilter, from, to, receiver, q, sortBy, sortDir],
+  );
+
+  const mapItems = (rows: DocumentListItem[]): DocRow[] => rows;
+
   const reload = useCallback(async () => {
     try {
-      const res = await listDocuments({
-        ...(statusFilter ? { status: statusFilter } : {}),
-        ...(kindFilter ? { kind: kindFilter } : {}),
-      });
-      setItems(
-        (res.items as Array<Record<string, unknown>>).map((d) => ({
-          id: String(d.id),
-          kind: String(d.kind),
-          status: String(d.status),
-          internalId: String(d.internalId),
-          totalAmount: String(d.totalAmount ?? ''),
-          issueDateTime: d.issueDateTime ? String(d.issueDateTime) : null,
-          needsAttention: Boolean(d.needsAttention),
-          etaUuid: (d.etaUuid as string | null) ?? null,
-          etaStatus: (d.etaStatus as string | null) ?? null,
-          etaStatusUpdatedAt: d.etaStatusUpdatedAt
-            ? String(d.etaStatusUpdatedAt)
-            : null,
-          submissionUuid: (d.submissionUuid as string | null) ?? null,
-          submitInFlight: Boolean(d.submitInFlight),
-          submitCooldownUntil: d.submitCooldownUntil
-            ? String(d.submitCooldownUntil)
-            : null,
-        })),
-      );
+      const res = await listDocuments(queryParams());
+      setItems(mapItems(res.items));
+      setNextCursor(res.nextCursor);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : t('forbidden'));
     }
-  }, [kindFilter, statusFilter, t]);
+  }, [queryParams, t]);
+
+  const loadMore = async () => {
+    if (!nextCursor) return;
+    setLoadingMore(true);
+    try {
+      const res = await listDocuments(queryParams(nextCursor));
+      setItems((prev) => [...prev, ...mapItems(res.items)]);
+      setNextCursor(res.nextCursor);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('forbidden'));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    latestSalesSync()
+      .then((run) => {
+        if (run.status === 'PENDING' || run.status === 'RUNNING') {
+          setShowSalesSyncReset(true);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
 
   // Soft background poll for SUBMITTED docs while the list is open.
   useEffect(() => {
@@ -183,9 +254,83 @@ export default function DocumentsPage() {
     });
   };
 
-  const showToast = (message: string) => {
+  const showToast = (message: string, tone: 'ok' | 'err' | 'info' = 'info') => {
     setToast(message);
-    window.setTimeout(() => setToast(null), 8000);
+    setToastTone(tone);
+    window.setTimeout(() => setToast(null), 12000);
+  };
+
+  const runSalesSync = async () => {
+    setSalesSyncing(true);
+    setError(null);
+    try {
+      await syncSales({
+        from: syncFrom ? `${syncFrom}T00:00:00.000Z` : undefined,
+        to: syncTo ? `${syncTo}T23:59:59.999Z` : undefined,
+      });
+      setShowSalesSyncReset(true);
+      for (let i = 0; i < 90; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const run = await latestSalesSync();
+        if (run.status === 'SUCCEEDED') {
+          setShowSalesSyncReset(false);
+          showToast(
+            t('salesSyncOk', {
+              newCount: run.newCount,
+              updatedCount: run.updatedCount,
+            }),
+            'ok',
+          );
+          await reload();
+          return;
+        }
+        if (run.status === 'FAILED') {
+          setShowSalesSyncReset(false);
+          const msg = run.errorSummary || t('salesSyncFailed', { message: '—' });
+          showToast(t('salesSyncFailed', { message: msg }), 'err');
+          setError(msg);
+          return;
+        }
+      }
+      showToast(t('salesSyncFailed', { message: 'timeout' }), 'err');
+      setShowSalesSyncReset(true);
+    } catch (e) {
+      const alreadyRunning =
+        e instanceof ApiError &&
+        e.status === 409 &&
+        /already running|in progress/i.test(e.message);
+      if (alreadyRunning) {
+        setShowSalesSyncReset(true);
+        showToast(t('salesSyncAlreadyRunning'), 'err');
+        setError(t('salesSyncAlreadyRunning'));
+      } else {
+        const msg =
+          e instanceof Error ? e.message : t('salesSyncFailed', { message: '—' });
+        showToast(t('salesSyncFailed', { message: msg }), 'err');
+        setError(msg);
+      }
+    } finally {
+      setSalesSyncing(false);
+    }
+  };
+
+  const runResetSalesSync = async () => {
+    setSalesSyncing(true);
+    setError(null);
+    try {
+      await resetSalesSync();
+      setShowSalesSyncReset(false);
+      showToast(t('salesSyncResetOk'), 'ok');
+    } catch (e) {
+      const msg =
+        e instanceof Error
+          ? e.message
+          : t('salesSyncResetFailed', { message: '—' });
+      showToast(t('salesSyncResetFailed', { message: msg }), 'err');
+      setError(msg);
+    } finally {
+      setSalesSyncing(false);
+    }
   };
 
   const confirmLateIfNeeded = (rows: DocRow[]) => {
@@ -226,6 +371,7 @@ export default function DocumentsPage() {
           skipped: result.skipped,
           failed: result.failed,
         }) + lateNote,
+        result.failed > 0 ? 'err' : result.sent > 0 ? 'ok' : 'info',
       );
       setSelected(new Set());
       await reload();
@@ -358,19 +504,6 @@ export default function DocumentsPage() {
     }
   };
 
-  const runDownloadSource = async (id: string) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const { blob, filename } = await downloadDocumentEtaSource(id);
-      triggerBrowserDownload(blob, filename);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t('downloadFailed'));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const runCancelOne = async (id: string) => {
     const reason = window.prompt(t('cancelReasonPrompt')) ?? '';
     if (!reason.trim()) {
@@ -390,51 +523,180 @@ export default function DocumentsPage() {
     }
   };
 
+  const runSubmitOne = async (id: string) => {
+    const row = items.find((d) => d.id === id);
+    if (!row || !isSigned(row.status) || row.origin === 'ETA_SYNC') return;
+    if (!confirmLateIfNeeded([row])) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await createSubmission([id]);
+      setLastBatch(result);
+      showToast(
+        t('batchSendSummary', {
+          sent: result.sent,
+          skipped: result.skipped,
+          failed: result.failed,
+        }),
+        result.failed > 0 ? 'err' : result.sent > 0 ? 'ok' : 'info',
+      );
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('submitFailed'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const kindLabel = (kind: string) => {
+    switch (kind) {
+      case 'INVOICE':
+        return t('kindInvoice');
+      case 'CREDIT_NOTE':
+        return t('kindCreditNote');
+      case 'DEBIT_NOTE':
+        return t('kindDebitNote');
+      case 'EXPORT_INVOICE':
+        return t('kindExportInvoice');
+      case 'EXPORT_CREDIT_NOTE':
+        return t('kindExportCreditNote');
+      case 'EXPORT_DEBIT_NOTE':
+        return t('kindExportDebitNote');
+      default:
+        return kind;
+    }
+  };
+
+  const statusLabel = (status: string) => {
+    switch (status) {
+      case 'DRAFT':
+        return t('statusDraft');
+      case 'READY':
+        return t('statusReady');
+      case 'PENDING_SIGNATURE':
+        return t('statusPendingSignature');
+      case 'SIGNED':
+        return t('statusSigned');
+      case 'SUBMITTED':
+        return t('statusSubmitted');
+      case 'VALID':
+        return t('statusValid');
+      case 'INVALID':
+        return t('statusInvalid');
+      case 'CANCELLED':
+        return t('statusCancelled');
+      case 'REJECTED':
+        return t('statusRejected');
+      default:
+        return status;
+    }
+  };
+
+  const toggleSort = (col: SortBy) => {
+    if (sortBy === col) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(col);
+      setSortDir(
+        col === 'issueDateTime' || col === 'totalAmount' ? 'desc' : 'asc',
+      );
+    }
+    setSelected(new Set());
+  };
+
+  const sortIndicator = (col: SortBy) => {
+    if (sortBy !== col) return '';
+    return sortDir === 'asc' ? ' ↑' : ' ↓';
+  };
+
+  const thClass =
+    'whitespace-nowrap border-b border-border px-token-sm py-token-sm text-start text-token-xs font-medium text-foreground/70';
+  const tdClass = 'border-b border-border px-token-sm py-token-sm text-token-sm';
+
   return (
     <div className="space-y-token-lg">
       <div className="flex flex-wrap items-center justify-between gap-token-md">
         <h1 className="font-display text-token-2xl text-brand">{t('title')}</h1>
-        <Link
-          href={`/${locale}/documents/new`}
-          className="rounded bg-brand px-token-md py-token-sm text-token-sm text-white"
-        >
-          {t('new')}
-        </Link>
+        <div className="flex flex-wrap items-end gap-token-sm">
+          <label className="block text-token-xs">
+            {t('salesSyncFrom')}
+            <input
+              type="date"
+              className="mt-1 block border border-border bg-background px-2 py-1"
+              value={syncFrom}
+              onChange={(e) => setSyncFrom(e.target.value)}
+              dir="ltr"
+            />
+          </label>
+          <label className="block text-token-xs">
+            {t('salesSyncTo')}
+            <input
+              type="date"
+              className="mt-1 block border border-border bg-background px-2 py-1"
+              value={syncTo}
+              onChange={(e) => setSyncTo(e.target.value)}
+              dir="ltr"
+            />
+          </label>
+          {showSalesSyncReset ? (
+            <button
+              type="button"
+              disabled={salesSyncing || busy}
+              className="rounded border border-danger/50 px-token-md py-token-sm text-token-sm text-danger disabled:opacity-50"
+              onClick={() => void runResetSalesSync()}
+            >
+              {t('salesSyncReset')}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            disabled={salesSyncing || busy}
+            className="rounded border border-brand px-token-md py-token-sm text-token-sm text-brand disabled:opacity-50"
+            onClick={() => void runSalesSync()}
+          >
+            {salesSyncing ? t('salesSyncing') : t('salesSync')}
+          </button>
+          <Link
+            href={`/${locale}/documents/new`}
+            className="rounded bg-brand px-token-md py-token-sm text-token-sm text-white"
+          >
+            {t('new')}
+          </Link>
+        </div>
       </div>
+      <p className="text-token-xs text-foreground/60">{t('salesSyncRangeHint')}</p>
 
-      <div className="flex flex-wrap items-end gap-token-sm">
-        <label className="block text-token-sm">
-          {t('status')}
-          <select
-            className="mt-token-xs block rounded border border-border bg-background px-token-sm py-token-xs"
-            value={statusFilter}
+      <div className="grid grid-cols-2 gap-token-sm md:grid-cols-3 lg:grid-cols-6">
+        <label className="block text-token-xs">
+          {t('filterFrom')}
+          <input
+            type="date"
+            className="mt-1 w-full border border-border bg-background px-2 py-1"
+            value={from}
             onChange={(e) => {
-              setStatusFilter(e.target.value);
+              setFrom(e.target.value);
               setSelected(new Set());
             }}
-          >
-            <option value="">{t('filterAll')}</option>
-            {[
-              'DRAFT',
-              'READY',
-              'PENDING_SIGNATURE',
-              'SIGNED',
-              'SUBMITTED',
-              'VALID',
-              'INVALID',
-              'CANCELLED',
-              'REJECTED',
-            ].map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
+            dir="ltr"
+          />
         </label>
-        <label className="block text-token-sm">
-          {t('kind')}
+        <label className="block text-token-xs">
+          {t('filterTo')}
+          <input
+            type="date"
+            className="mt-1 w-full border border-border bg-background px-2 py-1"
+            value={to}
+            onChange={(e) => {
+              setTo(e.target.value);
+              setSelected(new Set());
+            }}
+            dir="ltr"
+          />
+        </label>
+        <label className="block text-token-xs">
+          {t('filterKind')}
           <select
-            className="mt-token-xs block rounded border border-border bg-background px-token-sm py-token-xs"
+            className="mt-1 w-full border border-border bg-background px-2 py-1"
             value={kindFilter}
             onChange={(e) => {
               setKindFilter(e.target.value);
@@ -442,19 +704,75 @@ export default function DocumentsPage() {
             }}
           >
             <option value="">{t('filterAll')}</option>
-            {[
-              'INVOICE',
-              'CREDIT_NOTE',
-              'DEBIT_NOTE',
-              'EXPORT_INVOICE',
-              'EXPORT_CREDIT_NOTE',
-              'EXPORT_DEBIT_NOTE',
-            ].map((k) => (
+            {(
+              [
+                'INVOICE',
+                'CREDIT_NOTE',
+                'DEBIT_NOTE',
+                'EXPORT_INVOICE',
+                'EXPORT_CREDIT_NOTE',
+                'EXPORT_DEBIT_NOTE',
+              ] as const
+            ).map((k) => (
               <option key={k} value={k}>
-                {k}
+                {kindLabel(k)}
               </option>
             ))}
           </select>
+        </label>
+        <label className="block text-token-xs">
+          {t('filterStatus')}
+          <select
+            className="mt-1 w-full border border-border bg-background px-2 py-1"
+            value={statusFilter}
+            onChange={(e) => {
+              setStatusFilter(e.target.value);
+              setSelected(new Set());
+            }}
+          >
+            <option value="">{t('filterAll')}</option>
+            {(
+              [
+                'DRAFT',
+                'READY',
+                'PENDING_SIGNATURE',
+                'SIGNED',
+                'SUBMITTED',
+                'VALID',
+                'INVALID',
+                'CANCELLED',
+                'REJECTED',
+              ] as const
+            ).map((s) => (
+              <option key={s} value={s}>
+                {statusLabel(s)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-token-xs">
+          {t('filterReceiver')}
+          <input
+            className="mt-1 w-full border border-border bg-background px-2 py-1"
+            value={receiver}
+            onChange={(e) => {
+              setReceiver(e.target.value);
+              setSelected(new Set());
+            }}
+            placeholder={t('filterReceiver')}
+          />
+        </label>
+        <label className="block text-token-xs">
+          {t('filterSearch')}
+          <input
+            className="mt-1 w-full border border-border bg-background px-2 py-1"
+            value={q}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setSelected(new Set());
+            }}
+            placeholder={t('filterSearch')}
+          />
         </label>
       </div>
 
@@ -516,13 +834,26 @@ export default function DocumentsPage() {
 
       {toast ? (
         <p
-          className="rounded border border-border bg-background px-token-md py-token-sm text-token-sm"
+          className={
+            toastTone === 'ok'
+              ? 'rounded border-2 border-green-600 bg-green-50 px-token-md py-token-md text-token-sm font-medium text-green-900'
+              : toastTone === 'err'
+                ? 'rounded border-2 border-danger bg-danger/10 px-token-md py-token-md text-token-sm font-medium text-danger'
+                : 'rounded border-2 border-brand bg-brand/10 px-token-md py-token-md text-token-sm font-medium'
+          }
           role="status"
         >
           {toast}
         </p>
       ) : null}
-      {error ? <p className="text-token-sm text-danger">{error}</p> : null}
+      {error ? (
+        <p
+          className="rounded border-2 border-danger bg-danger/10 px-token-md py-token-md text-token-sm font-medium text-danger"
+          role="alert"
+        >
+          {error}
+        </p>
+      ) : null}
 
       {lastBatch ? (
         <details className="rounded border border-border px-token-md py-token-sm text-token-sm">
@@ -601,116 +932,252 @@ export default function DocumentsPage() {
       {items.length === 0 ? (
         <p className="text-foreground/70">{t('empty')}</p>
       ) : (
-        <ul className="divide-y divide-border border border-border">
-          {items.map((doc) => {
-            const checkedAt = formatCheckedAt(doc.etaStatusUpdatedAt, locale);
-            return (
-              <li
-                key={doc.id}
-                className="flex flex-wrap items-center gap-token-md px-token-md py-token-sm"
-              >
-                <input
-                  type="checkbox"
-                  checked={selected.has(doc.id)}
-                  onChange={() => toggleOne(doc.id)}
-                  aria-label={t('selectRow', { internalId: doc.internalId })}
-                />
-                <Link
-                  href={`/${locale}/documents/${doc.id}`}
-                  className="font-medium text-brand hover:underline"
-                >
-                  {doc.internalId}
-                </Link>
-                <span className="text-token-sm text-foreground/70">{doc.kind}</span>
-                <span className="text-token-sm">
-                  {doc.status}
-                  {doc.etaStatus ? (
-                    <span className="text-foreground/60"> · {doc.etaStatus}</span>
-                  ) : null}
-                </span>
-                {doc.needsAttention ? (
-                  <span className="text-token-xs text-amber-800">
-                    {t('needsAttention')}
-                  </span>
-                ) : null}
-                {checkedAt ? (
-                  <span className="text-token-xs text-foreground/50">
-                    {t('lastChecked', { when: checkedAt })}
-                  </span>
-                ) : null}
-                <span className="ms-auto text-token-sm">{doc.totalAmount}</span>
-                {isPendingEta(doc.status, doc.etaUuid) ||
-                doc.status === 'VALID' ||
-                doc.status === 'INVALID' ? (
+        <div className="overflow-x-auto border border-border">
+          <table className="min-w-full border-collapse text-start">
+            <thead className="bg-background/80">
+              <tr>
+                <th className={thClass}>
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={toggleAll}
+                    aria-label={t('selectAllMatching')}
+                  />
+                </th>
+                <th className={thClass}>
                   <button
                     type="button"
-                    disabled={busy}
-                    className="text-token-sm text-brand disabled:opacity-50"
-                    onClick={() => void runRefreshOne(doc.id)}
+                    className="hover:text-brand"
+                    onClick={() => toggleSort('internalId')}
                   >
-                    {t('refreshStatus')}
+                    {t('colInvoice')}
+                    {sortIndicator('internalId')}
                   </button>
-                ) : null}
-                {canDownloadEta(doc.status, doc.etaUuid) ? (
-                  <>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      className="text-token-sm text-brand disabled:opacity-50"
-                      onClick={() => void runDownloadPrintout(doc.id)}
-                    >
-                      {t('downloadPrintout')}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      className="text-token-sm text-brand disabled:opacity-50"
-                      onClick={() => void runDownloadSource(doc.id)}
-                    >
-                      {t('downloadEtaSource')}
-                    </button>
-                  </>
-                ) : null}
-                {canCancel(doc.status, doc.etaUuid) ? (
+                </th>
+                <th className={thClass}>{t('colEtaId')}</th>
+                <th className={thClass}>{t('colType')}</th>
+                <th className={thClass}>
                   <button
                     type="button"
-                    disabled={busy}
-                    className="text-token-sm text-danger disabled:opacity-50"
-                    onClick={() => void runCancelOne(doc.id)}
+                    className="hover:text-brand"
+                    onClick={() => toggleSort('issueDateTime')}
                   >
-                    {t('cancelDocument')}
+                    {t('colIssueDate')}
+                    {sortIndicator('issueDateTime')}
                   </button>
-                ) : null}
-                {isSigned(doc.status) ? (
-                  <span className="text-token-xs text-foreground/50">
-                    {t('eligibleToSend')}
-                    {doc.issueDateTime &&
-                    checkLateSubmission(doc.issueDateTime).isLate
-                      ? ` · ${t('lateBadge')}`
-                      : ''}
-                  </span>
-                ) : null}
-                <button
-                  type="button"
-                  className="text-token-sm text-danger"
-                  disabled={busy}
-                  onClick={async () => {
-                    await deleteDocument(doc.id);
-                    setSelected((prev) => {
-                      const next = new Set(prev);
-                      next.delete(doc.id);
-                      return next;
-                    });
-                    await reload();
-                  }}
-                >
-                  {t('delete')}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+                </th>
+                <th className={thClass}>
+                  <button
+                    type="button"
+                    className="hover:text-brand"
+                    onClick={() => toggleSort('receiverName')}
+                  >
+                    {t('colReceiver')}
+                    {sortIndicator('receiverName')}
+                  </button>
+                </th>
+                <th className={thClass}>{t('colReceiverTax')}</th>
+                <th className={thClass}>
+                  <button
+                    type="button"
+                    className="hover:text-brand"
+                    onClick={() => toggleSort('totalAmount')}
+                  >
+                    {t('colAmount')}
+                    {sortIndicator('totalAmount')}
+                  </button>
+                </th>
+                <th className={thClass}>{t('colCurrency')}</th>
+                <th className={thClass}>{t('colStatus')}</th>
+                <th className={thClass}>{t('colSource')}</th>
+                <th className={thClass}>{t('colActions')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((doc) => (
+                <tr key={doc.id} className="hover:bg-brand/5">
+                  <td className={tdClass}>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(doc.id)}
+                      onChange={() => toggleOne(doc.id)}
+                      aria-label={t('selectRow', {
+                        internalId: doc.internalId,
+                      })}
+                    />
+                  </td>
+                  <td className={tdClass}>
+                    <Link
+                      href={`/${locale}/documents/${doc.id}`}
+                      className="font-medium text-brand hover:underline"
+                      dir="ltr"
+                    >
+                      {doc.internalId}
+                    </Link>
+                  </td>
+                  <td className={`${tdClass} max-w-[14rem]`}>
+                    <span
+                      className="block truncate font-mono text-token-xs"
+                      dir="ltr"
+                      title={doc.etaLongId || doc.etaUuid || undefined}
+                    >
+                      {doc.etaLongId || doc.etaUuid || '—'}
+                    </span>
+                  </td>
+                  <td className={tdClass}>{kindLabel(doc.kind)}</td>
+                  <td className={tdClass}>
+                    <span dir="ltr" className="tabular-nums">
+                      {formatIssueDate(doc.issueDateTime)}
+                    </span>
+                  </td>
+                  <td className={tdClass}>{doc.receiverName || '—'}</td>
+                  <td className={tdClass}>
+                    <span dir="ltr" className="tabular-nums">
+                      {doc.receiverId || '—'}
+                    </span>
+                  </td>
+                  <td className={tdClass}>
+                    <span dir="ltr" className="tabular-nums">
+                      {formatAmount(doc.totalAmount)}
+                    </span>
+                  </td>
+                  <td className={tdClass}>
+                    <span dir="ltr">{doc.currencyCode || '—'}</span>
+                  </td>
+                  <td className={tdClass}>
+                    <span
+                      className={`inline-block rounded px-token-xs text-token-xs ${statusBadgeClass(doc.status)}`}
+                    >
+                      {statusLabel(doc.status)}
+                    </span>
+                    {doc.needsAttention ? (
+                      <span className="ms-token-xs text-token-xs text-amber-800">
+                        {t('needsAttention')}
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className={tdClass}>
+                    {doc.origin === 'ETA_SYNC' ? (
+                      <span className="rounded bg-amber-100 px-token-xs text-token-xs text-amber-900">
+                        {t('importedBadge')}
+                      </span>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                  <td className={tdClass}>
+                    <div className="flex flex-wrap gap-token-xs">
+                      <Link
+                        href={`/${locale}/documents/${doc.id}`}
+                        className="text-token-xs text-brand hover:underline"
+                      >
+                        {t('view')}
+                      </Link>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        className="text-token-xs text-brand disabled:opacity-50"
+                        onClick={() => setPreviewId(doc.id)}
+                      >
+                        {t('previewPrint')}
+                      </button>
+                      {isSigned(doc.status) && doc.origin !== 'ETA_SYNC' ? (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          className="text-token-xs text-brand disabled:opacity-50"
+                          onClick={() => void runSubmitOne(doc.id)}
+                        >
+                          {t('submitOne')}
+                        </button>
+                      ) : null}
+                      {isPendingEta(doc.status, doc.etaUuid) ||
+                      doc.status === 'VALID' ||
+                      doc.status === 'INVALID' ? (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          className="text-token-xs text-brand disabled:opacity-50"
+                          onClick={() => void runRefreshOne(doc.id)}
+                        >
+                          {t('refreshStatus')}
+                        </button>
+                      ) : null}
+                      {canDownloadEta(doc.status, doc.etaUuid) ? (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          className="text-token-xs text-brand disabled:opacity-50"
+                          onClick={() => void runDownloadPrintout(doc.id)}
+                        >
+                          {t('downloadPrintout')}
+                        </button>
+                      ) : null}
+                      {canCancel(doc.status, doc.etaUuid) ? (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          className="text-token-xs text-danger disabled:opacity-50"
+                          onClick={() => void runCancelOne(doc.id)}
+                        >
+                          {t('cancelDocument')}
+                        </button>
+                      ) : null}
+                      {doc.origin !== 'ETA_SYNC' &&
+                      (doc.status === 'DRAFT' ||
+                        doc.status === 'READY' ||
+                        doc.status === 'SIGNED') ? (
+                        <button
+                          type="button"
+                          className="text-token-xs text-danger disabled:opacity-50"
+                          disabled={busy}
+                          onClick={async () => {
+                            await deleteDocument(doc.id);
+                            setSelected((prev) => {
+                              const next = new Set(prev);
+                              next.delete(doc.id);
+                              return next;
+                            });
+                            await reload();
+                          }}
+                        >
+                          {t('delete')}
+                        </button>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
+
+      {nextCursor ? (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            disabled={loadingMore}
+            onClick={() => void loadMore()}
+            className="rounded border border-border px-token-md py-token-sm text-token-sm disabled:opacity-50"
+          >
+            {loadingMore ? t('loading') : t('loadMore')}
+          </button>
+        </div>
+      ) : null}
+
+      <LocalPdfPreviewModal
+        open={Boolean(previewId)}
+        title={t('previewPrint')}
+        closeLabel={t('close')}
+        downloadLabel={t('downloadPdf')}
+        loadingLabel={t('previewLoading')}
+        errorFallback={t('downloadFailed')}
+        onClose={() => setPreviewId(null)}
+        loadPdf={() =>
+          downloadLocalPrintout(previewId!, locale === 'ar' ? 'ar' : 'en')
+        }
+      />
     </div>
   );
 }

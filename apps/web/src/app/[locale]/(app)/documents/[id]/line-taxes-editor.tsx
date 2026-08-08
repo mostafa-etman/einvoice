@@ -16,6 +16,7 @@ import {
 import type { useTranslations } from 'next-intl';
 import type { EtaCodeEntry } from '@/lib/api/eta-codes';
 import type { DocumentUpsert } from '@/lib/api/documents';
+import { catalogOptionLabel, type UiLocale } from '@/lib/eta-display';
 
 type Line = DocumentUpsert['lines'][number];
 type UiTaxMode = 'taxable' | 'zero_or_exempt' | 'none';
@@ -27,9 +28,8 @@ function toUiTaxMode(mode: LineTaxMode): UiTaxMode {
   return 'taxable';
 }
 
-function codeLabel(entry: EtaCodeEntry): string {
-  const name = entry.nameEn || entry.nameAr || '';
-  return name ? `${entry.code} — ${name}` : entry.code;
+function codeLabel(entry: EtaCodeEntry, locale: UiLocale): string {
+  return catalogOptionLabel(entry, locale);
 }
 
 function fieldClass() {
@@ -39,6 +39,7 @@ function fieldClass() {
 export type LineTaxesEditorProps = {
   line: Line;
   lineIndex: number;
+  locale: UiLocale;
   taxTypes: EtaCodeEntry[];
   taxSubtypes: EtaCodeEntry[];
   taxTypeOptions: EtaCodeEntry[];
@@ -56,6 +57,7 @@ export function LineTaxesEditor(props: LineTaxesEditorProps) {
   const {
     line,
     lineIndex: idx,
+    locale,
     taxSubtypes,
     taxTypeOptions,
     zeroRatedSubtypeOptions,
@@ -130,7 +132,7 @@ export function LineTaxesEditor(props: LineTaxesEditorProps) {
                       >
                         {taxTypeOptions.map((tt) => (
                           <option key={tt.code} value={tt.code}>
-                            {codeLabel(tt)}
+                            {codeLabel(tt, locale)}
                           </option>
                         ))}
                       </select>
@@ -153,7 +155,7 @@ export function LineTaxesEditor(props: LineTaxesEditorProps) {
                         ) : null}
                         {subtypeOptions.map((s) => (
                           <option key={s.code} value={s.code}>
-                            {codeLabel(s)}
+                            {codeLabel(s, locale)}
                           </option>
                         ))}
                       </select>
@@ -317,7 +319,7 @@ export function LineTaxesEditor(props: LineTaxesEditorProps) {
                 >
                   {options.map((s) => (
                     <option key={s.code} value={s.code}>
-                      {codeLabel(s)}
+                      {codeLabel(s, locale)}
                     </option>
                   ))}
                 </select>

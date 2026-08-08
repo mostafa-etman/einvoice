@@ -49,6 +49,13 @@ enum DocumentStatus {
   REJECTED
 }
 
+/// How the document entered the system (ETA-synced rows are read-only).
+enum DocumentOrigin {
+  LOCAL
+  FILE_IMPORT
+  ETA_SYNC
+}
+
 enum SyncConflictStatus {
   OPEN
   RESOLVED
@@ -286,6 +293,7 @@ model Tenant {
   receivedDocuments    ReceivedDocument[]
   receivedDocumentLines ReceivedDocumentLine[]
   receivedDocumentSyncRuns ReceivedDocumentSyncRun[]
+  issuedDocumentSyncRuns   IssuedDocumentSyncRun[]
   importJobs           ImportJob[]
   importRowResults     ImportRowResult[]
   exportJobs           ExportJob[]
@@ -656,6 +664,8 @@ model Document {
   tenantId               String         @map("tenant_id") @db.Uuid
   kind                   DocumentKind
   status                 DocumentStatus @default(DRAFT)
+  /// LOCAL = created here; FILE_IMPORT = CSV/XLSX; ETA_SYNC = pulled from ETA (read-only).
+  origin                 DocumentOrigin @default(LOCAL)
   branchId               String         @map("branch_id") @db.Uuid
   currencyCode           String         @map("currency_code")
   exchangeRate           String?        @map("exchange_rate")
@@ -736,10 +746,12 @@ model Document {
 
   @@unique([tenantId, internalId])
   @@unique([tenantId, clientIdempotencyKey])
+  @@unique([tenantId, etaUuid])
   @@index([tenantId])
   @@index([tenantId, status])
   @@index([tenantId, importJobId])
   @@index([tenantId, etaEnvironment])
+  @@index([tenantId, origin])
   @@map("documents")
 }
 
@@ -1142,6 +1154,29 @@ model ReceivedDocumentSyncRun {
   @@index([tenantId])
   @@index([tenantId, createdAt])
   @@map("received_document_sync_runs")
+}
+
+model IssuedDocumentSyncRun {
+  id                 String                @id @default(uuid()) @db.Uuid
+  tenantId           String                @map("tenant_id") @db.Uuid
+  trigger            ReceivedSyncTrigger
+  status             ReceivedSyncRunStatus @default(PENDING)
+  fetchedCount       Int                   @default(0) @map("fetched_count")
+  newCount           Int                   @default(0) @map("new_count")
+  updatedCount       Int                   @default(0) @map("updated_count")
+  skippedCount       Int                   @default(0) @map("skipped_count")
+  failedCount        Int                   @default(0) @map("failed_count")
+  errorSummary       String?               @map("error_summary")
+  startedAt          DateTime?             @map("started_at")
+  finishedAt         DateTime?             @map("finished_at")
+  triggeredByUserId  String?               @map("triggered_by_user_id") @db.Uuid
+  createdAt          DateTime              @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, createdAt])
+  @@map("issued_document_sync_runs")
 }
 
 model ImportJob {

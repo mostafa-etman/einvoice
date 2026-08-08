@@ -10,7 +10,8 @@ export type ReportId =
   | 'P3'
   | 'C1'
   | 'C2'
-  | 'C3';
+  | 'C3'
+  | 'C4';
 
 export const REPORT_IDS: ReportId[] = [
   'S1',
@@ -23,9 +24,10 @@ export const REPORT_IDS: ReportId[] = [
   'C1',
   'C2',
   'C3',
+  'C4',
 ];
 
-export const PDF_REPORT_IDS: ReportId[] = ['S1', 'P1', 'S4', 'P3', 'C1'];
+export const PDF_REPORT_IDS: ReportId[] = ['S1', 'P1', 'S4', 'P3', 'C1', 'C4'];
 
 export type ReportFilters = {
   from: string;
@@ -39,6 +41,8 @@ export type ReportFilters = {
   perBranch: boolean;
   limit: number;
   documentKinds?: string[];
+  /** Filter VAT return lines to one tax type (e.g. T1, T4). */
+  taxType?: string;
   rangeStart: Date;
   rangeEnd: Date;
 };
@@ -99,6 +103,9 @@ export function parseReportFilters(query: Record<string, unknown>): ReportFilter
     perBranch: query.perBranch === true || query.perBranch === 'true',
     limit,
     documentKinds,
+    taxType: query.taxType
+      ? String(query.taxType).trim().toUpperCase()
+      : undefined,
     rangeStart: start,
     rangeEnd: end,
   };

@@ -21,10 +21,20 @@ import {
 } from './report-netting';
 import {
   accumulateTaxRows,
-  parseTaxTotalsJson,
   splitVatBreakdown,
   type VatBreakdownRow,
 } from './report-vat';
+import {
+  VatReturnAccumulator,
+  availableTaxTypes,
+  sumVatReturn,
+} from './report-egyptian-vat-return';
+import {
+  extractIssuedDocumentTaxes,
+  extractReceivedDocumentTaxes,
+  toTaxLineIn,
+  toVatReturnLineIn,
+} from './report-tax-sources';
 
 type Tx = Prisma.TransactionClient;
 
@@ -36,6 +46,7 @@ type IssuedRow = {
   currencyCode: string;
   issueDateTime: Date;
   totalAmount: string;
+  netAmount: string;
   taxTotalsJson: Prisma.JsonValue;
   receiverId: string | null;
   receiverName: string | null;
@@ -44,7 +55,13 @@ type IssuedRow = {
     description: string;
     quantity: string;
     total: string;
-    taxes: Array<{ taxType: string; rate: string; amount: string }>;
+    netTotal?: string;
+    taxes: Array<{
+      taxType: string;
+      subType: string;
+      rate: string;
+      amount: string;
+    }>;
   }>;
 };
 
@@ -58,15 +75,19 @@ type ReceivedRow = {
   currency: string | null;
   dateTimeIssued: Date | null;
   totalAmount: string | null;
+  netAmount: string | null;
   issuerId: string | null;
   issuerName: string | null;
   rawSummaryJson: Prisma.JsonValue;
+  rawDetailsJson: Prisma.JsonValue | null;
   lines: Array<{
     itemCode: string | null;
     description: string | null;
     quantity: string | null;
     total: string | null;
+    netTotal?: string | null;
     taxesJson: Prisma.JsonValue;
+    rawJson: Prisma.JsonValue | null;
   }>;
 };
 
@@ -116,6 +137,8 @@ export class ReportsService {
         return this.salesVsPurchases(tx, f);
       case 'C3':
         return this.statusOverview(tx, f);
+      case 'C4':
+        return this.egyptianVatReturn(tx, f);
       default:
         return { reportId, filters: this.publicFilters(f), summary: {} };
     }
@@ -134,6 +157,7 @@ export class ReportsService {
       perBranch: f.perBranch,
       limit: f.limit,
       documentKinds: f.documentKinds ?? null,
+      taxType: f.taxType ?? null,
     };
   }
 
@@ -157,6 +181,7 @@ export class ReportsService {
         currencyCode: true,
         issueDateTime: true,
         totalAmount: true,
+        netAmount: true,
         taxTotalsJson: true,
         receiverId: true,
         receiverName: true,
@@ -166,7 +191,15 @@ export class ReportsService {
             description: true,
             quantity: true,
             total: true,
-            taxes: { select: { taxType: true, rate: true, amount: true } },
+            netTotal: true,
+            taxes: {
+              select: {
+                taxType: true,
+                subType: true,
+                rate: true,
+                amount: true,
+              },
+            },
           },
         },
       },
@@ -200,16 +233,20 @@ export class ReportsService {
         currency: true,
         dateTimeIssued: true,
         totalAmount: true,
+        netAmount: true,
         issuerId: true,
         issuerName: true,
         rawSummaryJson: true,
+        rawDetailsJson: true,
         lines: {
           select: {
             itemCode: true,
             description: true,
             quantity: true,
             total: true,
+            netTotal: true,
             taxesJson: true,
+            rawJson: true,
           },
         },
       },
@@ -343,14 +380,11 @@ export class ReportsService {
     const rows = new Map<string, VatBreakdownRow>();
     for (const d of docs) {
       const sign = issuedDocumentSign(d.kind);
-      const fromTotals = parseTaxTotalsJson(d.taxTotalsJson);
-      if (fromTotals.length) {
-        accumulateTaxRows(rows, fromTotals, sign);
-      } else {
-        for (const line of d.lines) {
-          accumulateTaxRows(rows, line.taxes, sign);
-        }
-      }
+      accumulateTaxRows(
+        rows,
+        toTaxLineIn(extractIssuedDocumentTaxes(d)),
+        sign,
+      );
     }
     return splitVatBreakdown(rows.values());
   }
@@ -359,17 +393,11 @@ export class ReportsService {
     const rows = new Map<string, VatBreakdownRow>();
     for (const d of docs) {
       const sign = receivedDocumentSign(d.kind, d.etaDocumentType);
-      const summaryTaxes = parseTaxTotalsJson(
-        (d.rawSummaryJson as { taxTotals?: unknown } | null)?.taxTotals ??
-          (d.rawSummaryJson as { TaxTotals?: unknown } | null)?.TaxTotals,
+      accumulateTaxRows(
+        rows,
+        toTaxLineIn(extractReceivedDocumentTaxes(d)),
+        sign,
       );
-      if (summaryTaxes.length) {
-        accumulateTaxRows(rows, summaryTaxes, sign);
-      } else {
-        for (const line of d.lines) {
-          accumulateTaxRows(rows, parseTaxTotalsJson(line.taxesJson), sign);
-        }
-      }
     }
     return splitVatBreakdown(rows.values());
   }
@@ -577,6 +605,128 @@ export class ReportsService {
           { name: 'outputVat', amount: outputVat },
           { name: 'inputVat', amount: inputVat },
           { name: 'netVat', amount: netVat },
+        ],
+      },
+    };
+  }
+
+  /**
+   * C4 — Egyptian VAT Return (إقرار القيمة المضافة).
+   * Period declaration layout: sales value + output tax, purchases + input tax,
+   * net VAT payable/refundable; T4 withholding shown separately (never in net).
+   */
+  private async egyptianVatReturn(tx: Tx, f: ReportFilters) {
+    const issued = await this.loadIssued(tx, f);
+    const received = await this.loadReceived(tx, f);
+    const acc = new VatReturnAccumulator();
+
+    let salesValue = '0.00';
+    let purchasesValue = '0.00';
+    for (const d of issued) {
+      const sign = issuedDocumentSign(d.kind);
+      const parts = moneyParts(sign, d.netAmount || d.totalAmount, false);
+      salesValue = add(salesValue, parts.signed);
+      acc.addTaxes(
+        'output',
+        toVatReturnLineIn(extractIssuedDocumentTaxes(d)),
+        sign,
+        d.netAmount || d.totalAmount,
+      );
+    }
+
+    for (const d of received) {
+      const sign = receivedDocumentSign(d.kind, d.etaDocumentType);
+      const parts = moneyParts(sign, d.netAmount || d.totalAmount || '0', false);
+      purchasesValue = add(purchasesValue, parts.signed);
+      acc.addTaxes(
+        'input',
+        toVatReturnLineIn(extractReceivedDocumentTaxes(d)),
+        sign,
+        d.netAmount || d.totalAmount,
+      );
+    }
+
+    const allRows = acc.rows();
+    const filtered = acc.rows(f.taxType);
+    const outputVat = sumVatReturn(
+      allRows,
+      (r) => r.side === 'output' && r.category === 'vat',
+    );
+    const inputVat = sumVatReturn(
+      allRows,
+      (r) => r.side === 'input' && r.category === 'vat',
+    );
+    const outputOther = sumVatReturn(
+      allRows,
+      (r) => r.side === 'output' && r.category === 'other',
+    );
+    const inputOther = sumVatReturn(
+      allRows,
+      (r) => r.side === 'input' && r.category === 'other',
+    );
+    const withholdingOut = sumVatReturn(
+      allRows,
+      (r) => r.side === 'output' && r.category === 'withholding',
+    );
+    const withholdingIn = sumVatReturn(
+      allRows,
+      (r) => r.side === 'input' && r.category === 'withholding',
+    );
+    const netVat = sub(outputVat.taxAmount, inputVat.taxAmount);
+    const position = this.positionLabel(netVat);
+
+    const outputRows = filtered.filter((r) => r.side === 'output');
+    const inputRows = filtered.filter((r) => r.side === 'input');
+    const withholdingRows = filtered.filter(
+      (r) => r.category === 'withholding',
+    );
+
+    return {
+      reportId: 'C4' as const,
+      filters: this.publicFilters(f),
+      summary: {
+        period: { from: f.from, to: f.to },
+        salesValue,
+        purchasesValue,
+        outputVat: outputVat.taxAmount,
+        outputVatTaxable: outputVat.taxableValue,
+        inputVat: inputVat.taxAmount,
+        inputVatTaxable: inputVat.taxableValue,
+        netVat,
+        position,
+        otherOutputTax: outputOther.taxAmount,
+        otherInputTax: inputOther.taxAmount,
+        withholdingOutput: withholdingOut.taxAmount,
+        withholdingInput: withholdingIn.taxAmount,
+        salesDocumentCount: issued.length,
+        purchasesDocumentCount: received.length,
+        taxTypeFilter: f.taxType ?? null,
+        disclaimer:
+          'Reporting aid only — verify figures with your accountant / ETA before filing.',
+      },
+      taxTypes: availableTaxTypes(allRows),
+      sections: {
+        output: outputRows,
+        input: inputRows,
+        withholding: withholdingRows,
+      },
+      rows: filtered.map((r) => ({
+        side: r.side,
+        taxType: r.taxType,
+        subType: r.subType,
+        rate: r.rate,
+        category: r.category,
+        taxableValue: r.taxableValue,
+        taxAmount: r.taxAmount,
+        documentCount: r.documentCount,
+      })),
+      chart: {
+        type: 'bar',
+        data: [
+          { name: 'outputVat', amount: outputVat.taxAmount },
+          { name: 'inputVat', amount: inputVat.taxAmount },
+          { name: 'netVat', amount: netVat },
+          { name: 'withholding', amount: withholdingOut.taxAmount },
         ],
       },
     };

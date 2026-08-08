@@ -3,26 +3,19 @@ import {
   ConflictException,
   Injectable,
   Logger,
-  OnModuleDestroy,
-  OnModuleInit,
 } from '@nestjs/common';
-import type { Prisma, ReceivedSyncTrigger } from '@prisma/client';
-import { loadEnv, shouldRunInProcessCrons } from '../config/env';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
-import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { EtaService } from '../eta/eta.service';
 import {
   buildEtaSearchWindows,
   EtaDocumentsSearchClient,
 } from '../eta/eta-documents-search.client';
-import { EtaDocumentsRecentClient } from '../eta/eta-documents-recent.client';
 import { EtaDocumentDetailsClient } from '../eta/eta-document-details.client';
 import {
-  mapDetailsLines,
-  mapEtaReceivedRow,
-} from './received-document.mapper';
-import { UsageEmitService } from '../analytics/usage-emit.service';
+  ETA_STATUS_TO_LOCAL,
+  mapEtaIssuedDetailsToImport,
+} from './issued-document-import.mapper';
 import {
   isSyncRunStale,
   SYNC_RESET_ERROR,
@@ -44,30 +37,25 @@ import {
 } from '../eta/eta-rate-limit';
 
 @Injectable()
-export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(PurchasesSyncService.name);
+export class SalesSyncService {
+  private readonly logger = new Logger(SalesSyncService.name);
   private readonly inFlight = new Set<string>();
-  private cronTimer: ReturnType<typeof setInterval> | null = null;
-  private readonly syncEnabled: boolean;
-  private readonly useRecent: boolean;
-  private readonly intervalMs: number;
   private testOverrides: {
     search?: EtaDocumentsSearchClient;
-    recent?: EtaDocumentsRecentClient;
     details?: EtaDocumentDetailsClient;
   } = {};
 
   constructor(
     private readonly tenantPrisma: TenantPrismaService,
-    private readonly prisma: PrismaService,
     private readonly eta: EtaService,
     private readonly audit: AuditService,
-    private readonly usageEmit: UsageEmitService,
-  ) {
-    const env = loadEnv();
-    this.syncEnabled = env.PURCHASES_SYNC_ENABLED;
-    this.useRecent = env.PURCHASES_SYNC_USE_RECENT;
-    this.intervalMs = env.PURCHASES_SYNC_INTERVAL_MS;
+  ) {}
+
+  setClientsForTests(opts: {
+    search?: EtaDocumentsSearchClient;
+    details?: EtaDocumentDetailsClient;
+  }) {
+    this.testOverrides = { ...this.testOverrides, ...opts };
   }
 
   private async clientsFor(tenantId: string) {
@@ -75,37 +63,9 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
     return {
       search:
         this.testOverrides.search ?? new EtaDocumentsSearchClient(base),
-      recent:
-        this.testOverrides.recent ?? new EtaDocumentsRecentClient(base),
       details:
         this.testOverrides.details ?? new EtaDocumentDetailsClient(base),
     };
-  }
-
-  onModuleInit() {
-    if (!this.syncEnabled) return;
-    if (!shouldRunInProcessCrons()) {
-      this.logger.log('Purchases cron skipped (APP_ROLE=api; worker owns crons)');
-      return;
-    }
-    this.logger.log(
-      `Purchases cron sync enabled every ${this.intervalMs}ms`,
-    );
-    this.cronTimer = setInterval(() => {
-      void this.runCronForAllTenants();
-    }, this.intervalMs);
-  }
-
-  onModuleDestroy() {
-    if (this.cronTimer) clearInterval(this.cronTimer);
-  }
-
-  setClientsForTests(opts: {
-    search?: EtaDocumentsSearchClient;
-    recent?: EtaDocumentsRecentClient;
-    details?: EtaDocumentDetailsClient;
-  }) {
-    this.testOverrides = { ...this.testOverrides, ...opts };
   }
 
   async startManualSync(
@@ -121,11 +81,11 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
     const released = await this.failOpenRuns(tenantId, SYNC_RESET_ERROR);
     this.inFlight.delete(tenantId);
     await this.audit.write({
-      action: 'purchases.sync.reset',
+      action: 'sales.sync.reset',
       outcome: 'success',
       actorUserId,
       tenantId,
-      resourceType: 'received_document_sync_run',
+      resourceType: 'issued_document_sync_run',
       metadata: { releasedCount: released },
     });
     return {
@@ -137,7 +97,7 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
   async latestSync(tenantId: string) {
     await this.expireStaleRuns(tenantId);
     const run = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.receivedDocumentSyncRun.findFirst({
+      tx.issuedDocumentSyncRun.findFirst({
         where: { tenantId },
         orderBy: { createdAt: 'desc' },
       }),
@@ -162,7 +122,7 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
 
   private serializeRun(run: {
     id: string;
-    trigger: ReceivedSyncTrigger;
+    trigger: string;
     status: string;
     fetchedCount: number;
     newCount: number;
@@ -188,9 +148,10 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  /** Mark stale PENDING/RUNNING rows FAILED so a new sync can start. */
   private async expireStaleRuns(tenantId: string): Promise<number> {
     const open = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.receivedDocumentSyncRun.findMany({
+      tx.issuedDocumentSyncRun.findMany({
         where: { tenantId, status: { in: ['PENDING', 'RUNNING'] } },
         select: {
           id: true,
@@ -203,7 +164,7 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
     const staleIds = open.filter((r) => isSyncRunStale(r)).map((r) => r.id);
     if (!staleIds.length) return 0;
     await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.receivedDocumentSyncRun.updateMany({
+      tx.issuedDocumentSyncRun.updateMany({
         where: { id: { in: staleIds } },
         data: {
           status: 'FAILED',
@@ -213,8 +174,9 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
       }),
     );
     this.logger.warn(
-      `Purchases sync stale lock released for ${tenantId}: ${staleIds.length} run(s)`,
+      `Sales sync stale lock released for ${tenantId}: ${staleIds.length} run(s)`,
     );
+    // If every open run was stale, clear memory lock (process may have died).
     if (staleIds.length === open.length) this.inFlight.delete(tenantId);
     return staleIds.length;
   }
@@ -224,7 +186,7 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
     message: string,
   ): Promise<number> {
     const result = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.receivedDocumentSyncRun.updateMany({
+      tx.issuedDocumentSyncRun.updateMany({
         where: { tenantId, status: { in: ['PENDING', 'RUNNING'] } },
         data: {
           status: 'FAILED',
@@ -238,14 +200,14 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
 
   private async startSync(
     tenantId: string,
-    trigger: ReceivedSyncTrigger,
+    trigger: 'MANUAL' | 'CRON',
     triggeredByUserId: string | null,
     rangeInput?: SyncDateRangeInput,
   ) {
     await this.expireStaleRuns(tenantId);
 
     const busy = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.receivedDocumentSyncRun.findFirst({
+      tx.issuedDocumentSyncRun.findFirst({
         where: {
           tenantId,
           status: { in: ['PENDING', 'RUNNING'] },
@@ -254,17 +216,18 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
       }),
     );
 
+    // Memory lock without a live DB run = orphan after crash; clear it.
     if (this.inFlight.has(tenantId) && !busy) {
       this.inFlight.delete(tenantId);
     }
 
     if (busy || this.inFlight.has(tenantId)) {
       throw new ConflictException({
-        code: 'PURCHASES_SYNC_IN_PROGRESS',
-        message: 'A purchases sync is already running for this tenant',
+        code: 'SALES_SYNC_IN_PROGRESS',
+        message: 'A sales sync is already running for this tenant',
         syncRunId: busy?.id,
         staleAfterMs: SYNC_STALE_MS,
-        hint: 'POST /purchases/sync/reset to cancel a stuck sync',
+        hint: 'POST /documents/sync/reset to cancel a stuck sync',
       });
     }
 
@@ -278,7 +241,7 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
     }
 
     const run = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.receivedDocumentSyncRun.create({
+      tx.issuedDocumentSyncRun.create({
         data: {
           tenantId,
           trigger,
@@ -299,11 +262,11 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
     });
 
     await this.audit.write({
-      action: 'purchases.sync.start',
+      action: 'sales.sync.start',
       outcome: 'success',
       actorUserId: triggeredByUserId,
       tenantId,
-      resourceType: 'received_document_sync_run',
+      resourceType: 'issued_document_sync_run',
       resourceId: run.id,
       metadata: {
         trigger,
@@ -332,13 +295,14 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
     let rateLimited = false;
 
     await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.receivedDocumentSyncRun.update({
+      tx.issuedDocumentSyncRun.update({
         where: { id: runId },
         data: { status: 'RUNNING', startedAt: new Date() },
       }),
     );
 
     try {
+      // Cached per tenant — reused for the whole run (refresh only if near expiry).
       let accessToken = await this.eta.getAccessToken(tenantId);
       const clients = await this.clientsFor(tenantId);
       const etaEnvironment = await this.eta.getActiveEnvironment(tenantId);
@@ -350,27 +314,34 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
         -MAX_SYNC_WINDOWS,
       );
       this.logger.log(
-        `Purchases sync ${tenantId} windows=${windows.length} from=${range.from.toISOString()} to=${range.to.toISOString()}`,
+        `Sales sync ${tenantId} windows=${windows.length} from=${range.from.toISOString()} to=${range.to.toISOString()}`,
       );
 
       for (const win of windows) {
+        // Reuse cache; cheap if token still valid.
         accessToken = await this.eta.getAccessToken(tenantId);
         let token: string | null | undefined = undefined;
         try {
           do {
             await paceEtaSyncRequest();
-            const page = await clients.search.searchReceived(accessToken, {
+            const page = await clients.search.searchSent(accessToken, {
               pageSize: 100,
               continuationToken: token || undefined,
               window: { from: win.from, to: win.to, dateField: 'submission' },
             });
             for (const row of page.result) {
-              const mapped = mapEtaReceivedRow(row);
-              if (!mapped.documentUuid) {
+              const uuid = String(
+                row.uuid ??
+                  row.UUID ??
+                  row.documentUUID ??
+                  row.documentUuid ??
+                  '',
+              ).trim();
+              if (!uuid) {
                 counters.skippedCount += 1;
                 continue;
               }
-              byUuid.set(mapped.documentUuid, row);
+              byUuid.set(uuid, row);
             }
             token = page.continuationToken;
           } while (token);
@@ -379,38 +350,11 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
             rateLimited = true;
             errors.push(ETA_RATE_LIMIT_MESSAGE);
             this.logger.warn(
-              `Purchases sync rate-limited during search; continuing with ${byUuid.size} uuid(s)`,
+              `Sales sync rate-limited during search; continuing with ${byUuid.size} uuid(s) collected`,
             );
             break;
           }
           throw err;
-        }
-      }
-
-      if (this.useRecent && !rateLimited) {
-        try {
-          await paceEtaSyncRequest();
-          accessToken = await this.eta.getAccessToken(tenantId);
-          const recent = await clients.recent.recentReceived(accessToken, {
-            pageSize: 100,
-          });
-          for (const row of recent.result) {
-            const mapped = mapEtaReceivedRow(row);
-            if (!mapped.documentUuid) {
-              counters.skippedCount += 1;
-              continue;
-            }
-            byUuid.set(mapped.documentUuid, row);
-          }
-        } catch (err) {
-          if (isEtaRateLimitError(err)) {
-            rateLimited = true;
-            errors.push(`recent: ${ETA_RATE_LIMIT_MESSAGE}`);
-          } else {
-            const msg = err instanceof Error ? err.message : String(err);
-            this.logger.warn(`Recent documents pull failed: ${msg}`);
-            errors.push(`recent: ${msg}`);
-          }
         }
       }
 
@@ -423,7 +367,7 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
           if (detailIndex % 25 === 0) {
             accessToken = await this.eta.getAccessToken(tenantId);
           }
-          const outcome = await this.upsertOne(
+          const outcome = await this.upsertIssued(
             tenantId,
             accessToken,
             row,
@@ -438,6 +382,7 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
           if (isEtaRateLimitError(err)) {
             rateLimited = true;
             errors.push(`${uuid}: ${ETA_RATE_LIMIT_MESSAGE}`);
+            // Keep going — later UUIDs may already be local (skip details).
             continue;
           }
           const msg = err instanceof Error ? err.message : String(err);
@@ -459,7 +404,7 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
       ].filter(Boolean) as string[];
 
       await this.tenantPrisma.withTenant(tenantId, (tx) =>
-        tx.receivedDocumentSyncRun.update({
+        tx.issuedDocumentSyncRun.update({
           where: { id: runId },
           data: {
             status: failed ? 'FAILED' : 'SUCCEEDED',
@@ -475,11 +420,11 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
       );
 
       await this.audit.write({
-        action: failed ? 'purchases.sync.failure' : 'purchases.sync.success',
+        action: failed ? 'sales.sync.failure' : 'sales.sync.success',
         outcome: failed ? 'failure' : 'success',
         actorUserId: triggeredByUserId,
         tenantId,
-        resourceType: 'received_document_sync_run',
+        resourceType: 'issued_document_sync_run',
         resourceId: runId,
         metadata: {
           ...counters,
@@ -496,9 +441,10 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
           : String(err);
       const imported = counters.newCount + counters.updatedCount;
       await this.tenantPrisma.withTenant(tenantId, (tx) =>
-        tx.receivedDocumentSyncRun.update({
+        tx.issuedDocumentSyncRun.update({
           where: { id: runId },
           data: {
+            // Partial imports stay; mark SUCCEEDED when something was saved.
             status: imported > 0 ? 'SUCCEEDED' : 'FAILED',
             finishedAt: new Date(),
             ...counters,
@@ -511,11 +457,11 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
         }),
       );
       await this.audit.write({
-        action: 'purchases.sync.failure',
+        action: 'sales.sync.failure',
         outcome: 'failure',
         actorUserId: triggeredByUserId,
         tenantId,
-        resourceType: 'received_document_sync_run',
+        resourceType: 'issued_document_sync_run',
         resourceId: runId,
         metadata: { message, ...counters },
       });
@@ -525,7 +471,8 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Prefer explicit UI range; else last 90 days (or first VALID if within that window).
+   * Prefer explicit UI range; else last DEFAULT_SYNC_LOOKBACK_DAYS
+   * (or earlier if first local VALID is older — still capped by MAX_SYNC_WINDOWS).
    */
   private async resolveSyncRange(
     tenantId: string,
@@ -543,6 +490,7 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
         select: { issueDateTime: true },
       }),
     );
+    // Do not auto-expand to multi-year history — user can pick a wider range.
     if (
       firstValid?.issueDateTime &&
       firstValid.issueDateTime.getTime() > fallback.from.getTime() &&
@@ -550,161 +498,233 @@ export class PurchasesSyncService implements OnModuleInit, OnModuleDestroy {
     ) {
       return { from: new Date(firstValid.issueDateTime), to: fallback.to };
     }
-    // No local history: shorter first pull (30d) to avoid rate limits.
-    return defaultLookbackRange(30);
+    return fallback;
   }
 
-  private async upsertOne(
+  private async upsertIssued(
     tenantId: string,
     accessToken: string,
     row: Record<string, unknown>,
     detailsClient: EtaDocumentDetailsClient,
     etaEnvironment: 'SANDBOX' | 'PRODUCTION',
   ): Promise<'new' | 'updated' | 'skipped'> {
-    const mapped = mapEtaReceivedRow(row);
-    if (!mapped.documentUuid) return 'skipped';
+    const uuid = String(
+      row.uuid ?? row.UUID ?? row.documentUUID ?? row.documentUuid ?? '',
+    ).trim();
+    if (!uuid) return 'skipped';
 
-    const existingPeek = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.receivedDocument.findUnique({
-        where: {
-          tenantId_documentUuid: {
-            tenantId,
-            documentUuid: mapped.documentUuid!,
-          },
+    const existing = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.document.findFirst({
+        where: { tenantId, etaUuid: uuid },
+        select: {
+          id: true,
+          origin: true,
+          internalId: true,
+          _count: { select: { lines: true } },
         },
-        select: { id: true, rawDetailsJson: true },
       }),
     );
 
-    // Already imported with details — refresh summary only (no ETA details call).
-    if (existingPeek?.rawDetailsJson) {
-      await this.tenantPrisma.withTenant(tenantId, (tx) =>
-        tx.receivedDocument.update({
-          where: { id: existingPeek.id },
-          data: {
-            etaStatus: mapped.etaStatus,
-            etaLongId: mapped.etaLongId,
-            internalId: mapped.internalId,
-            totalAmount: mapped.totalAmount,
-            netAmount: mapped.netAmount,
-            lastSyncedAt: new Date(),
-            rawSummaryJson: mapped.rawSummaryJson,
-          },
-        }),
-      );
+    // Local / file-imported docs that already have this ETA uuid: refresh status only.
+    if (existing && existing.origin !== 'ETA_SYNC') {
+      await this.refreshLocalIssuedStatus(tenantId, existing.id, row);
+      return 'updated';
+    }
+
+    // Already imported with line details — status-only refresh (resume-friendly).
+    if (existing && existing.origin === 'ETA_SYNC' && existing._count.lines > 0) {
+      await this.refreshLocalIssuedStatus(tenantId, existing.id, row);
       return 'skipped';
     }
 
-    let details: Record<string, unknown> | null = null;
+    let details: Record<string, unknown>;
     try {
       await paceEtaSyncRequest();
-      details = await detailsClient.getDetails(
-        accessToken,
-        mapped.documentUuid,
-      );
+      details = await detailsClient.getDetails(accessToken, uuid);
     } catch (err) {
-      if (isEtaRateLimitError(err)) throw err;
-      details = null;
+      if (existing) {
+        await this.refreshLocalIssuedStatus(tenantId, existing.id, row);
+        return 'updated';
+      }
+      throw err;
     }
 
-    const now = new Date();
-    return this.tenantPrisma.withTenant(tenantId, async (tx) => {
-      const existing = await tx.receivedDocument.findUnique({
-        where: {
-          tenantId_documentUuid: {
-            tenantId,
-            documentUuid: mapped.documentUuid!,
+    const mapped = mapEtaIssuedDetailsToImport(row, details);
+    if (!mapped) return 'skipped';
+
+    if (existing) {
+      await this.tenantPrisma.withTenant(tenantId, (tx) =>
+        tx.document.update({
+          where: { id: existing.id },
+          data: {
+            etaLongId: mapped.etaLongId,
+            etaStatus: mapped.etaStatus,
+            status: mapped.status,
+            etaStatusUpdatedAt: new Date(),
+            taxTotalsJson: mapped.taxTotalsJson,
+            totalSalesAmount: mapped.totalSalesAmount,
+            totalDiscountAmount: mapped.totalDiscountAmount,
+            netAmount: mapped.netAmount,
+            totalAmount: mapped.totalAmount,
+            etaPayloadJson: mapped.etaPayloadJson,
+            ...(mapped.signaturesJson
+              ? { signaturesJson: mapped.signaturesJson }
+              : {}),
+          },
+        }),
+      );
+      return 'updated';
+    }
+
+    // Match by internalId for docs created here before UUID was known.
+    const byInternal = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.document.findFirst({
+        where: { tenantId, internalId: mapped.internalId },
+        select: { id: true, origin: true },
+      }),
+    );
+    if (byInternal) {
+      await this.tenantPrisma.withTenant(tenantId, (tx) =>
+        tx.document.update({
+          where: { id: byInternal.id },
+          data: {
+            etaUuid: mapped.etaUuid,
+            etaLongId: mapped.etaLongId,
+            etaStatus: mapped.etaStatus,
+            status: mapped.status,
+            etaStatusUpdatedAt: new Date(),
+            etaEnvironment,
+          },
+        }),
+      );
+      return 'updated';
+    }
+
+    const branch = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.branch.findFirst({
+        where: { tenantId, isActive: true },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      }),
+    );
+    if (!branch) {
+      throw new Error('No active branch to attach imported sales document');
+    }
+
+    let internalId = mapped.internalId;
+    const clash = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.document.findFirst({
+        where: { tenantId, internalId },
+        select: { id: true },
+      }),
+    );
+    if (clash) {
+      internalId = `ETA-${mapped.etaUuid.slice(0, 12)}`;
+    }
+
+    await this.tenantPrisma.withTenant(tenantId, async (tx) => {
+      await tx.document.create({
+        data: {
+          tenantId,
+          kind: mapped.kind,
+          status: mapped.status,
+          origin: 'ETA_SYNC',
+          branchId: branch.id,
+          currencyCode: mapped.currencyCode,
+          issueDateTime: mapped.issueDateTime,
+          internalId,
+          etaDocumentType: mapped.etaDocumentType,
+          etaDocumentTypeVersion: mapped.etaDocumentTypeVersion,
+          typeVersionFetchedAt: new Date(),
+          receiverType: mapped.receiverType,
+          receiverId: mapped.receiverId,
+          receiverName: mapped.receiverName,
+          receiverAddressJson: mapped.receiverAddressJson ?? undefined,
+          issuerSnapshotJson: mapped.issuerSnapshot,
+          extraDiscountAmount: mapped.extraDiscountAmount,
+          totalSalesAmount: mapped.totalSalesAmount,
+          totalDiscountAmount: mapped.totalDiscountAmount,
+          netAmount: mapped.netAmount,
+          totalAmount: mapped.totalAmount,
+          totalItemsDiscountAmount: mapped.totalItemsDiscountAmount,
+          taxTotalsJson: mapped.taxTotalsJson,
+          etaPayloadJson: mapped.etaPayloadJson,
+          signaturesJson: mapped.signaturesJson ?? undefined,
+          signedAt: mapped.signaturesJson ? mapped.issueDateTime : undefined,
+          etaUuid: mapped.etaUuid,
+          etaLongId: mapped.etaLongId,
+          etaStatus: mapped.etaStatus,
+          etaStatusUpdatedAt: new Date(),
+          etaEnvironment,
+          version: 1,
+          lines: {
+            create: mapped.lines.map((l) => ({
+              tenantId,
+              lineNumber: l.lineNumber,
+              description: l.description,
+              itemType: l.itemType,
+              itemCode: l.itemCode,
+              unitType: l.unitType,
+              quantity: l.quantity,
+              unitPrice: l.unitPrice,
+              currencySold: l.currencySold,
+              amountSold: l.amountSold,
+              amountEgp: l.amountEgp,
+              currencyExchangeRate: l.currencyExchangeRate,
+              discountRate: l.discountRate,
+              discountAmount: l.discountAmount,
+              salesTotal: l.salesTotal,
+              netTotal: l.netTotal,
+              total: l.total,
+              valueDifference: l.valueDifference,
+              totalTaxableFees: l.totalTaxableFees,
+              itemsDiscount: l.itemsDiscount,
+              internalCode: l.internalCode,
+              taxes: {
+                create: l.taxes.map((t) => ({
+                  tenantId,
+                  taxType: t.taxType,
+                  subType: t.subType,
+                  rate: t.rate,
+                  amount: t.amount,
+                })),
+              },
+            })),
           },
         },
       });
-
-      const data = {
-        etaLongId: mapped.etaLongId,
-        internalId: mapped.internalId,
-        etaDocumentType: mapped.etaDocumentType,
-        etaDocumentTypeVersion: mapped.etaDocumentTypeVersion,
-        kind: mapped.kind,
-        etaStatus: mapped.etaStatus,
-        dateTimeIssued: mapped.dateTimeIssued,
-        issuerType: mapped.issuerType,
-        issuerId: mapped.issuerId,
-        issuerName: mapped.issuerName,
-        issuerJson: mapped.issuerJson ?? undefined,
-        receiverJson: mapped.receiverJson ?? undefined,
-        currency: mapped.currency,
-        totalAmount: mapped.totalAmount,
-        netAmount: mapped.netAmount,
-        rawSummaryJson: mapped.rawSummaryJson,
-        rawDetailsJson: (details ?? undefined) as Prisma.InputJsonValue | undefined,
-        etaEnvironment,
-        lastSyncedAt: now,
-      };
-
-      let docId: string;
-      let outcome: 'new' | 'updated';
-      if (!existing) {
-        const created = await tx.receivedDocument.create({
-          data: {
-            tenantId,
-            documentUuid: mapped.documentUuid!,
-            ...data,
-          },
-        });
-        docId = created.id;
-        outcome = 'new';
-        void this.usageEmit.emitReceived({
-          tenantId,
-          receivedDocumentId: created.id,
-          currencyCode: mapped.currency ?? null,
-        });
-      } else {
-        await tx.receivedDocument.update({
-          where: { id: existing.id },
-          data,
-        });
-        docId = existing.id;
-        outcome = 'updated';
-        await tx.receivedDocumentLine.deleteMany({
-          where: { receivedDocumentId: docId },
-        });
-      }
-
-      if (details) {
-        const lines = mapDetailsLines(details);
-        if (lines.length) {
-          await tx.receivedDocumentLine.createMany({
-            data: lines.map((l) => ({
-              tenantId,
-              receivedDocumentId: docId,
-              ...l,
-            })),
-          });
-        }
-      }
-
-      return outcome;
     });
+
+    return 'new';
   }
 
-  private async runCronForAllTenants() {
-    try {
-      const tenants = await this.prisma.tenantEtaCredential.findMany({
-        select: { tenantId: true },
-        distinct: ['tenantId'],
-      });
-      for (const { tenantId } of tenants) {
-        if (this.inFlight.has(tenantId)) continue;
-        try {
-          await this.startSync(tenantId, 'CRON', null);
-        } catch (err) {
-          if (err instanceof ConflictException) continue;
-          const msg = err instanceof Error ? err.message : String(err);
-          this.logger.warn(`Cron sync skipped for ${tenantId}: ${msg}`);
-        }
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Cron sync tick failed: ${msg}`);
-    }
+  private async refreshLocalIssuedStatus(
+    tenantId: string,
+    documentId: string,
+    row: Record<string, unknown>,
+  ) {
+    const uuid = String(
+      row.uuid ?? row.UUID ?? row.documentUUID ?? row.documentUuid ?? '',
+    ).trim();
+    const longId = String(
+      row.longId ?? row.LongId ?? row.longID ?? '',
+    ).trim();
+    const etaStatusRaw = String(
+      row.status ?? row.Status ?? row.documentStatus ?? '',
+    ).trim();
+    const localStatus = ETA_STATUS_TO_LOCAL[etaStatusRaw.toLowerCase()];
+
+    await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.document.update({
+        where: { id: documentId },
+        data: {
+          ...(uuid ? { etaUuid: uuid } : {}),
+          ...(longId ? { etaLongId: longId } : {}),
+          ...(etaStatusRaw ? { etaStatus: etaStatusRaw } : {}),
+          ...(localStatus ? { status: localStatus } : {}),
+          etaStatusUpdatedAt: new Date(),
+        },
+      }),
+    );
   }
 }

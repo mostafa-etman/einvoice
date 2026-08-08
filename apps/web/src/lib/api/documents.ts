@@ -95,14 +95,91 @@ export type DocumentUpsert = {
   }>;
 };
 
-export function listDocuments(params?: { status?: string; kind?: string }) {
+export type DocumentListItem = {
+  id: string;
+  kind: string;
+  status: string;
+  origin: string;
+  internalId: string;
+  issueDateTime: string;
+  currencyCode: string;
+  totalAmount: string;
+  receiverName: string | null;
+  receiverId: string | null;
+  updatedAt: string;
+  needsAttention: boolean;
+  needsAttentionReason: string | null;
+  submissionUuid: string | null;
+  etaUuid: string | null;
+  etaLongId: string | null;
+  etaStatus: string | null;
+  etaStatusUpdatedAt: string | null;
+  submitInFlight: boolean;
+  submitCooldownUntil: string | null;
+};
+
+export function listDocuments(params?: {
+  status?: string;
+  kind?: string;
+  from?: string;
+  to?: string;
+  receiver?: string;
+  q?: string;
+  cursor?: string;
+  limit?: number;
+  sortBy?: string;
+  sortDir?: 'asc' | 'desc';
+}) {
   const q = new URLSearchParams();
   if (params?.status) q.set('status', params.status);
   if (params?.kind) q.set('kind', params.kind);
+  if (params?.from) q.set('from', params.from);
+  if (params?.to) q.set('to', params.to);
+  if (params?.receiver) q.set('receiver', params.receiver);
+  if (params?.q) q.set('q', params.q);
+  if (params?.cursor) q.set('cursor', params.cursor);
+  if (params?.limit) q.set('limit', String(params.limit));
+  if (params?.sortBy) q.set('sortBy', params.sortBy);
+  if (params?.sortDir) q.set('sortDir', params.sortDir);
   const qs = q.toString();
-  return apiFetch<{ items: Array<Record<string, unknown>> }>(
+  return apiFetch<{ items: DocumentListItem[]; nextCursor: string | null }>(
     `/documents${qs ? `?${qs}` : ''}`,
     { tenantScoped: true },
+  );
+}
+
+export type SalesSyncRun = {
+  id: string | null;
+  trigger: string | null;
+  status: string | null;
+  fetchedCount: number;
+  newCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  errorSummary: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+};
+
+export function syncSales(range?: { from?: string; to?: string }) {
+  return apiFetch<SalesSyncRun>('/documents/sync', {
+    method: 'POST',
+    tenantScoped: true,
+    body: range?.from || range?.to ? range : undefined,
+  });
+}
+
+export function latestSalesSync() {
+  return apiFetch<SalesSyncRun>('/documents/sync/latest', {
+    tenantScoped: true,
+  });
+}
+
+export function resetSalesSync() {
+  return apiFetch<{ releasedCount: number; latest: SalesSyncRun }>(
+    '/documents/sync/reset',
+    { method: 'POST', tenantScoped: true },
   );
 }
 
