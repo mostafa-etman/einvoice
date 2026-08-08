@@ -86,38 +86,43 @@ export function extractReceivedDocumentTaxes(doc: {
     taxes?: unknown;
   }>;
 }): UnifiedTaxLine[] {
-  const details = asRecord(doc.rawDetailsJson);
-  const storedLines = (doc.lines ?? []) as Array<Record<string, unknown>>;
+  try {
+    const details = asRecord(doc?.rawDetailsJson);
+    const storedLines = (doc?.lines ?? []) as Array<Record<string, unknown>>;
 
-  const fromStoredLines: UnifiedTaxLine[] = [];
-  for (const line of storedLines) {
-    fromStoredLines.push(...taxesFromReceivedLine(line));
-  }
-  if (fromStoredLines.length) return fromStoredLines;
-
-  const detailTotals =
-    details?.taxTotals ?? details?.TaxTotals ?? null;
-  const fromDetails = fromTotalsJson(detailTotals);
-  if (fromDetails.length) return fromDetails;
-
-  if (details) {
-    const hydrated = mapDetailsLines(details);
-    const fromHydrated: UnifiedTaxLine[] = [];
-    for (const line of hydrated) {
-      fromHydrated.push(
-        ...taxesFromReceivedLine({
-          taxesJson: line.taxesJson,
-          rawJson: line.rawJson,
-        }),
-      );
+    const fromStoredLines: UnifiedTaxLine[] = [];
+    for (const line of storedLines) {
+      if (!line) continue;
+      fromStoredLines.push(...taxesFromReceivedLine(line));
     }
-    if (fromHydrated.length) return fromHydrated;
-  }
+    if (fromStoredLines.length) return fromStoredLines;
 
-  const summary = asRecord(doc.rawSummaryJson);
-  const summaryTotals =
-    summary?.taxTotals ?? summary?.TaxTotals ?? null;
-  return fromTotalsJson(summaryTotals);
+    const detailTotals =
+      details?.taxTotals ?? details?.TaxTotals ?? null;
+    const fromDetails = fromTotalsJson(detailTotals);
+    if (fromDetails.length) return fromDetails;
+
+    if (details) {
+      const hydrated = mapDetailsLines(details);
+      const fromHydrated: UnifiedTaxLine[] = [];
+      for (const line of hydrated) {
+        fromHydrated.push(
+          ...taxesFromReceivedLine({
+            taxesJson: line.taxesJson,
+            rawJson: line.rawJson,
+          }),
+        );
+      }
+      if (fromHydrated.length) return fromHydrated;
+    }
+
+    const summary = asRecord(doc?.rawSummaryJson);
+    const summaryTotals =
+      summary?.taxTotals ?? summary?.TaxTotals ?? null;
+    return fromTotalsJson(summaryTotals);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -135,20 +140,24 @@ export function extractIssuedDocumentTaxes(doc: {
     }>;
   }>;
 }): UnifiedTaxLine[] {
-  const fromLines: UnifiedTaxLine[] = [];
-  for (const line of doc.lines ?? []) {
-    for (const t of line.taxes ?? []) {
-      if (!t.taxType && t.amount == null) continue;
-      fromLines.push({
-        taxType: t.taxType || 'T1',
-        subType: String(t.subType ?? ''),
-        rate: String(t.rate ?? '0'),
-        amount: String(t.amount ?? '0'),
-      });
+  try {
+    const fromLines: UnifiedTaxLine[] = [];
+    for (const line of doc?.lines ?? []) {
+      for (const t of line?.taxes ?? []) {
+        if (!t || (!t.taxType && t.amount == null)) continue;
+        fromLines.push({
+          taxType: t.taxType || 'T1',
+          subType: String(t.subType ?? ''),
+          rate: String(t.rate ?? '0'),
+          amount: String(t.amount ?? '0'),
+        });
+      }
     }
+    if (fromLines.length) return fromLines;
+    return fromTotalsJson(doc?.taxTotalsJson);
+  } catch {
+    return [];
   }
-  if (fromLines.length) return fromLines;
-  return fromTotalsJson(doc.taxTotalsJson);
 }
 
 export function toTaxLineIn(taxes: UnifiedTaxLine[]): TaxLineIn[] {

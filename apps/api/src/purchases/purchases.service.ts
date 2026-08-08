@@ -92,6 +92,12 @@ export type PurchaseListQuery = {
   sortDir?: 'asc' | 'desc';
 };
 
+function parseOptionalDate(value?: string): Date | undefined {
+  if (!value?.trim()) return undefined;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
 @Injectable()
 export class PurchasesService {
   constructor(
@@ -100,7 +106,7 @@ export class PurchasesService {
   ) {}
 
   async list(tenantId: string, query: PurchaseListQuery) {
-    const take = Math.min(Math.max(query.limit ?? 50, 1), 100);
+    const take = Math.min(Math.max(Number(query.limit) || 50, 1), 100);
     const where: Prisma.ReceivedDocumentWhereInput = { tenantId };
 
     if (query.kind) where.kind = query.kind as never;
@@ -121,12 +127,14 @@ export class PurchasesService {
     }
     if (query.branchId) where.branchId = query.branchId;
     if (query.unassignedBranch) where.branchId = null;
-    if (query.from || query.to) {
+    const fromDate = parseOptionalDate(query.from);
+    const toDate = parseOptionalDate(query.to);
+    if (fromDate || toDate) {
       where.dateTimeIssued = {};
-      if (query.from) where.dateTimeIssued.gte = new Date(query.from);
-      if (query.to) where.dateTimeIssued.lte = new Date(query.to);
+      if (fromDate) where.dateTimeIssued.gte = fromDate;
+      if (toDate) where.dateTimeIssued.lte = toDate;
     }
-    if (query.q) {
+    if (query.q?.trim()) {
       const q = query.q.trim();
       where.OR = [
         { internalId: { contains: q, mode: 'insensitive' } },
@@ -137,11 +145,25 @@ export class PurchasesService {
       ];
     }
 
-    const sortBy = query.sortBy ?? 'dateTimeIssued';
+    const allowedSort = new Set([
+      'dateTimeIssued',
+      'totalAmount',
+      'internalId',
+      'issuerName',
+      'lastSyncedAt',
+    ] as const);
+    const sortBy = allowedSort.has(query.sortBy as never)
+      ? (query.sortBy as
+          | 'dateTimeIssued'
+          | 'totalAmount'
+          | 'internalId'
+          | 'issuerName'
+          | 'lastSyncedAt')
+      : 'dateTimeIssued';
     const sortDir = query.sortDir === 'asc' ? 'asc' : 'desc';
     const orderBy: Prisma.ReceivedDocumentOrderByWithRelationInput[] = [
       { [sortBy]: sortDir },
-      { createdAt: 'desc' },
+      { id: 'desc' },
     ];
 
     const rows = await this.tenantPrisma.withTenant(tenantId, (tx) =>

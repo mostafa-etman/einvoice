@@ -41,6 +41,13 @@ import { assertDocumentMutable } from './documents-mutability';
 
 export { assertDocumentMutable } from './documents-mutability';
 
+/** Parse list filter dates; ignore invalid values so bad query params never 500. */
+function parseOptionalDate(value?: string): Date | undefined {
+  if (!value?.trim()) return undefined;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
 /** Issuer identity/address is company-level, so it is fixed in Settings. */
 function isIssuerSettingsPath(path: string): boolean {
   return path === 'issuer' || path.startsWith('issuer.');
@@ -496,15 +503,17 @@ export class DocumentsService {
       sortDir?: 'asc' | 'desc';
     } = {},
   ) {
-    const take = Math.min(Math.max(query.limit ?? 50, 1), 100);
+    const take = Math.min(Math.max(Number(query.limit) || 50, 1), 100);
     const where: Prisma.DocumentWhereInput = { tenantId };
 
     if (query.status) where.status = query.status;
     if (query.kind) where.kind = query.kind;
-    if (query.from || query.to) {
+    const fromDate = parseOptionalDate(query.from);
+    const toDate = parseOptionalDate(query.to);
+    if (fromDate || toDate) {
       where.issueDateTime = {};
-      if (query.from) where.issueDateTime.gte = new Date(query.from);
-      if (query.to) where.issueDateTime.lte = new Date(query.to);
+      if (fromDate) where.issueDateTime.gte = fromDate;
+      if (toDate) where.issueDateTime.lte = toDate;
     }
     if (query.receiver?.trim()) {
       where.receiverName = {
@@ -523,11 +532,25 @@ export class DocumentsService {
       ];
     }
 
-    const sortBy = query.sortBy ?? 'issueDateTime';
+    const allowedSort = new Set([
+      'issueDateTime',
+      'totalAmount',
+      'internalId',
+      'receiverName',
+      'updatedAt',
+    ] as const);
+    const sortBy = allowedSort.has(query.sortBy as never)
+      ? (query.sortBy as
+          | 'issueDateTime'
+          | 'totalAmount'
+          | 'internalId'
+          | 'receiverName'
+          | 'updatedAt')
+      : 'issueDateTime';
     const sortDir = query.sortDir === 'asc' ? 'asc' : 'desc';
     const orderBy: Prisma.DocumentOrderByWithRelationInput[] = [
       { [sortBy]: sortDir },
-      { updatedAt: 'desc' },
+      { id: 'desc' },
     ];
 
     return this.tenantPrisma.withTenant(tenantId, async (tx) => {
@@ -566,22 +589,23 @@ export class DocumentsService {
         id: doc.id,
         kind: doc.kind,
         status: doc.status,
-        origin: doc.origin,
-        internalId: doc.internalId,
-        issueDateTime: doc.issueDateTime.toISOString(),
-        currencyCode: doc.currencyCode,
-        totalAmount: doc.totalAmount,
-        receiverName: doc.receiverName,
-        receiverId: doc.receiverId,
-        updatedAt: doc.updatedAt.toISOString(),
-        needsAttention: doc.needsAttention,
-        needsAttentionReason: doc.needsAttentionReason,
-        submissionUuid: doc.submissionUuid,
-        etaUuid: doc.etaUuid,
-        etaLongId: doc.etaLongId,
-        etaStatus: doc.etaStatus,
+        origin: doc.origin ?? 'LOCAL',
+        internalId: doc.internalId ?? null,
+        issueDateTime: doc.issueDateTime?.toISOString?.() ?? null,
+        currencyCode: doc.currencyCode ?? null,
+        totalAmount:
+          doc.totalAmount == null ? null : String(doc.totalAmount),
+        receiverName: doc.receiverName ?? null,
+        receiverId: doc.receiverId ?? null,
+        updatedAt: doc.updatedAt?.toISOString?.() ?? null,
+        needsAttention: Boolean(doc.needsAttention),
+        needsAttentionReason: doc.needsAttentionReason ?? null,
+        submissionUuid: doc.submissionUuid ?? null,
+        etaUuid: doc.etaUuid ?? null,
+        etaLongId: doc.etaLongId ?? null,
+        etaStatus: doc.etaStatus ?? null,
         etaStatusUpdatedAt: doc.etaStatusUpdatedAt?.toISOString() ?? null,
-        submitInFlight: doc.submitInFlight,
+        submitInFlight: Boolean(doc.submitInFlight),
         submitCooldownUntil: doc.submitCooldownUntil?.toISOString() ?? null,
       }));
 
