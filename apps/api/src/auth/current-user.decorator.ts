@@ -10,6 +10,11 @@ export type AuthUser = {
   userId: string;
   /** Absent on impersonation-scoped tokens (see jwt.strategy.ts). */
   email?: string;
+  /**
+   * Active company from the access-token `tid` claim (session-bound).
+   * Never taken from the client as source of truth — see TenantContextService.
+   */
+  tenantId?: string;
   /** Present only when the bearer token is an impersonation session token — never carries isPlatformOperator. */
   impersonation?: ImpersonationClaim;
 };

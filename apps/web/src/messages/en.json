@@ -37,7 +37,9 @@
     "errorGeneric": "Something went wrong. Try again."
   },
   "shell": {
-    "tenant": "Tenant",
+    "tenant": "Company",
+    "switchCompany": "Switch company",
+    "createCompany": "Create company",
     "branch": "Branch",
     "language": "Language",
     "etaEnvSandbox": "SANDBOX",
@@ -48,6 +50,7 @@
   "users": {
     "title": "Users",
     "invite": "Add member",
+    "inviteHint": "Add an existing user by email — they keep the same login and can switch between companies.",
     "email": "Email",
     "role": "Role",
     "actions": "Actions",

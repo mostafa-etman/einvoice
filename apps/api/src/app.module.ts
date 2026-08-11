@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuthModule } from './auth/auth.module';
 import { AuditInterceptor } from './audit/audit.interceptor';
+import { TenantContextInterceptor } from './tenant/tenant-context.interceptor';
 import { AuditModule } from './audit/audit.module';
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -56,6 +57,10 @@ import { PlatformAdminModule } from './platform-admin/platform-admin.module';
     PlatformAdminModule,
   ],
   providers: [
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: TenantContextInterceptor,
+    },
     {
       provide: APP_INTERCEPTOR,
       useClass: AuditInterceptor,

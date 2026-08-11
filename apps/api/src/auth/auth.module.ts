@@ -29,6 +29,6 @@ import { RefreshService } from './refresh.service';
   providers: [AuthService, PasswordService, RefreshService, JwtStrategy],
   // JwtModule is re-exported so other modules (e.g. platform-admin impersonation
   // tokens) sign with the same JWT_ACCESS_SECRET without duplicating config.
-  exports: [AuthService, PasswordService, JwtModule],
+  exports: [AuthService, PasswordService, RefreshService, JwtModule],
 })
 export class AuthModule {}

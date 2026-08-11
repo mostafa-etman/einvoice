@@ -56,4 +56,16 @@ describe('Tenant context header', () => {
       .set('X-Tenant-Id', tenantId)
       .expect(200);
   });
+
+  it('session-bound token (tid) scopes members without a client header', async () => {
+    const switched = await request(app.getHttpServer())
+      .post('/tenants/switch')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ tenantId })
+      .expect(200);
+    await request(app.getHttpServer())
+      .get('/members')
+      .set('Authorization', `Bearer ${switched.body.accessToken}`)
+      .expect(200);
+  });
 });

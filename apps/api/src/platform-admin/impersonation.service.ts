@@ -18,6 +18,7 @@ export type ImpersonationClaims = {
   mode: 'READ_ONLY' | 'WRITE';
   operatorUserId: string;
   isPlatformOperator: false;
+  tid: string;
 };
 
 export type StartImpersonationInput = {
@@ -203,6 +204,7 @@ export class ImpersonationService {
       mode: session.mode,
       operatorUserId: session.operatorUserId,
       isPlatformOperator: false,
+      tid: session.tenantId,
     };
     return this.jwt.signAsync(payload, { expiresIn });
   }

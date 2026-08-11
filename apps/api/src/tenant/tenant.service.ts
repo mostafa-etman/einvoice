@@ -1,10 +1,14 @@
 import {
+  BadRequestException,
+  ConflictException,
   forwardRef,
   Inject,
   Injectable,
   Logger,
+  NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import {
   DEFAULT_ROLE_NAMES,
   PERMISSIONS,
@@ -228,22 +232,33 @@ export class TenantService implements OnModuleInit {
       where: { email: email.trim().toLowerCase() },
     });
     if (!user) {
-      throw new Error('User not found');
+      throw new NotFoundException('User not found');
     }
-    const membership = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.membership.create({
-        data: { tenantId, userId: user.id, roleId },
-        include: { user: true, role: true },
-      }),
-    );
-    await this.audit.write({
-      action: 'members.add.success',
-      outcome: 'success',
-      actorUserId,
-      tenantId,
-      resourceId: membership.id,
-    });
-    return membership;
+    try {
+      const membership = await this.tenantPrisma.withTenant(tenantId, async (tx) => {
+        const role = await tx.role.findFirst({ where: { id: roleId, tenantId } });
+        if (!role) {
+          throw new BadRequestException('Role not found in this tenant');
+        }
+        return tx.membership.create({
+          data: { tenantId, userId: user.id, roleId },
+          include: { user: true, role: true },
+        });
+      });
+      await this.audit.write({
+        action: 'members.add.success',
+        outcome: 'success',
+        actorUserId,
+        tenantId,
+        resourceId: membership.id,
+      });
+      return membership;
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ConflictException('User is already a member of this company');
+      }
+      throw err;
+    }
   }
 
   async updateMemberRole(

@@ -12,6 +12,8 @@ export type ImpersonationJwtPayload = {
   mode: 'READ_ONLY' | 'WRITE';
   operatorUserId: string;
   isPlatformOperator: false;
+  /** Impersonation is scoped to one tenant — same claim as normal access tokens. */
+  tid?: string;
 };
 
 type AccessTokenPayload = JwtPayload | ImpersonationJwtPayload;
@@ -37,6 +39,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (isImpersonationPayload(payload)) {
       return {
         userId: payload.sub,
+        tenantId: payload.tid,
         impersonation: {
           sessionId: payload.impersonationSessionId,
           mode: payload.mode,
@@ -44,6 +47,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         },
       };
     }
-    return { userId: payload.sub, email: payload.email };
+    return { userId: payload.sub, email: payload.email, tenantId: payload.tid };
   }
 }

@@ -31,6 +31,7 @@ export class AuthController {
     return {
       accessToken: session.accessToken,
       expiresIn: session.expiresIn,
+      activeTenantId: session.activeTenantId,
       user: session.user,
     };
   }
@@ -46,6 +47,7 @@ export class AuthController {
     return {
       accessToken: session.accessToken,
       expiresIn: session.expiresIn,
+      activeTenantId: session.activeTenantId,
       user: session.user,
     };
   }
@@ -62,6 +64,7 @@ export class AuthController {
     return {
       accessToken: session.accessToken,
       expiresIn: session.expiresIn,
+      activeTenantId: session.activeTenantId,
       user: session.user,
     };
   }

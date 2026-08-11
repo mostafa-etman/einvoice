@@ -1,5 +1,5 @@
 import { apiFetch } from './client';
-import { setAccessToken, setSessionHint } from '@/lib/session';
+import { setAccessToken, setActiveTenantId, setSessionHint } from '@/lib/session';
 
 export type AuthUser = {
   id: string;
@@ -10,8 +10,17 @@ export type AuthUser = {
 export type AuthSession = {
   accessToken: string;
   expiresIn?: string;
+  activeTenantId?: string | null;
   user: AuthUser;
 };
+
+function applySession(session: AuthSession) {
+  setAccessToken(session.accessToken);
+  setSessionHint(true);
+  if (session.activeTenantId) {
+    setActiveTenantId(session.activeTenantId);
+  }
+}
 
 export async function register(input: {
   email: string;
@@ -23,8 +32,7 @@ export async function register(input: {
     body: input,
     skipAuth: true,
   });
-  setAccessToken(session.accessToken);
-  setSessionHint(true);
+  applySession(session);
   return session;
 }
 
@@ -37,8 +45,7 @@ export async function login(input: {
     body: input,
     skipAuth: true,
   });
-  setAccessToken(session.accessToken);
-  setSessionHint(true);
+  applySession(session);
   return session;
 }
 
@@ -53,8 +60,7 @@ export async function refresh(): Promise<AuthSession> {
         skipAuth: true,
         retry: false,
       });
-      setAccessToken(session.accessToken);
-      setSessionHint(true);
+      applySession(session);
       return session;
     })().finally(() => {
       refreshInFlight = null;

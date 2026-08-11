@@ -2,6 +2,7 @@ import {
   getAccessToken,
   getActiveTenantId,
   setAccessToken,
+  setActiveTenantId,
   setSessionHint,
 } from '@/lib/session';
 
@@ -59,8 +60,14 @@ async function refreshAccessToken(): Promise<string | null> {
         setSessionHint(false);
         return null;
       }
-      const data = (await res.json()) as { accessToken: string };
+      const data = (await res.json()) as {
+        accessToken: string;
+        activeTenantId?: string | null;
+      };
       setAccessToken(data.accessToken);
+      if (data.activeTenantId) {
+        setActiveTenantId(data.activeTenantId);
+      }
       return data.accessToken;
     })().finally(() => {
       refreshPromise = null;

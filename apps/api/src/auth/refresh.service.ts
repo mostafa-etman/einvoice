@@ -14,7 +14,11 @@ export class RefreshService {
     return createHash('sha256').update(raw).digest('hex');
   }
 
-  async issue(userId: string, ttlDays: number): Promise<{ raw: string; expiresAt: Date }> {
+  async issue(
+    userId: string,
+    ttlDays: number,
+    activeTenantId?: string | null,
+  ): Promise<{ raw: string; expiresAt: Date }> {
     const raw = this.createRawToken();
     const expiresAt = new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000);
     await this.prisma.refreshSession.create({
@@ -22,6 +26,7 @@ export class RefreshService {
         userId,
         tokenHash: this.hashToken(raw),
         expiresAt,
+        activeTenantId: activeTenantId ?? null,
       },
     });
     return { raw, expiresAt };
@@ -31,7 +36,12 @@ export class RefreshService {
   async rotate(
     raw: string,
     ttlDays: number,
-  ): Promise<{ userId: string; raw: string; expiresAt: Date }> {
+  ): Promise<{
+    userId: string;
+    raw: string;
+    expiresAt: Date;
+    activeTenantId: string | null;
+  }> {
     const tokenHash = this.hashToken(raw);
     const existing = await this.prisma.refreshSession.findFirst({
       where: { tokenHash },
@@ -48,6 +58,7 @@ export class RefreshService {
           userId: existing.userId,
           tokenHash: this.hashToken(newRaw),
           expiresAt,
+          activeTenantId: existing.activeTenantId,
         },
       });
       await tx.refreshSession.update({
@@ -57,7 +68,20 @@ export class RefreshService {
       return next;
     });
 
-    return { userId: created.userId, raw: newRaw, expiresAt };
+    return {
+      userId: created.userId,
+      raw: newRaw,
+      expiresAt,
+      activeTenantId: created.activeTenantId,
+    };
+  }
+
+  async setActiveTenant(raw: string, tenantId: string): Promise<void> {
+    const tokenHash = this.hashToken(raw);
+    await this.prisma.refreshSession.updateMany({
+      where: { tokenHash, revokedAt: null },
+      data: { activeTenantId: tenantId },
+    });
   }
 
   async revoke(raw: string): Promise<void> {

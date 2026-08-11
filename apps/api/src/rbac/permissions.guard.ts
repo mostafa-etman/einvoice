@@ -9,6 +9,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import type { PermissionCode } from '@einvoice/shared';
 import type { AuthUser } from '../auth/current-user.decorator';
+import { TenantContextService } from '../tenant/tenant-context.service';
 import { TenantService } from '../tenant/tenant.service';
 
 export const PERMISSIONS_KEY = 'permissions';
@@ -20,6 +21,7 @@ export class PermissionsGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly tenants: TenantService,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -27,18 +29,24 @@ export class PermissionsGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
-    if (!required?.length) {
-      return true;
-    }
 
     const req = context.switchToHttp().getRequest<{
       user?: AuthUser;
-      headers: Record<string, string | undefined>;
+      headers: Record<string, string | string[] | undefined>;
     }>();
+
+    if (!required?.length) {
+      // Still bind/verify tenant when a tenant is present so un-annotated
+      // routes cannot use a forged X-Tenant-Id.
+      await this.tenantContext.bind(req);
+      return true;
+    }
+
     if (!req.user) {
       throw new UnauthorizedException();
     }
-    const tenantId = req.headers['x-tenant-id'];
+
+    const tenantId = await this.tenantContext.bind(req);
     if (!tenantId) {
       throw new ForbiddenException('X-Tenant-Id required');
     }

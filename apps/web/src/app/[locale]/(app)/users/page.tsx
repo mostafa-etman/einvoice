@@ -53,6 +53,7 @@ export default function UsersPage() {
   return (
     <section>
       <h1 className="font-display text-token-xl">{t('title')}</h1>
+      <p className="mt-token-xs text-token-sm text-foreground/70">{t('inviteHint')}</p>
       {forbidden ? (
         <p className="mt-token-md text-token-sm text-red-700">{t('forbidden')}</p>
       ) : null}

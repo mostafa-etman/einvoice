@@ -318,6 +318,7 @@ model Tenant {
   impersonationSessions ImpersonationSession[]
   invoiceNumbering     TenantInvoiceNumbering?
   documentNumberSequences DocumentNumberSequence[]
+  refreshSessions      RefreshSession[]
 
   @@map("tenants")
 }
@@ -624,20 +625,24 @@ model Membership {
 }
 
 model RefreshSession {
-  id           String    @id @default(uuid()) @db.Uuid
-  userId       String    @map("user_id") @db.Uuid
-  tokenHash    String    @map("token_hash")
-  expiresAt    DateTime  @map("expires_at")
-  revokedAt    DateTime? @map("revoked_at")
-  replacedById String?   @map("replaced_by_id") @db.Uuid
-  createdAt    DateTime  @default(now()) @map("created_at")
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  tokenHash      String    @map("token_hash")
+  expiresAt      DateTime  @map("expires_at")
+  revokedAt      DateTime? @map("revoked_at")
+  replacedById   String?   @map("replaced_by_id") @db.Uuid
+  /// Last company the user switched to on this session (JWT `tid` is derived from this).
+  activeTenantId String?   @map("active_tenant_id") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at")
 
-  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  replacedBy RefreshSession?  @relation("RefreshRotation", fields: [replacedById], references: [id])
-  replaces   RefreshSession[] @relation("RefreshRotation")
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activeTenant Tenant?          @relation(fields: [activeTenantId], references: [id], onDelete: SetNull)
+  replacedBy   RefreshSession?  @relation("RefreshRotation", fields: [replacedById], references: [id])
+  replaces     RefreshSession[] @relation("RefreshRotation")
 
   @@index([userId])
   @@index([tokenHash])
+  @@index([activeTenantId])
   @@map("refresh_sessions")
 }
 
