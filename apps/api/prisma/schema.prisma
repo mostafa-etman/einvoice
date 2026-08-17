@@ -319,6 +319,7 @@ model Tenant {
   invoiceNumbering     TenantInvoiceNumbering?
   documentNumberSequences DocumentNumberSequence[]
   refreshSessions      RefreshSession[]
+  customers            Customer[]
 
   @@map("tenants")
 }
@@ -564,6 +565,37 @@ model ItemCodeSyncRun {
   @@index([tenantId])
   @@index([tenantId, createdAt])
   @@map("item_code_sync_runs")
+}
+
+/// Tenant customer directory (ETA invoice receivers) — reuse on documents without retyping.
+model Customer {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  /// ETA receiver.type: B (Business), P (Person), F (Foreign).
+  type            String
+  /// Tax registration / national ID / foreign ID — maps to ETA receiver.id.
+  registrationId  String   @map("registration_id")
+  /// Primary name used as ETA receiver.name (usually Arabic legal name).
+  name            String
+  nameEn          String?  @map("name_en")
+  /// ETA address object (country, governate, regionCity, street, …).
+  addressJson     Json     @map("address_json")
+  /// Optional internal code for the tenant's own reference.
+  code            String?
+  email           String?
+  phone           String?
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, type, registrationId])
+  @@index([tenantId])
+  @@index([tenantId, name])
+  @@index([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("customers")
 }
 
 model Permission {

@@ -27,6 +27,7 @@ import { BackupModule } from './backup/backup.module';
 import { BillingModule } from './billing/billing.module';
 import { EmailModule } from './email/email.module';
 import { PlatformAdminModule } from './platform-admin/platform-admin.module';
+import { CustomersModule } from './customers/customers.module';
 
 @Module({
   imports: [
@@ -55,6 +56,7 @@ import { PlatformAdminModule } from './platform-admin/platform-admin.module';
     BillingModule,
     EmailModule,
     PlatformAdminModule,
+    CustomersModule,
   ],
   providers: [
     {

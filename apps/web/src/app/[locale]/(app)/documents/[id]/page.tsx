@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { LocalPdfPreviewModal } from '@/components/local-pdf-preview-modal';
+import { CustomerPicker } from '@/components/customers/customer-picker';
 import {
   createDocument,
   downloadLocalPrintoutFromBody,
@@ -1443,6 +1444,17 @@ export default function DocumentEditorPage() {
             {showReceiver ? (
               <div className="space-y-token-sm rounded border border-border bg-surface p-token-sm">
                 {sectionTitle(t('sectionReceiver'))}
+                <CustomerPicker
+                  receiver={receiver}
+                  onPick={(next) => {
+                    setReceiver({
+                      type: next.type || 'B',
+                      id: next.id || '',
+                      name: next.name || '',
+                      address: { ...emptyAddress(), ...next.address },
+                    });
+                  }}
+                />
                 <label className="block text-token-sm">
                   {t('receiverType')}
                   <select
@@ -1460,6 +1472,7 @@ export default function DocumentEditorPage() {
                   {t('receiverId')}
                   <input
                     className={fieldClass()}
+                    dir="ltr"
                     value={receiver.id}
                     onChange={(e) => setReceiver({ ...receiver, id: e.target.value })}
                   />

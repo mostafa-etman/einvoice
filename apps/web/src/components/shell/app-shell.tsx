@@ -13,6 +13,7 @@ import { getSidebarCollapsed, setSidebarCollapsed } from '@/lib/session';
 type NavIcon =
   | 'home'
   | 'documents'
+  | 'customers'
   | 'sync'
   | 'analytics'
   | 'reports'
@@ -49,6 +50,14 @@ function NavGlyph({ name }: { name: NavIcon }) {
         <svg {...common}>
           <path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
           <path d="M14 3v5h5M9 13h6M9 17h6" />
+        </svg>
+      );
+    case 'customers':
+      return (
+        <svg {...common}>
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
         </svg>
       );
     case 'sync':
@@ -171,6 +180,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const nav: Array<{ href: string; label: string; icon: NavIcon }> = [
     { href: `/${locale}`, label: t('nav.home'), icon: 'home' },
     { href: `/${locale}/documents`, label: t('nav.documents'), icon: 'documents' },
+    { href: `/${locale}/customers`, label: t('nav.customers'), icon: 'customers' },
     { href: `/${locale}/sync`, label: t('nav.sync'), icon: 'sync' },
     { href: `/${locale}/analytics`, label: t('nav.analytics'), icon: 'analytics' },
     { href: `/${locale}/reports`, label: t('nav.reports'), icon: 'reports' },

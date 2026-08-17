@@ -98,6 +98,13 @@ CREATE POLICY tenant_isolation_item_code_sync_runs ON item_code_sync_runs
   USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
   WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
 
+ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customers FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_customers ON customers;
+CREATE POLICY tenant_isolation_customers ON customers
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
 ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE documents FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_documents ON documents;
