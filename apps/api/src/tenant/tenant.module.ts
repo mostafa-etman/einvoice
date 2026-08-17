@@ -4,6 +4,7 @@ import { AuthModule } from '../auth/auth.module';
 import { BillingModule } from '../billing/billing.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { PermissionsGuard } from '../rbac/permissions.guard';
+import { RolesService } from '../rbac/roles.service';
 import { TenantAdminController } from './tenant-admin.controller';
 import { TenantContextInterceptor } from './tenant-context.interceptor';
 import { TenantContextService } from './tenant-context.service';
@@ -18,12 +19,14 @@ import { TenantService } from './tenant.service';
   controllers: [TenantController, TenantAdminController],
   providers: [
     TenantService,
+    RolesService,
     TenantContextService,
     TenantContextInterceptor,
     PermissionsGuard,
   ],
   exports: [
     TenantService,
+    RolesService,
     PermissionsGuard,
     TenantContextService,
     TenantContextInterceptor,

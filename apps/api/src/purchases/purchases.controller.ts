@@ -38,7 +38,7 @@ export class PurchasesController {
   ) {}
 
   @Get()
-  @RequirePermissions(PERMISSIONS.DOCUMENTS_VIEW)
+  @RequirePermissions(PERMISSIONS.PURCHASES_VIEW)
   list(
     @Headers('x-tenant-id') tenantHeader: string | undefined,
     @Query('from') from?: string,
@@ -90,7 +90,7 @@ export class PurchasesController {
   }
 
   @Post('sync')
-  @RequirePermissions(PERMISSIONS.DOCUMENTS_MANAGE)
+  @RequirePermissions(PERMISSIONS.PURCHASES_MANAGE)
   async syncNow(
     @Headers('x-tenant-id') tenantHeader: string | undefined,
     @CurrentUser() user: { userId: string },
@@ -106,14 +106,14 @@ export class PurchasesController {
   }
 
   @Get('sync/latest')
-  @RequirePermissions(PERMISSIONS.DOCUMENTS_VIEW)
+  @RequirePermissions(PERMISSIONS.PURCHASES_VIEW)
   latestSync(@Headers('x-tenant-id') tenantHeader: string | undefined) {
     return this.sync.latestSync(requireTenant(tenantHeader));
   }
 
   /** Cancel a stuck PENDING/RUNNING purchases sync so a new one can start. */
   @Post('sync/reset')
-  @RequirePermissions(PERMISSIONS.DOCUMENTS_MANAGE)
+  @RequirePermissions(PERMISSIONS.PURCHASES_MANAGE)
   async resetSync(
     @Headers('x-tenant-id') tenantHeader: string | undefined,
     @CurrentUser() user: { userId: string },
@@ -123,7 +123,7 @@ export class PurchasesController {
   }
 
   @Get(':id')
-  @RequirePermissions(PERMISSIONS.DOCUMENTS_VIEW)
+  @RequirePermissions(PERMISSIONS.PURCHASES_VIEW)
   async get(
     @Headers('x-tenant-id') tenantHeader: string | undefined,
     @Param('id') id: string,
@@ -134,7 +134,7 @@ export class PurchasesController {
   }
 
   @Patch(':id')
-  @RequirePermissions(PERMISSIONS.DOCUMENTS_MANAGE)
+  @RequirePermissions(PERMISSIONS.PURCHASES_MANAGE)
   async patch(
     @Headers('x-tenant-id') tenantHeader: string | undefined,
     @Param('id') id: string,
@@ -159,7 +159,7 @@ export class PurchasesController {
   }
 
   @Post(':id/accept')
-  @RequirePermissions(PERMISSIONS.DOCUMENTS_MANAGE)
+  @RequirePermissions(PERMISSIONS.PURCHASES_MANAGE)
   async accept(
     @Headers('x-tenant-id') tenantHeader: string | undefined,
     @CurrentUser() user: { userId: string },
@@ -171,7 +171,7 @@ export class PurchasesController {
   }
 
   @Post(':id/reject')
-  @RequirePermissions(PERMISSIONS.DOCUMENTS_MANAGE)
+  @RequirePermissions(PERMISSIONS.PURCHASES_MANAGE)
   async reject(
     @Headers('x-tenant-id') tenantHeader: string | undefined,
     @CurrentUser() user: { userId: string },
@@ -184,7 +184,7 @@ export class PurchasesController {
   }
 
   @Post(':id/decline-cancelation')
-  @RequirePermissions(PERMISSIONS.DOCUMENTS_MANAGE)
+  @RequirePermissions(PERMISSIONS.PURCHASES_MANAGE)
   async declineCancelation(
     @Headers('x-tenant-id') tenantHeader: string | undefined,
     @CurrentUser() user: { userId: string },
@@ -196,7 +196,7 @@ export class PurchasesController {
   }
 
   @Get(':id/printout')
-  @RequirePermissions(PERMISSIONS.DOCUMENTS_VIEW)
+  @RequirePermissions(PERMISSIONS.PURCHASES_VIEW)
   async printout(
     @Headers('x-tenant-id') tenantHeader: string | undefined,
     @Param('id') id: string,
@@ -221,7 +221,7 @@ export class PurchasesController {
   }
 
   @Get(':id/local-printout')
-  @RequirePermissions(PERMISSIONS.DOCUMENTS_VIEW)
+  @RequirePermissions(PERMISSIONS.PURCHASES_VIEW)
   async localPrintout(
     @Headers('x-tenant-id') tenantHeader: string | undefined,
     @Param('id') id: string,

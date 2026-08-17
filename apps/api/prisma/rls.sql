@@ -14,6 +14,9 @@ CREATE POLICY tenant_isolation_branches ON branches
   USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
   WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
 
+-- Custom roles use the existing tenant-scoped `roles` + `role_permissions`
+-- tables (is_system = false). No extra tables: policies below isolate by
+-- app.tenant_id (session tid), never by client input.
 ALTER TABLE roles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE roles FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_roles ON roles;

@@ -12,6 +12,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "node ./scripts/migrate.mjs",
     "db:seed": "node ./scripts/seed.mjs",
+    "permissions:sync": "node ./scripts/sync-permissions.mjs",
     "eta:codes:seed": "node ./scripts/seed-eta-codes.mjs",
     "eta:codes:refresh-sdk": "node ./scripts/refresh-eta-codes-from-sdk.mjs"
   },

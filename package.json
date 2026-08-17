@@ -14,6 +14,7 @@
     "build:agent": "dotnet build apps/agent/Einvoice.Agent.sln",
     "db:prepare": "pnpm --filter @einvoice/api prisma:generate && pnpm --filter @einvoice/api prisma:migrate",
     "db:seed": "pnpm --filter @einvoice/api db:seed",
+    "permissions:sync": "pnpm --filter @einvoice/api permissions:sync",
     "eta:codes:seed": "pnpm --filter @einvoice/api eta:codes:seed",
     "eta:codes:refresh-sdk": "pnpm --filter @einvoice/api eta:codes:refresh-sdk",
     "dev:api": "pnpm db:prepare && turbo run dev --filter=@einvoice/shared --filter=@einvoice/api",

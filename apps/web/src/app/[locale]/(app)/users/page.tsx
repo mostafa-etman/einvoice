@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { addMember, listMembers } from '@/lib/api/members';
+import { addMember, listMembers, updateMemberRole } from '@/lib/api/members';
 import { listRoles } from '@/lib/api/roles';
 import { ApiError } from '@/lib/api/client';
 import { useTenant } from '@/lib/tenant-provider';
@@ -43,6 +43,14 @@ export default function UsersPage() {
     mutationFn: (values: FormValues) => addMember(values.email, values.roleId),
     onSuccess: async () => {
       reset();
+      await qc.invalidateQueries({ queryKey: ['members', tenantId] });
+    },
+  });
+
+  const changeRole = useMutation({
+    mutationFn: (input: { membershipId: string; roleId: string }) =>
+      updateMemberRole(input.membershipId, input.roleId),
+    onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['members', tenantId] });
     },
   });
@@ -95,6 +103,11 @@ export default function UsersPage() {
       {invite.error instanceof ApiError && invite.error.status === 403 ? (
         <p className="mt-token-sm text-token-sm text-red-700">{t('forbidden')}</p>
       ) : null}
+      {changeRole.error instanceof ApiError ? (
+        <p className="mt-token-sm text-token-sm text-red-700">
+          {changeRole.error.status === 403 ? t('forbidden') : changeRole.error.message}
+        </p>
+      ) : null}
 
       <table className="mt-token-xl w-full border-collapse text-start text-token-sm">
         <thead>
@@ -107,7 +120,23 @@ export default function UsersPage() {
           {(membersQuery.data ?? []).map((m) => (
             <tr key={m.id} className="border-b border-border/60">
               <td className="py-token-sm">{m.user.email}</td>
-              <td className="py-token-sm">{m.role.name}</td>
+              <td className="py-token-sm">
+                <select
+                  className="rounded border border-border bg-surface px-token-sm py-token-xs"
+                  value={m.role.id}
+                  onChange={(e) => {
+                    const roleId = e.target.value;
+                    if (roleId === m.role.id) return;
+                    void changeRole.mutateAsync({ membershipId: m.id, roleId });
+                  }}
+                >
+                  {(rolesQuery.data ?? []).map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </select>
+              </td>
             </tr>
           ))}
         </tbody>

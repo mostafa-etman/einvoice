@@ -32,6 +32,17 @@ describe('RBAC permission matrix', () => {
     expect(ROLE_PERMISSION_MATRIX.Admin).toContain(PERMISSIONS.ANALYTICS_EXPORT);
   });
 
+  it('Owner/Admin/Accountant include customers and purchases', () => {
+    expect(ROLE_PERMISSION_MATRIX.Owner).toContain(PERMISSIONS.CUSTOMERS_VIEW);
+    expect(ROLE_PERMISSION_MATRIX.Owner).toContain(PERMISSIONS.CUSTOMERS_MANAGE);
+    expect(ROLE_PERMISSION_MATRIX.Admin).toContain(PERMISSIONS.CUSTOMERS_VIEW);
+    expect(ROLE_PERMISSION_MATRIX.Accountant).toContain(PERMISSIONS.CUSTOMERS_MANAGE);
+    expect(ROLE_PERMISSION_MATRIX.Owner).toContain(PERMISSIONS.PURCHASES_VIEW);
+    expect(ROLE_PERMISSION_MATRIX.Accountant).toContain(PERMISSIONS.PURCHASES_MANAGE);
+    expect(ROLE_PERMISSION_MATRIX.Viewer).toContain(PERMISSIONS.PURCHASES_VIEW);
+    expect(ROLE_PERMISSION_MATRIX.Viewer).not.toContain(PERMISSIONS.PURCHASES_MANAGE);
+  });
+
   it('PermissionsGuard is defined', () => {
     expect(PermissionsGuard).toBeDefined();
   });
