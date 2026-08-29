@@ -2,7 +2,14 @@ import { apiFetch } from './client';
 import { setAccessToken, setActiveBranchId, setActiveTenantId } from '@/lib/session';
 
 export type TenantMembership = {
-  tenant: { id: string; name: string };
+  tenant: {
+    id: string;
+    name: string;
+    activationStatus?: 'PENDING' | 'ACTIVE' | 'REJECTED';
+    lifecycleStatus?: 'PENDING' | 'ACTIVE' | 'REJECTED' | 'SUSPENDED';
+    suspendedAt?: string | null;
+    pointsBalance?: number;
+  };
   role: { id: string; name: string };
 };
 
@@ -36,15 +43,19 @@ export async function switchTenant(tenantId: string): Promise<SwitchTenantResult
   return result;
 }
 
-export async function createTenant(name: string): Promise<{ id: string; name: string }> {
+export async function createTenant(
+  name: string,
+  planCode?: string,
+): Promise<{ id: string; name: string; activationStatus?: string }> {
   const tenant = await apiFetch<{
     id: string;
     name: string;
+    activationStatus?: string;
     accessToken?: string;
     activeTenantId?: string;
   }>('/tenants', {
     method: 'POST',
-    body: { name },
+    body: { name, planCode },
   });
   if (tenant.accessToken) {
     setAccessToken(tenant.accessToken);
@@ -52,6 +63,16 @@ export async function createTenant(name: string): Promise<{ id: string; name: st
   setActiveTenantId(tenant.activeTenantId ?? tenant.id);
   setActiveBranchId(null);
   return tenant;
+}
+
+export type ActivationHelp = {
+  whatsappE164: string;
+  whatsappDisplay: string;
+  whatsappUrl: string;
+};
+
+export function fetchActivationHelp() {
+  return apiFetch<ActivationHelp>('/tenants/activation-help');
 }
 
 export async function listBranches(): Promise<Branch[]> {

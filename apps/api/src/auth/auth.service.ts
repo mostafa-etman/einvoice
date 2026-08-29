@@ -34,15 +34,21 @@ export class AuthService {
       throw new ConflictException('Unable to register with that email');
     }
     const passwordHash = await this.passwords.hash(password);
-    const user = await this.prisma.user.create({
-      data: { email: normalized, passwordHash, name },
+    const created = await this.prisma.user.create({
+      data: {
+        email: normalized,
+        passwordHash,
+        name,
+        isPlatformOperator: this.isConfiguredOperator(normalized),
+      },
     });
+    const user = await this.ensurePlatformOperator(created);
     await this.audit.write({
       action: 'auth.register.success',
       outcome: 'success',
       actorUserId: user.id,
     });
-    return this.issueSession(user.id, user.email, user.name, null);
+    return this.issueSession(user.id, user.email, user.name, user.isPlatformOperator, null);
   }
 
   async login(email: string, password: string) {
@@ -61,8 +67,9 @@ export class AuthService {
       outcome: 'success',
       actorUserId: user.id,
     });
-    const tenantId = await this.firstMembershipTenantId(user.id);
-    return this.issueSession(user.id, user.email, user.name, tenantId);
+    const operator = await this.ensurePlatformOperator(user);
+    const tenantId = await this.firstMembershipTenantId(operator.id);
+    return this.issueSession(operator.id, operator.email, operator.name, operator.isPlatformOperator, tenantId);
   }
 
   async refreshSession(rawToken: string) {
@@ -84,7 +91,12 @@ export class AuthService {
       expiresIn: 900,
       refreshRaw: rotated.raw,
       activeTenantId: tenantId,
-      user: { id: user.id, email: user.email, name: user.name },
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        isPlatformOperator: user.isPlatformOperator,
+      },
     };
   }
 
@@ -131,6 +143,7 @@ export class AuthService {
     userId: string,
     email: string,
     name: string | null,
+    isPlatformOperator: boolean,
     tenantId: string | null,
   ) {
     const accessToken = await this.signAccess(userId, email, tenantId);
@@ -140,8 +153,30 @@ export class AuthService {
       expiresIn: 900,
       refreshRaw: raw,
       activeTenantId: tenantId,
-      user: { id: userId, email, name },
+      user: { id: userId, email, name, isPlatformOperator },
     };
+  }
+
+  private isConfiguredOperator(email: string): boolean {
+    const raw = this.env.PLATFORM_OPERATOR_EMAILS ?? '';
+    const allowed = raw
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    return allowed.includes(email);
+  }
+
+  private async ensurePlatformOperator<T extends { id: string; email: string; isPlatformOperator: boolean }>(
+    user: T,
+  ): Promise<T> {
+    if (user.isPlatformOperator || !this.isConfiguredOperator(user.email)) {
+      return user;
+    }
+    const updated = await this.prisma.user.update({
+      where: { id: user.id },
+      data: { isPlatformOperator: true },
+    });
+    return { ...user, isPlatformOperator: updated.isPlatformOperator };
   }
 
   private signAccess(userId: string, email: string, tenantId: string | null) {

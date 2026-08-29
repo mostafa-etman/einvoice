@@ -1,16 +1,22 @@
 import { apiFetch } from './client';
 import type { PlanCode, SubscriptionStatus } from './billing';
 
+export type LifecycleStatus = 'PENDING' | 'ACTIVE' | 'REJECTED' | 'SUSPENDED';
+
 export type TenantSummary = {
   id: string;
   name: string;
   planCode: PlanCode | null;
   status: SubscriptionStatus | null;
+  lifecycleStatus: LifecycleStatus;
+  activationStatus: 'PENDING' | 'ACTIVE' | 'REJECTED';
   suspendedAt: string | null;
+  pointsBalance: number;
+  createdAt: string;
+  ownerEmail: string | null;
 };
 
 export type TenantDetail = TenantSummary & {
-  ownerEmail: string | null;
   ownerId: string | null;
   graceEndsAt: string | null;
   entitlements: {
@@ -34,6 +40,49 @@ export type TenantUsage = {
     branches: number;
     devices: number;
   };
+  pointsBalance: number;
+  pointsLedger: {
+    items: Array<{
+      id: string;
+      delta: number;
+      balanceAfter: number;
+      reason: string;
+      documentKind: string | null;
+      note: string | null;
+      createdAt: string;
+    }>;
+    nextCursor: string | null;
+    consumedOnPage: number;
+  };
+};
+
+export type PlanAdmin = {
+  id: string;
+  code: string;
+  nameEn: string;
+  nameAr: string;
+  descriptionEn: string | null;
+  descriptionAr: string | null;
+  documentQuota: number;
+  branchQuota: number;
+  deviceQuota: number;
+  includedPoints: number;
+  selfServe: boolean;
+  isActive: boolean;
+  sortOrder: number;
+};
+
+export type DocumentCostView = {
+  documentKind: string;
+  points: number;
+  source: 'platform' | 'tenant';
+};
+
+export type PlatformSettings = {
+  id: string;
+  autoActivateSubCompanies: boolean;
+  supportWhatsappE164: string;
+  supportWhatsappDisplay: string;
 };
 
 export type ImpersonationSessionView = {
@@ -49,12 +98,14 @@ export type ImpersonationSessionView = {
 export function listTenants(params?: {
   q?: string;
   status?: SubscriptionStatus;
+  lifecycle?: LifecycleStatus;
   cursor?: string;
   limit?: number;
 }) {
   const qs = new URLSearchParams();
   if (params?.q) qs.set('q', params.q);
   if (params?.status) qs.set('status', params.status);
+  if (params?.lifecycle) qs.set('lifecycle', params.lifecycle);
   if (params?.cursor) qs.set('cursor', params.cursor);
   if (params?.limit) qs.set('limit', String(params.limit));
   const query = qs.toString();
@@ -78,6 +129,20 @@ export function provisionTenant(input: {
 
 export function getTenant(tenantId: string) {
   return apiFetch<TenantDetail>(`/platform-admin/tenants/${tenantId}`);
+}
+
+export function approveTenant(tenantId: string, reason?: string) {
+  return apiFetch<TenantDetail>(`/platform-admin/tenants/${tenantId}/approve`, {
+    method: 'POST',
+    body: { reason },
+  });
+}
+
+export function rejectTenant(tenantId: string, reason: string) {
+  return apiFetch<TenantDetail>(`/platform-admin/tenants/${tenantId}/reject`, {
+    method: 'POST',
+    body: { reason },
+  });
 }
 
 export function suspendTenant(tenantId: string, reason: string) {
@@ -112,6 +177,54 @@ export function assignPlan(
 
 export function getTenantUsage(tenantId: string) {
   return apiFetch<TenantUsage>(`/platform-admin/tenants/${tenantId}/usage`);
+}
+
+export function adjustPoints(tenantId: string, delta: number, note?: string) {
+  return apiFetch<{ tenantId: string; pointsBalance: number }>(
+    `/platform-admin/tenants/${tenantId}/points`,
+    { method: 'POST', body: { delta, note } },
+  );
+}
+
+export function listAdminPlans() {
+  return apiFetch<{ plans: PlanAdmin[] }>('/platform-admin/plans');
+}
+
+export function upsertPlan(input: {
+  code: string;
+  nameEn: string;
+  nameAr: string;
+  documentQuota: number;
+  branchQuota: number;
+  deviceQuota: number;
+  includedPoints: number;
+  selfServe?: boolean;
+  isActive?: boolean;
+  sortOrder?: number;
+}) {
+  return apiFetch<PlanAdmin>('/platform-admin/plans', { method: 'POST', body: input });
+}
+
+export function getDocumentCosts() {
+  return apiFetch<DocumentCostView[]>('/platform-admin/document-costs');
+}
+
+export function setDocumentCosts(items: Array<{ documentKind: string; points: number }>) {
+  return apiFetch<DocumentCostView[]>('/platform-admin/document-costs', {
+    method: 'PUT',
+    body: { items },
+  });
+}
+
+export function getSettings() {
+  return apiFetch<PlatformSettings>('/platform-admin/settings');
+}
+
+export function updateSettings(patch: Partial<PlatformSettings>) {
+  return apiFetch<PlatformSettings>('/platform-admin/settings', {
+    method: 'PATCH',
+    body: patch,
+  });
 }
 
 export function startImpersonation(input: {

@@ -11,6 +11,12 @@ export const PLATFORM_AUDIT_ACTIONS = {
   IMPERSONATION_EXPIRE: 'platform.impersonation.expire',
   /** Written for EVERY tenant-API request (read + write) made under an impersonation token — no sampling. */
   IMPERSONATION_ACTION: 'platform.impersonation.action',
+  TENANT_APPROVE: 'platform.tenant.approve',
+  TENANT_REJECT: 'platform.tenant.reject',
+  POINTS_ADJUST: 'platform.points.adjust',
+  POINTS_COSTS_SET: 'platform.points.costs.set',
+  PLAN_UPSERT: 'platform.plan.upsert',
+  SETTINGS_UPDATE: 'platform.settings.update',
 } as const;
 
 export type PlatformAuditAction =

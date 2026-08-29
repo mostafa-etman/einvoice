@@ -105,6 +105,17 @@ const envSchema = z.object({
     .default(900_000),
   IMPERSONATION_TTL_MINUTES: z.coerce.number().int().positive().default(30),
   EMAIL_TRANSPORT: z.string().default('console'),
+  /**
+   * When true, new tenants skip the pending-approval gate (ACTIVE immediately).
+   * Unset: auto-approve only in NODE_ENV=test so existing API tests keep working.
+   * Production must leave this unset/false so signup requires platform approval.
+   */
+  SIGNUP_AUTO_APPROVE: z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === 'true' || v === '1')),
+  /** Comma-separated emails that become isPlatformOperator on register/login. */
+  PLATFORM_OPERATOR_EMAILS: z.string().optional(),
 });
 
 export type ApiEnv = Omit<
@@ -118,6 +129,7 @@ export type ApiEnv = Omit<
   | 'ETA_SANDBOX_INTEGRATION'
   | 'PURCHASES_SYNC_ENABLED'
   | 'PURCHASES_SYNC_USE_RECENT'
+  | 'SIGNUP_AUTO_APPROVE'
 > & {
   SECRETS_MASTER_KEY: string;
   BACKUP_ARCHIVE_MASTER_KEY: string;
@@ -128,6 +140,7 @@ export type ApiEnv = Omit<
   ETA_SANDBOX_INTEGRATION: boolean;
   PURCHASES_SYNC_ENABLED: boolean;
   PURCHASES_SYNC_USE_RECENT: boolean;
+  SIGNUP_AUTO_APPROVE: boolean;
 };
 
 const TEST_SECRETS_MASTER_KEY = Buffer.from(
@@ -241,6 +254,12 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): ApiEnv {
     PURCHASES_SYNC_INTERVAL_MS: result.data.PURCHASES_SYNC_INTERVAL_MS ?? 900_000,
     COOKIE_SECURE: result.data.COOKIE_SECURE ?? false,
     COOKIE_PARTITIONED: result.data.COOKIE_PARTITIONED ?? false,
+    SIGNUP_AUTO_APPROVE:
+      result.data.SIGNUP_AUTO_APPROVE === true
+        ? true
+        : result.data.SIGNUP_AUTO_APPROVE === false
+          ? false
+          : result.data.NODE_ENV === 'test',
   };
 }
 

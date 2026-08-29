@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
+import { tenantLifecycleStatus } from './tenant-lifecycle-status';
 
 export type TenantWriteCheck = { allowed: true } | { allowed: false; reason: string };
 
@@ -19,6 +20,8 @@ const BILLING_RECOVERY_PATH_PREFIXES = [
   '/billing/webhooks',
 ];
 
+const OPEN_WRITE_PATH_PREFIXES = [...BILLING_RECOVERY_PATH_PREFIXES, '/platform-admin'];
+
 @Injectable()
 export class TenantAccessService {
   constructor(
@@ -26,13 +29,24 @@ export class TenantAccessService {
     private readonly tenantPrisma: TenantPrismaService,
   ) {}
 
-  /** Suspended tenants and PAST_DUE-after-grace (READ_ONLY) / operator SUSPENDED subscriptions block writes. */
+  /** Pending / rejected / suspended tenants and READ_ONLY subscriptions block writes. */
   async isWriteAllowed(tenantId: string): Promise<TenantWriteCheck> {
     const tenant = await this.prisma.tenant.findUnique({
       where: { id: tenantId },
-      select: { suspendedAt: true },
+      select: { suspendedAt: true, activationStatus: true },
     });
-    if (tenant?.suspendedAt) {
+    if (!tenant) {
+      return { allowed: false, reason: 'tenant_not_found' };
+    }
+
+    const lifecycle = tenantLifecycleStatus(tenant);
+    if (lifecycle === 'PENDING') {
+      return { allowed: false, reason: 'tenant_pending_approval' };
+    }
+    if (lifecycle === 'REJECTED') {
+      return { allowed: false, reason: 'tenant_rejected' };
+    }
+    if (lifecycle === 'SUSPENDED' || tenant.suspendedAt) {
       return { allowed: false, reason: 'tenant_suspended' };
     }
 
@@ -51,9 +65,10 @@ export class TenantAccessService {
 }
 
 /**
- * Global write-gate: blocks mutating requests for READ_ONLY / SUSPENDED tenants
- * everywhere except billing recovery routes (checkout, change-plan, enterprise
- * request, webhooks) and GET/HEAD (always allowed — "billing recovery" + read access).
+ * Global write-gate: blocks mutating requests for pending / rejected / READ_ONLY /
+ * SUSPENDED tenants everywhere except billing recovery, platform-admin, and
+ * tenant create/switch (so a pending user can still log in, switch companies,
+ * and an approved owner can create a sub-company).
  */
 @Injectable()
 export class TenantAccessGuard implements CanActivate {
@@ -72,14 +87,16 @@ export class TenantAccessGuard implements CanActivate {
       return true;
     }
 
-    const path = req.path || req.url || '';
-    if (BILLING_RECOVERY_PATH_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+    const path = (req.path || req.url || '').split('?')[0];
+    if (OPEN_WRITE_PATH_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+      return true;
+    }
+    if (method === 'POST' && (path === '/tenants' || path === '/tenants/switch')) {
       return true;
     }
 
     const tenantId = req.headers['x-tenant-id'];
     if (!tenantId) {
-      // No tenant context yet — let downstream guards/controllers reject with the usual 400.
       return true;
     }
 

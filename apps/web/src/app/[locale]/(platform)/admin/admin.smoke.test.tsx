@@ -7,7 +7,10 @@ describe('platform admin page smoke', () => {
     expect(en.admin.provision).toBeTruthy();
     expect(en.admin.impersonate).toBeTruthy();
     expect(en.admin.accessDenied).toBeTruthy();
-    expect(ar.admin.suspend).toBeTruthy();
-    expect(ar.admin.breakGlass).toBeTruthy();
+    expect(en.admin.approve).toBeTruthy();
+    expect(en.admin.adjustPoints).toBeTruthy();
+    expect(en.pending.whatsappPrompt).toContain('{number}');
+    expect(ar.admin.approve).toBeTruthy();
+    expect(ar.pending.whatsappPrompt).toContain('واتساب');
   });
 });

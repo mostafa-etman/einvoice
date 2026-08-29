@@ -20,7 +20,8 @@
     "billing": "Billing",
     "logout": "Sign out",
     "login": "Sign in",
-    "register": "Create account"
+    "register": "Create account",
+    "platformAdmin": "Platform admin"
   },
   "auth": {
     "email": "Email",
@@ -33,6 +34,8 @@
     "submitLogin": "Sign in",
     "submitRegister": "Register",
     "submitTenant": "Continue",
+    "choosePlan": "Choose a package",
+    "planMeta": "{documents} documents / month · {branches} branches · {devices} devices · {points} points",
     "haveAccount": "Already have an account?",
     "needAccount": "Need an account?",
     "errorGeneric": "Something went wrong. Try again."
@@ -1085,9 +1088,10 @@
     "branches": "Branches",
     "devices": "Devices",
     "readOnlyWarning": "Your account is read-only until payment is recovered. Reads still work; writes are blocked.",
+    "pointsBalance": "Points balance",
     "graceEndsAt": "Grace period ends {date}",
     "plans": "Plans",
-    "planQuotas": "{documents} documents · {branches} branches · {devices} devices / month",
+    "planQuotas": "{documents} documents · {branches} branches · {devices} devices / month · {points} points",
     "current": "Current plan",
     "contactSales": "Contact sales",
     "downgrade": "Switch to Free",
@@ -1113,10 +1117,12 @@
   },
   "admin": {
     "title": "Platform admin",
-    "subtitle": "Manage tenants, plans, and impersonation",
+    "subtitle": "Approve tenants, manage plans and points",
     "accessDenied": "You don't have platform-operator access.",
     "search": "Search tenants",
     "searchPlaceholder": "Tenant name…",
+    "filterLifecycle": "Status",
+    "allStatuses": "All",
     "provision": "Provision tenant",
     "provisionTitle": "Provision a new tenant",
     "tenantName": "Tenant name",
@@ -1129,17 +1135,41 @@
     "colName": "Name",
     "colPlan": "Plan",
     "colStatus": "Status",
+    "colPoints": "Points",
+    "colContact": "Contact",
+    "colSignup": "Signed up",
     "colActions": "Actions",
     "empty": "No tenants found",
     "loading": "Loading…",
     "suspend": "Suspend",
-    "activate": "Activate",
+    "activate": "Reactivate",
+    "approve": "Approve",
+    "reject": "Reject",
     "suspendReasonPrompt": "Reason for suspending this tenant:",
+    "rejectReasonPrompt": "Reason for rejecting this tenant:",
     "viewDetails": "View",
     "detailsTitle": "Tenant details",
     "owner": "Owner",
     "entitlements": "Entitlements",
     "usage": "Usage this month",
+    "points": "Points",
+    "adjustPoints": "Adjust points",
+    "pointsDeltaPrompt": "Points to add (negative to subtract):",
+    "pointsNotePrompt": "Note for this adjustment:",
+    "tabTenants": "Tenants",
+    "tabPlans": "Plans",
+    "tabCosts": "Document costs",
+    "tabSettings": "Settings",
+    "includedPoints": "Included points",
+    "savePlan": "Save plan",
+    "newPlan": "New plan",
+    "costKind": "Document type",
+    "costPoints": "Points per send",
+    "saveCosts": "Save costs",
+    "autoActivateSubs": "Auto-activate sub-companies created by an approved owner",
+    "whatsappE164": "WhatsApp number (digits)",
+    "whatsappDisplay": "WhatsApp display",
+    "saveSettings": "Save settings",
     "impersonate": "Impersonate owner",
     "impersonateReasonPrompt": "Reason for impersonating this tenant:",
     "impersonationActive": "Impersonation session started ({mode}). Token copied to console.",
@@ -1147,5 +1177,23 @@
     "endImpersonation": "End session",
     "back": "Back to tenants",
     "error": "Something went wrong"
+  },
+  "pending": {
+    "logout": "Sign out",
+    "openAdmin": "Platform admin",
+    "whatsappPrompt": "To activate your account please contact us on WhatsApp: {number}",
+    "whatsappCta": "Open WhatsApp",
+    "PENDING": {
+      "title": "Pending activation",
+      "body": "Your company is waiting for platform approval. You can sign in, but invoicing is locked until we activate the account."
+    },
+    "REJECTED": {
+      "title": "Account not approved",
+      "body": "This company was not approved. Contact us on WhatsApp if you believe this is a mistake."
+    },
+    "SUSPENDED": {
+      "title": "Account suspended",
+      "body": "This company is suspended. Contact us on WhatsApp to restore access."
+    }
   }
 }

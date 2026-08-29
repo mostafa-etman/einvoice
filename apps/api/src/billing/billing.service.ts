@@ -164,6 +164,7 @@ export class BillingService {
       branchQuota: plan.branchQuota,
       deviceQuota: plan.deviceQuota,
       selfServe: plan.selfServe,
+      includedPoints: plan.includedPoints,
       priceDisplay: null as string | null,
     };
   }

@@ -1,7 +1,7 @@
 import { apiFetch } from './client';
 
-export type PlanCode = 'FREE' | 'STARTER' | 'PRO' | 'ENTERPRISE';
-export type SubscriptionStatus = 'ACTIVE' | 'PAST_DUE' | 'READ_ONLY' | 'SUSPENDED';
+export type PlanCode = string;
+export type SubscriptionStatus = 'ACTIVE' | 'PAST_DUE' | 'READ_ONLY' | 'SUSPENDED' | 'TRIAL' | 'CANCELLED';
 
 export type PlanView = {
   code: PlanCode;
@@ -11,6 +11,7 @@ export type PlanView = {
   branchQuota: number;
   deviceQuota: number;
   selfServe: boolean;
+  includedPoints: number;
   priceDisplay: string | null;
 };
 
@@ -23,6 +24,7 @@ export type SubscriptionView = {
     branchQuota: number;
     deviceQuota: number;
     selfServe: boolean;
+    includedPoints: number;
   };
   graceEndsAt: string | null;
   entitlements: {
@@ -31,7 +33,8 @@ export type SubscriptionView = {
     deviceQuota: number;
     overrideActive: boolean;
   };
-  accessMode: 'FULL' | 'READ_ONLY' | 'BLOCKED';
+  accessMode: 'FULL' | 'READ_ONLY' | 'BLOCKED' | 'PENDING';
+  pointsBalance: number;
 };
 
 export type QuotaMeter = { used: number; limit: number };

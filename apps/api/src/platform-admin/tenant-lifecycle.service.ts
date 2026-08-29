@@ -1,9 +1,11 @@
 import { randomBytes } from 'node:crypto';
-import { Injectable, NotFoundException } from '@nestjs/common';
-import type { Plan, PlanCode, Subscription, SubscriptionStatus, Tenant } from '@prisma/client';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import type { Plan, Subscription, SubscriptionStatus, Tenant } from '@prisma/client';
 import { PasswordService } from '../auth/password.service';
 import { QuotaService } from '../billing/quota.service';
+import { PointsService } from '../billing/points.service';
 import { SubscriptionService } from '../billing/subscription.service';
+import { tenantLifecycleStatus, type TenantLifecycleStatus } from '../billing/tenant-lifecycle-status';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
@@ -14,13 +16,13 @@ export type ProvisionTenantInput = {
   name: string;
   ownerEmail: string;
   ownerName?: string;
-  planCode: PlanCode;
+  planCode: string;
   reason?: string;
   operatorUserId: string;
 };
 
 export type AssignPlanInput = {
-  planCode?: PlanCode;
+  planCode?: string;
   documentQuota?: number | null;
   branchQuota?: number | null;
   deviceQuota?: number | null;
@@ -31,6 +33,7 @@ export type AssignPlanInput = {
 export type ListTenantsInput = {
   q?: string;
   status?: SubscriptionStatus;
+  lifecycle?: TenantLifecycleStatus;
   cursor?: string;
   limit?: number;
 };
@@ -52,6 +55,7 @@ export class TenantLifecycleService {
     private readonly subscriptions: SubscriptionService,
     private readonly quota: QuotaService,
     private readonly passwords: PasswordService,
+    private readonly points: PointsService,
   ) {}
 
   async listTenants(query: ListTenantsInput) {
@@ -67,13 +71,28 @@ export class TenantLifecycleService {
 
     const items = await Promise.all(
       page.map(async (tenant) => {
-        const subscription = await this.getSubscriptionWithPlan(tenant.id);
-        return this.toSummary(tenant, subscription);
+        const [subscription, ownerMembership] = await Promise.all([
+          this.getSubscriptionWithPlan(tenant.id),
+          this.tenantPrisma.withTenant(tenant.id, (tx) =>
+            tx.membership.findFirst({
+              where: { tenantId: tenant.id, role: { name: 'Owner' } },
+              include: { user: true },
+              orderBy: { createdAt: 'asc' },
+            }),
+          ),
+        ]);
+        return this.toSummary(tenant, subscription, ownerMembership?.user.email ?? null);
       }),
     );
 
+    const filtered = items.filter((i) => {
+      if (query.status && i.status !== query.status) return false;
+      if (query.lifecycle && i.lifecycleStatus !== query.lifecycle) return false;
+      return true;
+    });
+
     return {
-      items: query.status ? items.filter((i) => i.status === query.status) : items,
+      items: filtered,
       nextCursor: hasMore ? (page[page.length - 1]?.id ?? null) : null,
     };
   }
@@ -96,7 +115,7 @@ export class TenantLifecycleService {
     ]);
 
     return {
-      ...this.toSummary(tenant, subscription),
+      ...this.toSummary(tenant, subscription, ownerMembership?.user.email ?? null),
       ownerEmail: ownerMembership?.user.email ?? null,
       ownerId: ownerMembership?.user.id ?? null,
       entitlements,
@@ -114,18 +133,14 @@ export class TenantLifecycleService {
       });
     }
 
-    const tenant = await this.tenants.createTenant(owner.id, input.name);
+    const tenant = await this.tenants.createTenant(owner.id, input.name, {
+      planCode: input.planCode,
+      activation: 'active',
+    });
     await this.prisma.tenant.update({
       where: { id: tenant.id },
-      data: { provisionedByUserId: input.operatorUserId },
+      data: { provisionedByUserId: input.operatorUserId, approvedByUserId: input.operatorUserId },
     });
-
-    if (input.planCode !== 'FREE') {
-      await this.subscriptions.assignPlan(tenant.id, input.planCode, {
-        actorUserId: input.operatorUserId,
-        reason: input.reason ?? 'platform_provision',
-      });
-    }
 
     await this.audit.write({
       action: PLATFORM_AUDIT_ACTIONS.TENANT_PROVISION,
@@ -243,11 +258,181 @@ export class TenantLifecycleService {
     return this.getTenant(tenantId);
   }
 
+  async approveTenant(tenantId: string, operatorUserId: string, reason?: string) {
+    const tenant = await this.assertTenantExists(tenantId);
+    if (tenant.activationStatus === 'REJECTED') {
+      throw new BadRequestException('cannot_approve_rejected_tenant');
+    }
+    await this.prisma.tenant.update({
+      where: { id: tenantId },
+      data: {
+        activationStatus: 'ACTIVE',
+        approvedAt: new Date(),
+        approvedByUserId: operatorUserId,
+        rejectedAt: null,
+        rejectedReason: null,
+        suspendedAt: null,
+        suspendedReason: null,
+      },
+    });
+    await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.subscription.updateMany({
+        where: { tenantId, status: { in: ['SUSPENDED', 'READ_ONLY'] } },
+        data: { status: 'ACTIVE', graceEndsAt: null },
+      }),
+    );
+    await this.audit.write({
+      action: PLATFORM_AUDIT_ACTIONS.TENANT_APPROVE,
+      outcome: 'success',
+      actorUserId: operatorUserId,
+      tenantId,
+      resourceType: 'tenant',
+      resourceId: tenantId,
+      metadata: { reason: reason ?? null },
+    });
+    return this.getTenant(tenantId);
+  }
+
+  async rejectTenant(tenantId: string, operatorUserId: string, reason: string) {
+    await this.assertTenantExists(tenantId);
+    await this.prisma.tenant.update({
+      where: { id: tenantId },
+      data: {
+        activationStatus: 'REJECTED',
+        rejectedAt: new Date(),
+        rejectedReason: reason,
+      },
+    });
+    await this.audit.write({
+      action: PLATFORM_AUDIT_ACTIONS.TENANT_REJECT,
+      outcome: 'success',
+      actorUserId: operatorUserId,
+      tenantId,
+      resourceType: 'tenant',
+      resourceId: tenantId,
+      metadata: { reason },
+    });
+    return this.getTenant(tenantId);
+  }
+
+  async getSettings() {
+    return this.prisma.platformSettings.upsert({
+      where: { id: 'default' },
+      create: { id: 'default' },
+      update: {},
+    });
+  }
+
+  async updateSettings(
+    operatorUserId: string,
+    patch: {
+      autoActivateSubCompanies?: boolean;
+      supportWhatsappE164?: string;
+      supportWhatsappDisplay?: string;
+    },
+  ) {
+    const data: {
+      autoActivateSubCompanies?: boolean;
+      supportWhatsappE164?: string;
+      supportWhatsappDisplay?: string;
+    } = {};
+    if (typeof patch.autoActivateSubCompanies === 'boolean') {
+      data.autoActivateSubCompanies = patch.autoActivateSubCompanies;
+    }
+    if (patch.supportWhatsappE164?.trim()) {
+      data.supportWhatsappE164 = patch.supportWhatsappE164.replace(/\D/g, '');
+    }
+    if (patch.supportWhatsappDisplay?.trim()) {
+      data.supportWhatsappDisplay = patch.supportWhatsappDisplay.trim();
+    }
+    const settings = await this.prisma.platformSettings.upsert({
+      where: { id: 'default' },
+      create: { id: 'default', ...data },
+      update: data,
+    });
+    await this.audit.write({
+      action: PLATFORM_AUDIT_ACTIONS.SETTINGS_UPDATE,
+      outcome: 'success',
+      actorUserId: operatorUserId,
+      resourceType: 'platform_settings',
+      resourceId: 'default',
+      metadata: data,
+    });
+    return settings;
+  }
+
+  async listPlans() {
+    const plans = await this.prisma.plan.findMany({ orderBy: { sortOrder: 'asc' } });
+    return { plans: plans.map((p) => this.toPlanAdmin(p)) };
+  }
+
+  async upsertPlan(
+    operatorUserId: string,
+    input: {
+      code: string;
+      nameEn: string;
+      nameAr: string;
+      descriptionEn?: string;
+      descriptionAr?: string;
+      documentQuota: number;
+      branchQuota: number;
+      deviceQuota: number;
+      includedPoints: number;
+      selfServe?: boolean;
+      isActive?: boolean;
+      sortOrder?: number;
+    },
+  ) {
+    const code = input.code.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+    if (!code) throw new BadRequestException('plan_code_required');
+    const plan = await this.prisma.plan.upsert({
+      where: { code },
+      create: {
+        code,
+        nameEn: input.nameEn,
+        nameAr: input.nameAr,
+        descriptionEn: input.descriptionEn,
+        descriptionAr: input.descriptionAr,
+        documentQuota: input.documentQuota,
+        branchQuota: input.branchQuota,
+        deviceQuota: input.deviceQuota,
+        includedPoints: Math.max(0, Math.floor(input.includedPoints)),
+        selfServe: input.selfServe ?? true,
+        isActive: input.isActive ?? true,
+        sortOrder: input.sortOrder ?? 0,
+      },
+      update: {
+        nameEn: input.nameEn,
+        nameAr: input.nameAr,
+        descriptionEn: input.descriptionEn,
+        descriptionAr: input.descriptionAr,
+        documentQuota: input.documentQuota,
+        branchQuota: input.branchQuota,
+        deviceQuota: input.deviceQuota,
+        includedPoints: Math.max(0, Math.floor(input.includedPoints)),
+        selfServe: input.selfServe,
+        isActive: input.isActive,
+        sortOrder: input.sortOrder,
+      },
+    });
+    await this.audit.write({
+      action: PLATFORM_AUDIT_ACTIONS.PLAN_UPSERT,
+      outcome: 'success',
+      actorUserId: operatorUserId,
+      resourceType: 'plan',
+      resourceId: plan.id,
+      metadata: { code: plan.code },
+    });
+    return this.toPlanAdmin(plan);
+  }
+
   async getUsage(tenantId: string) {
     await this.assertTenantExists(tenantId);
-    const [entitlements, usage] = await Promise.all([
+    const [entitlements, usage, pointsBalance, ledger] = await Promise.all([
       this.quota.getEffectiveEntitlements(tenantId),
       this.quota.getUsage(tenantId),
+      this.points.getBalance(tenantId),
+      this.points.listLedger(tenantId, { limit: 20 }),
     ]);
     return {
       quotas: {
@@ -256,6 +441,8 @@ export class TenantLifecycleService {
         devices: { used: usage.devices, limit: entitlements.deviceQuota },
       },
       meters: usage,
+      pointsBalance,
+      pointsLedger: ledger,
     };
   }
 
@@ -273,13 +460,40 @@ export class TenantLifecycleService {
     );
   }
 
-  private toSummary(tenant: Tenant, subscription: SubscriptionWithPlan | null) {
+  private toSummary(
+    tenant: Tenant,
+    subscription: SubscriptionWithPlan | null,
+    ownerEmail: string | null = null,
+  ) {
     return {
       id: tenant.id,
       name: tenant.name,
       planCode: subscription?.plan.code ?? null,
       status: subscription?.status ?? null,
+      lifecycleStatus: tenantLifecycleStatus(tenant),
+      activationStatus: tenant.activationStatus,
       suspendedAt: tenant.suspendedAt,
+      pointsBalance: tenant.pointsBalance,
+      createdAt: tenant.createdAt.toISOString(),
+      ownerEmail,
+    };
+  }
+
+  private toPlanAdmin(plan: Plan) {
+    return {
+      id: plan.id,
+      code: plan.code,
+      nameEn: plan.nameEn,
+      nameAr: plan.nameAr,
+      descriptionEn: plan.descriptionEn,
+      descriptionAr: plan.descriptionAr,
+      documentQuota: plan.documentQuota,
+      branchQuota: plan.branchQuota,
+      deviceQuota: plan.deviceQuota,
+      includedPoints: plan.includedPoints,
+      selfServe: plan.selfServe,
+      isActive: plan.isActive,
+      sortOrder: plan.sortOrder,
     };
   }
 }

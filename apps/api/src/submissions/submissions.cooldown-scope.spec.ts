@@ -93,6 +93,7 @@ function makeService(rows: DocRow[]) {
       checkTenantWritable: jest.fn().mockResolvedValue(undefined),
       assertWithinLimits: jest.fn().mockResolvedValue(undefined),
     } as never,
+    { consumeForSendInTx: jest.fn() } as never,
   );
   const gate = (ids: string[]) =>
     (

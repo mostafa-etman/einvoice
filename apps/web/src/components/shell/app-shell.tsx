@@ -281,6 +281,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </select>
               </label>
               <span className="text-token-sm text-foreground/70">{user?.email}</span>
+              {user?.isPlatformOperator ? (
+                <a
+                  href={`/${locale}/admin`}
+                  className="text-token-sm text-brand underline"
+                >
+                  {t('nav.platformAdmin')}
+                </a>
+              ) : null}
               <button
                 type="button"
                 className="rounded border border-border px-token-sm py-token-xs text-token-sm hover:bg-brand-muted"

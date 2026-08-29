@@ -3,7 +3,7 @@
 -- Intentionally NOT RLS-protected (global / shared / identity):
 --   users              — global login identity; tenant membership is via memberships
 --   tenants            — root registry (access mediated by memberships + app checks)
---   permissions, plans — platform catalogs
+--   permissions, plans, platform_settings, document_point_costs — platform catalogs
 --   currencies, eta_code_catalogs, eta_code_entries — shared ETA reference data
 --   refresh_sessions, billing_webhook_events — non-tenant or provider-scoped
 
@@ -381,3 +381,17 @@ CREATE POLICY tenant_isolation_impersonation_sessions ON impersonation_sessions
     tenant_id::text = NULLIF(current_setting('app.tenant_id', true), '')
     OR NULLIF(current_setting('app.platform_operator', true), '') = '1'
   );
+
+ALTER TABLE tenant_document_point_costs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_document_point_costs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_tenant_document_point_costs ON tenant_document_point_costs;
+CREATE POLICY tenant_isolation_tenant_document_point_costs ON tenant_document_point_costs
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+ALTER TABLE points_ledger ENABLE ROW LEVEL SECURITY;
+ALTER TABLE points_ledger FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_points_ledger ON points_ledger;
+CREATE POLICY tenant_isolation_points_ledger ON points_ledger
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));

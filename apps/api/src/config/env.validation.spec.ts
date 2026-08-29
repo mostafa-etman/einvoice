@@ -79,4 +79,17 @@ describe('loadEnv', () => {
     expect(env.ETA_IDENTITY_BASE_URL).toContain('preprod');
     expect(env.ETA_API_BASE_URL).toContain('preprod');
   });
+
+  it('auto-approves signups in test and requires approval in production unless overridden', () => {
+    expect(loadEnv(valid).SIGNUP_AUTO_APPROVE).toBe(true);
+    expect(loadEnv({ ...valid, SIGNUP_AUTO_APPROVE: 'false' }).SIGNUP_AUTO_APPROVE).toBe(false);
+    const { SECRETS_MASTER_KEY: _s, BACKUP_ARCHIVE_MASTER_KEY: _b, ...rest } = valid;
+    const prod = loadEnv({
+      ...rest,
+      NODE_ENV: 'production',
+      SECRETS_MASTER_KEY: valid.SECRETS_MASTER_KEY,
+      BACKUP_ARCHIVE_MASTER_KEY: valid.BACKUP_ARCHIVE_MASTER_KEY,
+    });
+    expect(prod.SIGNUP_AUTO_APPROVE).toBe(false);
+  });
 });

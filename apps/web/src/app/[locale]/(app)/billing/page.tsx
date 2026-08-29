@@ -134,6 +134,12 @@ export default function BillingPage() {
             })}
           </p>
         ) : null}
+        <p className="text-sm">
+          {t('pointsBalance')}:{' '}
+          <span className="font-medium tabular-nums" dir="ltr">
+            {subscription?.pointsBalance ?? 0}
+          </span>
+        </p>
       </section>
 
       <section className="space-y-3 rounded border border-border bg-background p-4">
@@ -168,6 +174,7 @@ export default function BillingPage() {
                       documents: plan.documentQuota,
                       branches: plan.branchQuota,
                       devices: plan.deviceQuota,
+                      points: plan.includedPoints,
                     })}
                   </p>
                 </div>

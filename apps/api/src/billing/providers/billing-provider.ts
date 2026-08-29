@@ -1,7 +1,7 @@
-import type { BillingProviderId, PlanCode, SubscriptionStatus } from '@prisma/client';
+import type { BillingProviderId, SubscriptionStatus } from '@prisma/client';
 
-export type SelfServePlanCode = Extract<PlanCode, 'STARTER' | 'PRO'>;
-export type ChangePlanCode = Extract<PlanCode, 'FREE' | 'STARTER' | 'PRO'>;
+export type SelfServePlanCode = 'STARTER' | 'PRO';
+export type ChangePlanCode = 'FREE' | 'STARTER' | 'PRO';
 
 export interface BillingCustomerRef {
   tenantId: string;

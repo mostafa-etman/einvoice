@@ -20,7 +20,8 @@
     "billing": "الفواتير",
     "logout": "تسجيل الخروج",
     "login": "تسجيل الدخول",
-    "register": "إنشاء حساب"
+    "register": "إنشاء حساب",
+    "platformAdmin": "إدارة المنصة"
   },
   "auth": {
     "email": "البريد الإلكتروني",
@@ -33,6 +34,8 @@
     "submitLogin": "دخول",
     "submitRegister": "تسجيل",
     "submitTenant": "متابعة",
+    "choosePlan": "اختر الباقة",
+    "planMeta": "{documents} مستند / شهر · {branches} فرع · {devices} جهاز · {points} نقطة",
     "haveAccount": "لديك حساب بالفعل؟",
     "needAccount": "ليس لديك حساب؟",
     "errorGeneric": "حدث خطأ. حاول مرة أخرى."
@@ -1086,9 +1089,10 @@
     "branches": "الفروع",
     "devices": "الأجهزة",
     "readOnlyWarning": "حسابك للقراءة فقط حتى تتم استعادة الدفع. القراءة متاحة، والكتابة محظورة.",
+    "pointsBalance": "رصيد النقاط",
     "graceEndsAt": "تنتهي فترة السماح في {date}",
     "plans": "الخطط",
-    "planQuotas": "{documents} مستند · {branches} فرع · {devices} جهاز / شهرياً",
+    "planQuotas": "{documents} مستند · {branches} فرع · {devices} جهاز / شهرياً · {points} نقطة",
     "current": "الخطة الحالية",
     "contactSales": "تواصل مع المبيعات",
     "downgrade": "التحويل إلى المجانية",
@@ -1114,10 +1118,12 @@
   },
   "admin": {
     "title": "إدارة المنصة",
-    "subtitle": "إدارة المستأجرين والخطط والانتحال",
+    "subtitle": "اعتماد المستأجرين وإدارة الخطط والنقاط",
     "accessDenied": "ليس لديك صلاحية مشغل المنصة.",
     "search": "بحث عن مستأجر",
     "searchPlaceholder": "اسم المؤسسة…",
+    "filterLifecycle": "الحالة",
+    "allStatuses": "الكل",
     "provision": "تزويد مستأجر",
     "provisionTitle": "تزويد مستأجر جديد",
     "tenantName": "اسم المؤسسة",
@@ -1130,17 +1136,41 @@
     "colName": "الاسم",
     "colPlan": "الخطة",
     "colStatus": "الحالة",
+    "colPoints": "النقاط",
+    "colContact": "التواصل",
+    "colSignup": "تاريخ التسجيل",
     "colActions": "إجراءات",
     "empty": "لا يوجد مستأجرون",
     "loading": "جارٍ التحميل…",
     "suspend": "إيقاف",
-    "activate": "تفعيل",
+    "activate": "إعادة تفعيل",
+    "approve": "اعتماد",
+    "reject": "رفض",
     "suspendReasonPrompt": "سبب إيقاف هذا المستأجر:",
+    "rejectReasonPrompt": "سبب رفض هذا المستأجر:",
     "viewDetails": "عرض",
     "detailsTitle": "تفاصيل المستأجر",
     "owner": "المالك",
     "entitlements": "الاستحقاقات",
     "usage": "الاستخدام هذا الشهر",
+    "points": "النقاط",
+    "adjustPoints": "تعديل النقاط",
+    "pointsDeltaPrompt": "النقاط المراد إضافتها (سالب للخصم):",
+    "pointsNotePrompt": "ملاحظة لهذا التعديل:",
+    "tabTenants": "المستأجرون",
+    "tabPlans": "الخطط",
+    "tabCosts": "تكلفة المستندات",
+    "tabSettings": "الإعدادات",
+    "includedPoints": "النقاط المشمولة",
+    "savePlan": "حفظ الخطة",
+    "newPlan": "خطة جديدة",
+    "costKind": "نوع المستند",
+    "costPoints": "النقاط لكل إرسال",
+    "saveCosts": "حفظ التكاليف",
+    "autoActivateSubs": "تفعيل الشركات الفرعية تلقائياً عند إنشائها بواسطة مالك معتمد",
+    "whatsappE164": "رقم واتساب (أرقام)",
+    "whatsappDisplay": "عرض واتساب",
+    "saveSettings": "حفظ الإعدادات",
     "impersonate": "انتحال شخصية المالك",
     "impersonateReasonPrompt": "سبب انتحال شخصية هذا المستأجر:",
     "impersonationActive": "بدأت جلسة الانتحال ({mode}). تم نسخ الرمز إلى وحدة التحكم.",
@@ -1148,5 +1178,23 @@
     "endImpersonation": "إنهاء الجلسة",
     "back": "العودة إلى المستأجرين",
     "error": "حدث خطأ ما"
+  },
+  "pending": {
+    "logout": "تسجيل الخروج",
+    "openAdmin": "إدارة المنصة",
+    "whatsappPrompt": "لتفعيل الحساب برجاء التواصل على واتساب: {number}",
+    "whatsappCta": "فتح واتساب",
+    "PENDING": {
+      "title": "بانتظار التفعيل",
+      "body": "شركتك بانتظار موافقة المنصة. يمكنك تسجيل الدخول، لكن الفوترة مقفلة حتى يتم تفعيل الحساب."
+    },
+    "REJECTED": {
+      "title": "لم يُعتمد الحساب",
+      "body": "لم تتم الموافقة على هذه الشركة. تواصل معنا عبر واتساب إن كان ذلك خطأ."
+    },
+    "SUSPENDED": {
+      "title": "الحساب موقوف",
+      "body": "هذه الشركة موقوفة. تواصل معنا عبر واتساب لاستعادة الوصول."
+    }
   }
 }

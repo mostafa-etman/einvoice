@@ -31,6 +31,7 @@ import { MAX_DUPLICATE_RETRIES } from './duplicate-submission';
 import { checkLateSubmission, parseEtaDocument, type JsonObject } from '@einvoice/eta-core';
 import { UsageEmitService } from '../analytics/usage-emit.service';
 import { QuotaService } from '../billing/quota.service';
+import { PointsService } from '../billing/points.service';
 
 export type SubmitAttemptLogEntry = {
   at: string;
@@ -118,6 +119,7 @@ export class SubmissionsService implements OnModuleDestroy {
     private readonly audit: AuditService,
     private readonly usageEmit: UsageEmitService,
     private readonly quota: QuotaService,
+    private readonly points: PointsService,
   ) {}
 
   onModuleDestroy() {
@@ -300,6 +302,16 @@ export class SubmissionsService implements OnModuleDestroy {
             })),
           },
         },
+      });
+
+      // Points are checked and deducted BEFORE ETA post; a failed consume rolls
+      // back this transaction so signing/submit correctness is unchanged.
+      await this.points.consumeForSendInTx(tx, {
+        tenantId,
+        kinds: docs.map((d) => d.kind),
+        documentIds: docs.map((d) => d.id),
+        submissionId: created.id,
+        actorUserId,
       });
 
       return created;

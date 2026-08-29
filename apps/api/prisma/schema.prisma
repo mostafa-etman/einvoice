@@ -310,6 +310,13 @@ model Tenant {
   suspendedAt          DateTime? @map("suspended_at")
   suspendedReason      String?   @map("suspended_reason")
   provisionedByUserId  String?   @map("provisioned_by_user_id") @db.Uuid
+  /// Manual platform-owner gate: new self-serve tenants start PENDING.
+  activationStatus     TenantActivationStatus @default(PENDING) @map("activation_status")
+  approvedAt           DateTime? @map("approved_at")
+  approvedByUserId     String?   @map("approved_by_user_id") @db.Uuid
+  rejectedAt           DateTime? @map("rejected_at")
+  rejectedReason       String?   @map("rejected_reason")
+  pointsBalance        Int       @default(0) @map("points_balance")
   subscription         Subscription?
   quotaOverrides       QuotaOverride[]
   paymentCustomers     PaymentCustomer[]
@@ -320,6 +327,8 @@ model Tenant {
   documentNumberSequences DocumentNumberSequence[]
   refreshSessions      RefreshSession[]
   customers            Customer[]
+  pointsLedger         PointsLedger[]
+  tenantDocumentPointCosts TenantDocumentPointCost[]
 
   @@map("tenants")
 }
@@ -1536,11 +1545,17 @@ model TenantDataExportJob {
 
 // --- SaaS layer (013) ---
 
-enum PlanCode {
-  FREE
-  STARTER
-  PRO
-  ENTERPRISE
+enum TenantActivationStatus {
+  PENDING
+  ACTIVE
+  REJECTED
+}
+
+enum PointsLedgerReason {
+  PLAN_GRANT
+  ADMIN_ADJUST
+  DOCUMENT_SEND
+  REFUND
 }
 
 enum SubscriptionStatus {
@@ -1583,7 +1598,8 @@ enum EmailOutboxStatus {
 
 model Plan {
   id              String   @id @default(uuid()) @db.Uuid
-  code            PlanCode @unique
+  /// Stable slug (FREE / STARTER / PRO / ENTERPRISE or a custom code).
+  code            String   @unique
   nameEn          String   @map("name_en")
   nameAr          String   @map("name_ar")
   descriptionEn   String?  @map("description_en")
@@ -1591,6 +1607,8 @@ model Plan {
   documentQuota   Int      @map("document_quota")
   branchQuota     Int      @map("branch_quota")
   deviceQuota     Int      @map("device_quota")
+  /// Points credited once when a tenant is first assigned this plan.
+  includedPoints  Int      @default(0) @map("included_points")
   selfServe       Boolean  @default(true) @map("self_serve")
   isActive        Boolean  @default(true) @map("is_active")
   sortOrder       Int      @default(0) @map("sort_order")
@@ -1601,6 +1619,64 @@ model Plan {
   subscriptions Subscription[]
 
   @@map("plans")
+}
+
+/// Singleton row id = "default". Platform-owner commercial settings (not tenant-scoped).
+model PlatformSettings {
+  id                       String   @id @default("default")
+  autoActivateSubCompanies Boolean  @default(true) @map("auto_activate_sub_companies")
+  supportWhatsappE164      String   @default("201000864620") @map("support_whatsapp_e164")
+  supportWhatsappDisplay   String   @default("00201000864620") @map("support_whatsapp_display")
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
+
+  @@map("platform_settings")
+}
+
+/// Platform-wide default points cost to *send* a document of this kind.
+model DocumentPointCost {
+  id            String   @id @default(uuid()) @db.Uuid
+  documentKind  String   @unique @map("document_kind")
+  points        Int      @default(0)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("document_point_costs")
+}
+
+/// Optional per-tenant override of DocumentPointCost (platform-admin only).
+model TenantDocumentPointCost {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  documentKind  String   @map("document_kind")
+  points        Int
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, documentKind])
+  @@index([tenantId])
+  @@map("tenant_document_point_costs")
+}
+
+model PointsLedger {
+  id            String             @id @default(uuid()) @db.Uuid
+  tenantId      String             @map("tenant_id") @db.Uuid
+  delta         Int
+  balanceAfter  Int                @map("balance_after")
+  reason        PointsLedgerReason
+  documentKind  String?            @map("document_kind")
+  documentId    String?            @map("document_id") @db.Uuid
+  submissionId  String?            @map("submission_id") @db.Uuid
+  actorUserId   String?            @map("actor_user_id") @db.Uuid
+  note          String?
+  createdAt     DateTime           @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@map("points_ledger")
 }
 
 model Subscription {

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { BillingProviderId, PlanCode, Subscription, SubscriptionStatus } from '@prisma/client';
+import type { BillingProviderId, Subscription, SubscriptionStatus } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
@@ -8,13 +8,14 @@ import { BILLING_AUDIT_ACTIONS } from './billing-audit';
 export type SubscriptionView = {
   status: SubscriptionStatus;
   plan: {
-    code: PlanCode;
+    code: string;
     name: string;
     documentQuota: number;
     branchQuota: number;
-    deviceQuota: number;
-    selfServe: boolean;
-  };
+        deviceQuota: number;
+        selfServe: boolean;
+        includedPoints: number;
+      };
   graceEndsAt: string | null;
   entitlements: {
     documentQuota: number;
@@ -22,7 +23,8 @@ export type SubscriptionView = {
     deviceQuota: number;
     overrideActive: boolean;
   };
-  accessMode: 'FULL' | 'READ_ONLY' | 'BLOCKED';
+  accessMode: 'FULL' | 'READ_ONLY' | 'BLOCKED' | 'PENDING';
+  pointsBalance: number;
 };
 
 export type AssignPlanOpts = {
@@ -83,7 +85,7 @@ export class SubscriptionService {
 
   async assignPlan(
     tenantId: string,
-    planCode: PlanCode,
+    planCode: string,
     opts: AssignPlanOpts = {},
   ): Promise<Subscription> {
     const plan = await this.prisma.plan.findUnique({ where: { code: planCode } });
@@ -169,7 +171,10 @@ export class SubscriptionService {
       this.tenantPrisma.withTenant(tenantId, (tx) =>
         tx.subscription.findUniqueOrThrow({ where: { tenantId }, include: { plan: true } }),
       ),
-      this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { suspendedAt: true } }),
+      this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { suspendedAt: true, activationStatus: true, pointsBalance: true },
+      }),
       this.tenantPrisma.withTenant(tenantId, (tx) =>
         tx.quotaOverride.findFirst({
           where: { tenantId, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
@@ -179,11 +184,13 @@ export class SubscriptionService {
     ]);
 
     const accessMode: SubscriptionView['accessMode'] =
-      tenant?.suspendedAt || subscription.status === 'SUSPENDED'
-        ? 'BLOCKED'
-        : subscription.status === 'READ_ONLY'
-          ? 'READ_ONLY'
-          : 'FULL';
+      tenant?.activationStatus === 'PENDING'
+        ? 'PENDING'
+        : tenant?.activationStatus === 'REJECTED' || tenant?.suspendedAt || subscription.status === 'SUSPENDED'
+          ? 'BLOCKED'
+          : subscription.status === 'READ_ONLY'
+            ? 'READ_ONLY'
+            : 'FULL';
 
     return {
       status: subscription.status,
@@ -194,6 +201,7 @@ export class SubscriptionService {
         branchQuota: subscription.plan.branchQuota,
         deviceQuota: subscription.plan.deviceQuota,
         selfServe: subscription.plan.selfServe,
+        includedPoints: subscription.plan.includedPoints,
       },
       graceEndsAt: subscription.graceEndsAt?.toISOString() ?? null,
       entitlements: {
@@ -203,6 +211,7 @@ export class SubscriptionService {
         overrideActive: Boolean(override),
       },
       accessMode,
+      pointsBalance: tenant?.pointsBalance ?? 0,
     };
   }
 }

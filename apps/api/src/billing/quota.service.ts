@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
-import type { PlanCode, QuotaOverride } from '@prisma/client';
+import type { QuotaOverride } from '@prisma/client';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
@@ -8,7 +8,7 @@ import { cairoMonthBounds, cairoMonthDateStrings, CAIRO_TZ } from './quota-perio
 import { TenantAccessService } from './tenant-access.guard';
 
 export type Entitlements = {
-  planCode: PlanCode;
+  planCode: string;
   documentQuota: number;
   branchQuota: number;
   deviceQuota: number;
@@ -22,7 +22,7 @@ export type UsageSnapshot = {
   devices: number;
 };
 
-type PlanQuotas = { code: PlanCode; documentQuota: number; branchQuota: number; deviceQuota: number };
+type PlanQuotas = { code: string; documentQuota: number; branchQuota: number; deviceQuota: number };
 type OverrideQuotas = Pick<
   QuotaOverride,
   'documentQuota' | 'branchQuota' | 'deviceQuota' | 'expiresAt'
