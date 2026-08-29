@@ -5,10 +5,14 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { fetchActivationHelp } from '@/lib/api/tenants';
 import { useAuth } from '@/lib/auth-provider';
+import { useTenant } from '@/lib/tenant-provider';
 import { TenantSwitcher } from '@/components/switchers/tenant-switcher';
+import { CopyableTenantId } from '@/components/copyable-tenant-id';
 import {
   FALLBACK_WHATSAPP_DISPLAY,
   FALLBACK_WHATSAPP_URL,
+  buildWhatsAppUpgradeMessage,
+  whatsappUrlWithText,
 } from '@/lib/support-whatsapp';
 
 export function PendingActivationScreen({
@@ -20,12 +24,23 @@ export function PendingActivationScreen({
   const locale = useLocale();
   const router = useRouter();
   const { logout, user } = useAuth();
+  const { tenantId, memberships } = useTenant();
+  const companyName = memberships.find((m) => m.tenant.id === tenantId)?.tenant.name ?? null;
   const helpQuery = useQuery({
     queryKey: ['activation-help'],
     queryFn: fetchActivationHelp,
   });
   const display = helpQuery.data?.whatsappDisplay ?? FALLBACK_WHATSAPP_DISPLAY;
-  const url = helpQuery.data?.whatsappUrl ?? FALLBACK_WHATSAPP_URL;
+  const baseUrl = helpQuery.data?.whatsappUrl ?? FALLBACK_WHATSAPP_URL;
+  const prefill = buildWhatsAppUpgradeMessage({
+    locale,
+    kind: 'activation',
+    tenantId,
+    companyName,
+    userName: user?.name,
+    userEmail: user?.email,
+  });
+  const url = whatsappUrlWithText(baseUrl, prefill);
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
@@ -54,10 +69,13 @@ export function PendingActivationScreen({
         <h1 className="font-display text-token-xl text-brand">{t(`${status}.title`)}</h1>
         <p className="mt-token-md text-token-md text-foreground/80">{t(`${status}.body`)}</p>
         {status === 'PENDING' || status === 'REJECTED' ? (
-          <p className="mt-token-lg text-token-md" dir="rtl">
+          <p className="mt-token-lg text-token-md" dir={locale === 'ar' ? 'rtl' : 'ltr'}>
             {t('whatsappPrompt', { number: display })}
           </p>
         ) : null}
+        <div className="mt-token-lg flex justify-center">
+          <CopyableTenantId id={tenantId} />
+        </div>
         <a
           href={url}
           target="_blank"

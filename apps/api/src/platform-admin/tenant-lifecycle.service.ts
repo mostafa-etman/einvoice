@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import type { Plan, Subscription, SubscriptionStatus, Tenant } from '@prisma/client';
+import type { Plan, Prisma, Subscription, SubscriptionStatus, Tenant } from '@prisma/client';
 import { PasswordService } from '../auth/password.service';
 import { QuotaService } from '../billing/quota.service';
 import { PointsService } from '../billing/points.service';
@@ -11,6 +11,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { TenantService } from '../tenant/tenant.service';
 import { PLATFORM_AUDIT_ACTIONS } from './platform-audit';
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type ProvisionTenantInput = {
   name: string;
@@ -60,8 +63,10 @@ export class TenantLifecycleService {
 
   async listTenants(query: ListTenantsInput) {
     const limit = Math.min(Math.max(query.limit ?? 50, 1), 200);
+    const term = query.q?.trim() ?? '';
+    const where = term ? await this.tenantSearchWhere(term) : undefined;
     const rows = await this.prisma.tenant.findMany({
-      where: query.q ? { name: { contains: query.q, mode: 'insensitive' } } : undefined,
+      where,
       orderBy: { createdAt: 'asc' },
       ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
       take: limit + 1,
@@ -444,6 +449,40 @@ export class TenantLifecycleService {
       pointsBalance,
       pointsLedger: ledger,
     };
+  }
+
+  private async tenantSearchWhere(term: string): Promise<Prisma.TenantWhereInput> {
+    const ids = new Set<string>();
+    if (UUID_RE.test(term)) {
+      ids.add(term);
+    }
+
+    if (!UUID_RE.test(term)) {
+      const emailUsers = await this.prisma.user.findMany({
+        where: { email: { contains: term, mode: 'insensitive' } },
+        select: { id: true },
+        take: 25,
+      });
+      for (const user of emailUsers) {
+        const memberships = await this.tenantPrisma.withUser(user.id, (tx) =>
+          tx.membership.findMany({
+            where: { userId: user.id },
+            select: { tenantId: true },
+          }),
+        );
+        for (const m of memberships) {
+          ids.add(m.tenantId);
+        }
+      }
+    }
+
+    const or: Prisma.TenantWhereInput[] = [
+      { name: { contains: term, mode: 'insensitive' } },
+    ];
+    if (ids.size) {
+      or.push({ id: { in: [...ids] } });
+    }
+    return { OR: or };
   }
 
   private async assertTenantExists(tenantId: string): Promise<Tenant> {

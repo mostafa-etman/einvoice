@@ -4,13 +4,19 @@ import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useLocale, useTranslations } from 'next-intl';
 import { fetchActivationHelp } from '@/lib/api/tenants';
+import { useAuth } from '@/lib/auth-provider';
+import { useTenant } from '@/lib/tenant-provider';
+import { CopyableTenantId } from '@/components/copyable-tenant-id';
 import {
   FALLBACK_WHATSAPP_DISPLAY,
   FALLBACK_WHATSAPP_URL,
+  buildWhatsAppUpgradeMessage,
   whatsappUrlWithText,
+  type WhatsAppRequestKind,
 } from '@/lib/support-whatsapp';
 
 export type BillingInterest = {
+  kind: WhatsAppRequestKind;
   planCode: string;
   planLabel: string;
 };
@@ -18,14 +24,18 @@ export type BillingInterest = {
 export function WhatsAppUpgradeDialog({
   open,
   interest,
+  currentPlanLabel,
   onClose,
 }: {
   open: boolean;
   interest: BillingInterest | null;
+  currentPlanLabel?: string | null;
   onClose: () => void;
 }) {
   const t = useTranslations('billing');
   const locale = useLocale();
+  const { user } = useAuth();
+  const { tenantId, memberships } = useTenant();
   const helpQuery = useQuery({
     queryKey: ['activation-help'],
     queryFn: fetchActivationHelp,
@@ -33,9 +43,19 @@ export function WhatsAppUpgradeDialog({
   });
   const display = helpQuery.data?.whatsappDisplay ?? FALLBACK_WHATSAPP_DISPLAY;
   const baseUrl = helpQuery.data?.whatsappUrl ?? FALLBACK_WHATSAPP_URL;
-  const prefill = interest
-    ? t('whatsappPrefill', { plan: interest.planLabel })
-    : t('whatsappPrefillGeneric');
+  const companyName = memberships.find((m) => m.tenant.id === tenantId)?.tenant.name ?? null;
+  const kind: WhatsAppRequestKind = interest?.kind ?? 'upgrade';
+  const requestedPlan = kind === 'points' || kind === 'activation' ? null : interest?.planLabel;
+  const prefill = buildWhatsAppUpgradeMessage({
+    locale,
+    kind,
+    tenantId,
+    companyName,
+    currentPlan: currentPlanLabel,
+    requestedPlan,
+    userName: user?.name,
+    userEmail: user?.email,
+  });
   const href = whatsappUrlWithText(baseUrl, prefill);
 
   useEffect(() => {
@@ -68,11 +88,18 @@ export function WhatsAppUpgradeDialog({
         <p className="mt-token-md text-token-md text-foreground/90">
           {t('whatsappUpgradeBody', { number: display })}
         </p>
-        {interest ? (
+        {interest && kind !== 'points' ? (
           <p className="mt-token-sm text-token-sm text-muted-foreground">
             {t('whatsappInterestedPlan', { plan: interest.planLabel })}
           </p>
         ) : null}
+        <CopyableTenantId id={tenantId} className="mt-token-md" />
+        <pre
+          className="mt-token-md max-h-48 overflow-auto whitespace-pre-wrap rounded border border-border bg-background p-token-sm text-token-sm"
+          dir="auto"
+        >
+          {prefill}
+        </pre>
         <a
           href={href}
           target="_blank"

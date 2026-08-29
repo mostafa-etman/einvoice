@@ -15,5 +15,7 @@ describe('billing page smoke', () => {
     expect(ar.billing.whatsappUpgradeBody).toContain('{number}');
     expect(en.billing.whatsappUpgradeBody).toContain('WhatsApp');
     expect(en.billing.buyPoints).toBeTruthy();
+    expect(en.common.copy).toBeTruthy();
+    expect(ar.common.tenantId).toBeTruthy();
   });
 });

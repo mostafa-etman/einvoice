@@ -29,6 +29,7 @@ import {
   type PlanAdmin,
   type TenantDetail,
 } from '@/lib/api/platform-admin';
+import { CopyableTenantId } from '@/components/copyable-tenant-id';
 
 type Tab = 'tenants' | 'plans' | 'costs' | 'settings';
 
@@ -104,6 +105,12 @@ function TenantDetailPanel({
       ) : (
         <>
           <dl className="grid gap-2 text-sm sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <dt className="text-muted-foreground">{t('colId')}</dt>
+              <dd>
+                <CopyableTenantId id={detail.id} showLabel={false} />
+              </dd>
+            </div>
             <div>
               <dt className="text-muted-foreground">{t('colName')}</dt>
               <dd className="font-medium">{detail.name}</dd>
@@ -232,6 +239,7 @@ export default function PlatformAdminPage() {
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>('tenants');
   const [q, setQ] = useState('');
+  const [qDebounced, setQDebounced] = useState('');
   const [lifecycle, setLifecycle] = useState<LifecycleStatus | ''>('');
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
   const [showProvision, setShowProvision] = useState(false);
@@ -257,8 +265,8 @@ export default function PlatformAdminPage() {
   });
 
   const tenantsQuery = useQuery({
-    queryKey: ['platform-admin-tenants', q, lifecycle],
-    queryFn: () => listTenants({ q: q || undefined, lifecycle: lifecycle || undefined }),
+    queryKey: ['platform-admin-tenants', qDebounced, lifecycle],
+    queryFn: () => listTenants({ q: qDebounced || undefined, lifecycle: lifecycle || undefined }),
     retry: false,
   });
   const plansQuery = useQuery({
@@ -276,6 +284,11 @@ export default function PlatformAdminPage() {
     queryFn: getSettings,
     enabled: tab === 'settings',
   });
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => setQDebounced(q.trim()), 250);
+    return () => window.clearTimeout(handle);
+  }, [q]);
 
   useEffect(() => {
     if (tenantsQuery.error instanceof ApiError && tenantsQuery.error.status === 403) {
@@ -430,6 +443,7 @@ export default function PlatformAdminPage() {
               <thead>
                 <tr className="border-b bg-muted/40 text-left">
                   <th className="p-2">{t('colName')}</th>
+                  <th className="p-2">{t('colId')}</th>
                   <th className="p-2">{t('colContact')}</th>
                   <th className="p-2">{t('colPlan')}</th>
                   <th className="p-2">{t('colStatus')}</th>
@@ -442,6 +456,9 @@ export default function PlatformAdminPage() {
                 {(tenantsQuery.data?.items ?? []).map((tenant) => (
                   <tr key={tenant.id} className="border-b">
                     <td className="p-2">{tenant.name}</td>
+                    <td className="p-2">
+                      <CopyableTenantId id={tenant.id} showLabel={false} />
+                    </td>
                     <td className="p-2">{tenant.ownerEmail ?? '—'}</td>
                     <td className="p-2">{tenant.planCode ?? '—'}</td>
                     <td className="p-2">{tenant.lifecycleStatus}</td>
@@ -502,7 +519,7 @@ export default function PlatformAdminPage() {
                 ))}
                 {!tenantsQuery.data?.items?.length ? (
                   <tr>
-                    <td className="p-4 text-muted-foreground" colSpan={7}>
+                    <td className="p-4 text-muted-foreground" colSpan={8}>
                       {tenantsQuery.isLoading ? t('loading') : t('empty')}
                     </td>
                   </tr>

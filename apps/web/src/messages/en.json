@@ -2,6 +2,11 @@
   "brand": "eInvoice",
   "tagline": "Egyptian Tax Authority e-invoicing platform",
   "cta": "Get started",
+  "common": {
+    "tenantId": "Tenant ID",
+    "copy": "Copy",
+    "copied": "Copied"
+  },
   "nav": {
     "home": "Home",
     "users": "Users",
@@ -1129,7 +1134,8 @@
     "subtitle": "Approve tenants, manage plans and points",
     "accessDenied": "You don't have platform-operator access.",
     "search": "Search tenants",
-    "searchPlaceholder": "Tenant name…",
+    "searchPlaceholder": "Tenant ID, company name, or email…",
+    "colId": "Tenant ID",
     "filterLifecycle": "Status",
     "allStatuses": "All",
     "provision": "Provision tenant",

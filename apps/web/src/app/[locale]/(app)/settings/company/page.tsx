@@ -10,10 +10,13 @@ import {
   uploadCompanyLogo,
   type CompanyProfile,
 } from '@/lib/api/company';
+import { CopyableTenantId } from '@/components/copyable-tenant-id';
+import { useTenant } from '@/lib/tenant-provider';
 
 export default function CompanySettingsPage() {
   const t = useTranslations('settingsCompany');
   const locale = useLocale();
+  const { tenantId } = useTenant();
   const [profile, setProfile] = useState<CompanyProfile | null>(null);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -76,6 +79,7 @@ export default function CompanySettingsPage() {
     <section className="mx-auto max-w-2xl">
       <h1 className="font-display text-token-xl">{t('title')}</h1>
       <p className="mt-token-sm text-token-md text-foreground/70">{t('intro')}</p>
+      <CopyableTenantId id={tenantId} className="mt-token-md" />
 
       {error ? (
         <p

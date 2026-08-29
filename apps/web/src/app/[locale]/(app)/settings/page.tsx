@@ -2,10 +2,13 @@
 
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
+import { CopyableTenantId } from '@/components/copyable-tenant-id';
+import { useTenant } from '@/lib/tenant-provider';
 
 export default function SettingsHubPage() {
   const t = useTranslations('settings');
   const locale = useLocale();
+  const { tenantId } = useTenant();
 
   const links = [
     { href: `/${locale}/settings/company`, label: t('company') },
@@ -24,6 +27,7 @@ export default function SettingsHubPage() {
     <section>
       <h1 className="font-display text-token-xl">{t('title')}</h1>
       <p className="mt-token-sm text-token-md text-foreground/70">{t('hubIntro')}</p>
+      <CopyableTenantId id={tenantId} className="mt-token-md" />
       <ul className="mt-token-lg flex flex-col gap-token-sm">
         {links.map((l) => (
           <li key={l.href}>

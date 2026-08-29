@@ -7,7 +7,10 @@ describe('platform admin page smoke', () => {
     expect(en.admin.provision).toBeTruthy();
     expect(en.admin.impersonate).toBeTruthy();
     expect(en.admin.accessDenied).toBeTruthy();
-    expect(en.admin.approve).toBeTruthy();
+    expect(en.admin.searchPlaceholder.toLowerCase()).toContain('tenant id');
+    expect(ar.admin.searchPlaceholder).toContain('معرّف');
+    expect(en.common.tenantId).toBeTruthy();
+    expect(ar.common.tenantId).toContain('مستأجر');
     expect(en.admin.adjustPoints).toBeTruthy();
     expect(en.pending.whatsappPrompt).toContain('{number}');
     expect(ar.admin.approve).toBeTruthy();

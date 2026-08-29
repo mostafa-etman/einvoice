@@ -10,10 +10,12 @@ import {
   fetchSubscription,
 } from '@/lib/api/billing';
 import { formatQuantityDisplay } from '@/lib/format-number';
+import { CopyableTenantId } from '@/components/copyable-tenant-id';
 import {
   WhatsAppUpgradeDialog,
   type BillingInterest,
 } from '@/components/billing/whatsapp-upgrade-dialog';
+import { useTenant } from '@/lib/tenant-provider';
 
 function QuotaBar({
   label,
@@ -47,6 +49,7 @@ function QuotaBar({
 export default function BillingPage() {
   const t = useTranslations('billing');
   const locale = useLocale();
+  const { tenantId } = useTenant();
   const [interest, setInterest] = useState<BillingInterest | null>(null);
 
   const plansQuery = useQuery({ queryKey: ['billing-plans'], queryFn: fetchPlans });
@@ -64,8 +67,13 @@ export default function BillingPage() {
   const planLabel = (plan: { code: string; name: string; nameAr: string }) =>
     locale === 'ar' && plan.nameAr ? plan.nameAr : plan.name;
 
+  const currentPlanView = (plansQuery.data?.plans ?? []).find((p) => p.code === currentPlan);
+  const currentPlanLabel = currentPlanView
+    ? planLabel(currentPlanView)
+    : (subscription?.plan.name ?? null);
+
   const openForPlan = (plan: { code: string; name: string; nameAr: string }) => {
-    setInterest({ planCode: plan.code, planLabel: planLabel(plan) });
+    setInterest({ kind: 'upgrade', planCode: plan.code, planLabel: planLabel(plan) });
   };
 
   return (
@@ -73,6 +81,7 @@ export default function BillingPage() {
       <header>
         <h1 className="text-2xl font-semibold text-brand">{t('title')}</h1>
         <p className="text-sm text-muted-foreground">{t('subtitle')}</p>
+        <CopyableTenantId id={tenantId} className="mt-2" />
       </header>
 
       <section className="space-y-3 rounded border border-border bg-background p-4">
@@ -116,7 +125,7 @@ export default function BillingPage() {
             type="button"
             className="rounded border px-3 py-2 text-sm"
             onClick={() =>
-              setInterest({ planCode: 'POINTS', planLabel: t('pointsTopUp') })
+              setInterest({ kind: 'points', planCode: 'POINTS', planLabel: t('pointsTopUp') })
             }
           >
             {t('buyPoints')}
@@ -193,17 +202,14 @@ export default function BillingPage() {
         <button
           type="button"
           className="rounded border px-3 py-2 text-sm"
-          onClick={() =>
+          onClick={() => {
+            const enterprise = plansQuery.data?.plans.find((p) => p.code === 'ENTERPRISE');
             setInterest({
+              kind: 'upgrade',
               planCode: 'ENTERPRISE',
-              planLabel:
-                locale === 'ar'
-                  ? (plansQuery.data?.plans.find((p) => p.code === 'ENTERPRISE')?.nameAr ??
-                    t('enterpriseTitle'))
-                  : (plansQuery.data?.plans.find((p) => p.code === 'ENTERPRISE')?.name ??
-                    t('enterpriseTitle')),
-            })
-          }
+              planLabel: enterprise ? planLabel(enterprise) : t('enterpriseTitle'),
+            });
+          }}
         >
           {t('enterpriseContact')}
         </button>
@@ -258,6 +264,7 @@ export default function BillingPage() {
       <WhatsAppUpgradeDialog
         open={interest !== null}
         interest={interest}
+        currentPlanLabel={currentPlanLabel}
         onClose={() => setInterest(null)}
       />
     </div>
