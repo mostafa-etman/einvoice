@@ -60,9 +60,10 @@ export interface ApplyWebhookEventResult {
 }
 
 /**
- * Billing gateway abstraction (R3 / research.md). Stripe is the v1 implementation;
- * a local Egyptian gateway (Paymob/Fawry/Kashier) can implement this same contract
- * later without touching entitlement/quota logic.
+ * Billing gateway abstraction (R3 / research.md). Stripe remains an optional
+ * adapter; live tenant upgrades currently use WhatsApp + super-admin (no provider
+ * is invoked from checkout). A local Egyptian gateway (Paymob/Fawry/Kashier)
+ * can implement this same contract later without touching entitlement/quota logic.
  */
 export interface BillingProvider {
   readonly id: BillingProviderId;

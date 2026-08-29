@@ -76,12 +76,18 @@ export function fetchQuotas() {
   return apiFetch<QuotaSnapshot>('/billing/quotas', { tenantScoped: true });
 }
 
-export function startCheckout(input: {
-  planCode: 'STARTER' | 'PRO';
-  successUrl?: string;
-  cancelUrl?: string;
-}) {
-  return apiFetch<{ checkoutUrl?: string; [key: string]: unknown }>('/billing/checkout', {
+export type ManualCheckoutResult = {
+  mode: 'manual';
+  planCode: string;
+  planName: string;
+  planNameAr: string;
+  whatsappUrl: string;
+  whatsappDisplay: string;
+};
+
+/** Kept for API compatibility. Online Stripe checkout is disabled; this returns WhatsApp contact. */
+export function startCheckout(input: { planCode: string; successUrl?: string; cancelUrl?: string }) {
+  return apiFetch<ManualCheckoutResult>('/billing/checkout', {
     method: 'POST',
     tenantScoped: true,
     body: input,

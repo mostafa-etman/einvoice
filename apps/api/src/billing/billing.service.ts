@@ -1,17 +1,26 @@
-import { BadRequestException, ConflictException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import type { Plan } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { BILLING_AUDIT_ACTIONS } from './billing-audit';
-import { BILLING_PROVIDER, type BillingProvider } from './providers/billing-provider';
+import { PointsService } from './points.service';
 import { QuotaService } from './quota.service';
 import { SubscriptionService } from './subscription.service';
 
 export type StartCheckoutInput = {
-  planCode: 'STARTER' | 'PRO';
+  planCode: string;
   successUrl?: string;
   cancelUrl?: string;
+};
+
+export type ManualCheckoutResult = {
+  mode: 'manual';
+  planCode: string;
+  planName: string;
+  planNameAr: string;
+  whatsappUrl: string;
+  whatsappDisplay: string;
 };
 
 @Injectable()
@@ -22,7 +31,7 @@ export class BillingService {
     private readonly audit: AuditService,
     private readonly quota: QuotaService,
     private readonly subscriptions: SubscriptionService,
-    @Inject(BILLING_PROVIDER) private readonly provider: BillingProvider,
+    private readonly points: PointsService,
   ) {}
 
   async listPlans() {
@@ -41,51 +50,31 @@ export class BillingService {
     return this.quota.getQuotaSnapshot(tenantId);
   }
 
-  async startCheckout(tenantId: string, userId: string, input: StartCheckoutInput) {
-    const plan = await this.prisma.plan.findUnique({ where: { code: input.planCode } });
-    if (!plan || !plan.selfServe) {
-      throw new BadRequestException('plan_not_self_serve');
-    }
+  async startCheckout(
+    tenantId: string,
+    userId: string,
+    input: StartCheckoutInput,
+  ): Promise<ManualCheckoutResult> {
+    const planCode = (input.planCode ?? '').trim() || 'UNKNOWN';
+    const plan = await this.prisma.plan.findUnique({ where: { code: planCode } });
+    const contact = await this.points.getSupportContact();
 
     await this.audit.write({
       action: BILLING_AUDIT_ACTIONS.CHECKOUT_START,
       outcome: 'success',
       actorUserId: userId,
       tenantId,
-      metadata: { planCode: input.planCode },
+      metadata: { planCode, mode: 'manual' },
     });
 
-    try {
-      const customer = await this.ensurePaymentCustomer(tenantId, userId);
-      const result = await this.provider.createCheckoutSession({
-        tenantId,
-        planCode: input.planCode,
-        stripePriceId: plan.stripePriceId,
-        customerId: customer.providerCustomerId,
-        successUrl: input.successUrl,
-        cancelUrl: input.cancelUrl,
-      });
-      await this.audit.write({
-        action: BILLING_AUDIT_ACTIONS.CHECKOUT_SUCCESS,
-        outcome: 'success',
-        actorUserId: userId,
-        tenantId,
-        metadata: { planCode: input.planCode },
-      });
-      return result;
-    } catch (err) {
-      await this.audit.write({
-        action: BILLING_AUDIT_ACTIONS.CHECKOUT_FAIL,
-        outcome: 'failure',
-        actorUserId: userId,
-        tenantId,
-        metadata: {
-          planCode: input.planCode,
-          error: err instanceof Error ? err.message : String(err),
-        },
-      });
-      throw err;
-    }
+    return {
+      mode: 'manual',
+      planCode,
+      planName: plan?.nameEn ?? planCode,
+      planNameAr: plan?.nameAr ?? planCode,
+      whatsappUrl: contact.whatsappUrl,
+      whatsappDisplay: contact.whatsappDisplay,
+    };
   }
 
   async changePlan(tenantId: string, userId: string, planCode: 'FREE' | 'STARTER' | 'PRO') {
@@ -127,32 +116,6 @@ export class BillingService {
       tx.invoiceRef.findMany({ where: { tenantId }, orderBy: { createdAt: 'desc' } }),
     );
     return { items };
-  }
-
-  private async ensurePaymentCustomer(tenantId: string, userId: string) {
-    const providerId = this.provider.id;
-    const existing = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.paymentCustomer.findUnique({
-        where: { tenantId_provider: { tenantId, provider: providerId } },
-      }),
-    );
-    if (existing) return existing;
-
-    const [user, tenant] = await Promise.all([
-      this.prisma.user.findUnique({ where: { id: userId } }),
-      this.prisma.tenant.findUnique({ where: { id: tenantId } }),
-    ]);
-    const result = await this.provider.createCustomer({
-      tenantId,
-      email: user?.email ?? `tenant-${tenantId}@invoices.local`,
-      name: tenant?.name,
-    });
-
-    return this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.paymentCustomer.create({
-        data: { tenantId, provider: providerId, providerCustomerId: result.providerCustomerId },
-      }),
-    );
   }
 
   private toPlanView(plan: Plan) {

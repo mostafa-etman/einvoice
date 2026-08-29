@@ -6,9 +6,10 @@ import { useRouter } from 'next/navigation';
 import { fetchActivationHelp } from '@/lib/api/tenants';
 import { useAuth } from '@/lib/auth-provider';
 import { TenantSwitcher } from '@/components/switchers/tenant-switcher';
-
-const FALLBACK_DISPLAY = '00201000864620';
-const FALLBACK_URL = 'https://wa.me/201000864620';
+import {
+  FALLBACK_WHATSAPP_DISPLAY,
+  FALLBACK_WHATSAPP_URL,
+} from '@/lib/support-whatsapp';
 
 export function PendingActivationScreen({
   status,
@@ -23,8 +24,8 @@ export function PendingActivationScreen({
     queryKey: ['activation-help'],
     queryFn: fetchActivationHelp,
   });
-  const display = helpQuery.data?.whatsappDisplay ?? FALLBACK_DISPLAY;
-  const url = helpQuery.data?.whatsappUrl ?? FALLBACK_URL;
+  const display = helpQuery.data?.whatsappDisplay ?? FALLBACK_WHATSAPP_DISPLAY;
+  const url = helpQuery.data?.whatsappUrl ?? FALLBACK_WHATSAPP_URL;
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">

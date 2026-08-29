@@ -12,6 +12,7 @@ import { BillingPastDueProcessor, BillingPastDueScheduler } from './billing-past
 import { BillingService } from './billing.service';
 import { BILLING_PROVIDER, type BillingProvider } from './providers/billing-provider';
 import { LocalGatewayBillingProvider } from './providers/local-gateway.provider';
+import { isConfiguredStripeSecret } from './providers/stripe-config';
 import { StripeBillingProvider } from './providers/stripe.provider';
 import { QuotaService } from './quota.service';
 import { SubscriptionService } from './subscription.service';
@@ -44,7 +45,16 @@ import { TenantAccessGuard, TenantAccessService } from './tenant-access.guard';
       useFactory: (
         stripe: StripeBillingProvider,
         local: LocalGatewayBillingProvider,
-      ): BillingProvider => (loadEnv().BILLING_PROVIDER === 'local' ? local : stripe),
+      ): BillingProvider => {
+        const env = loadEnv();
+        if (
+          env.BILLING_PROVIDER === 'stripe' &&
+          isConfiguredStripeSecret(env.STRIPE_SECRET_KEY)
+        ) {
+          return stripe;
+        }
+        return local;
+      },
       inject: [StripeBillingProvider, LocalGatewayBillingProvider],
     },
     {

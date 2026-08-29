@@ -36,9 +36,13 @@ export class BillingController {
   startCheckout(
     @Headers('x-tenant-id') tenantHeader: string | undefined,
     @CurrentUser() user: AuthUser,
-    @Body() body: { planCode: 'STARTER' | 'PRO'; successUrl?: string; cancelUrl?: string },
+    @Body() body: { planCode?: string; successUrl?: string; cancelUrl?: string },
   ) {
-    return this.billing.startCheckout(requireTenant(tenantHeader), user.userId, body);
+    return this.billing.startCheckout(requireTenant(tenantHeader), user.userId, {
+      planCode: body?.planCode ?? '',
+      successUrl: body?.successUrl,
+      cancelUrl: body?.cancelUrl,
+    });
   }
 
   @Post('change-plan')

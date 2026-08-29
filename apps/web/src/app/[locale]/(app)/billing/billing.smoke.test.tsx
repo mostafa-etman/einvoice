@@ -11,5 +11,9 @@ describe('billing page smoke', () => {
     expect(en.billing.status.READ_ONLY).toBeTruthy();
     expect(ar.billing.enterpriseTitle).toBeTruthy();
     expect(ar.billing.invoices).toBeTruthy();
+    expect(ar.billing.whatsappUpgradeBody).toContain('واتساب');
+    expect(ar.billing.whatsappUpgradeBody).toContain('{number}');
+    expect(en.billing.whatsappUpgradeBody).toContain('WhatsApp');
+    expect(en.billing.buyPoints).toBeTruthy();
   });
 });

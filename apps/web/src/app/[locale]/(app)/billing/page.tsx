@@ -1,18 +1,19 @@
 'use client';
 
 import { useState } from 'react';
-import { useTranslations } from 'next-intl';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLocale, useTranslations } from 'next-intl';
+import { useQuery } from '@tanstack/react-query';
 import {
-  changePlan,
   fetchInvoices,
   fetchPlans,
   fetchQuotas,
   fetchSubscription,
-  requestEnterprise,
-  startCheckout,
 } from '@/lib/api/billing';
 import { formatQuantityDisplay } from '@/lib/format-number';
+import {
+  WhatsAppUpgradeDialog,
+  type BillingInterest,
+} from '@/components/billing/whatsapp-upgrade-dialog';
 
 function QuotaBar({
   label,
@@ -45,10 +46,8 @@ function QuotaBar({
 
 export default function BillingPage() {
   const t = useTranslations('billing');
-  const qc = useQueryClient();
-  const [enterpriseMessage, setEnterpriseMessage] = useState('');
-  const [enterpriseSent, setEnterpriseSent] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const locale = useLocale();
+  const [interest, setInterest] = useState<BillingInterest | null>(null);
 
   const plansQuery = useQuery({ queryKey: ['billing-plans'], queryFn: fetchPlans });
   const subscriptionQuery = useQuery({
@@ -58,36 +57,16 @@ export default function BillingPage() {
   const quotasQuery = useQuery({ queryKey: ['billing-quotas'], queryFn: fetchQuotas });
   const invoicesQuery = useQuery({ queryKey: ['billing-invoices'], queryFn: fetchInvoices });
 
-  const checkoutMut = useMutation({
-    mutationFn: (planCode: 'STARTER' | 'PRO') => startCheckout({ planCode }),
-    onSuccess: (res) => {
-      setActionError(null);
-      if (typeof res.checkoutUrl === 'string') {
-        window.location.href = res.checkoutUrl;
-      }
-    },
-    onError: (e) => setActionError(e instanceof Error ? e.message : t('error')),
-  });
-
-  const changePlanMut = useMutation({
-    mutationFn: (planCode: 'FREE' | 'STARTER' | 'PRO') => changePlan(planCode),
-    onSuccess: () => {
-      setActionError(null);
-      void qc.invalidateQueries({ queryKey: ['billing-subscription'] });
-      void qc.invalidateQueries({ queryKey: ['billing-quotas'] });
-    },
-    onError: (e) => setActionError(e instanceof Error ? e.message : t('error')),
-  });
-
-  const enterpriseMut = useMutation({
-    mutationFn: () => requestEnterprise(enterpriseMessage || undefined),
-    onSuccess: () => setEnterpriseSent(true),
-    onError: (e) => setActionError(e instanceof Error ? e.message : t('error')),
-  });
-
   const subscription = subscriptionQuery.data;
   const quotas = quotasQuery.data;
   const currentPlan = subscription?.plan.code;
+
+  const planLabel = (plan: { code: string; name: string; nameAr: string }) =>
+    locale === 'ar' && plan.nameAr ? plan.nameAr : plan.name;
+
+  const openForPlan = (plan: { code: string; name: string; nameAr: string }) => {
+    setInterest({ planCode: plan.code, planLabel: planLabel(plan) });
+  };
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4">
@@ -96,19 +75,11 @@ export default function BillingPage() {
         <p className="text-sm text-muted-foreground">{t('subtitle')}</p>
       </header>
 
-      {actionError ? (
-        <p className="text-sm text-red-600" role="alert">
-          {actionError}
-        </p>
-      ) : null}
-
       <section className="space-y-3 rounded border border-border bg-background p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-lg font-medium">{t('currentPlan')}</h2>
-            <p className="text-2xl font-semibold">
-              {subscription?.plan.name ?? '—'}
-            </p>
+            <p className="text-2xl font-semibold">{subscription?.plan.name ?? '—'}</p>
           </div>
           <span
             className={`rounded px-3 py-1 text-sm font-medium ${
@@ -134,12 +105,23 @@ export default function BillingPage() {
             })}
           </p>
         ) : null}
-        <p className="text-sm">
-          {t('pointsBalance')}:{' '}
-          <span className="font-medium tabular-nums" dir="ltr">
-            {subscription?.pointsBalance ?? 0}
-          </span>
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm">
+            {t('pointsBalance')}:{' '}
+            <span className="font-medium tabular-nums" dir="ltr">
+              {subscription?.pointsBalance ?? 0}
+            </span>
+          </p>
+          <button
+            type="button"
+            className="rounded border px-3 py-2 text-sm"
+            onClick={() =>
+              setInterest({ planCode: 'POINTS', planLabel: t('pointsTopUp') })
+            }
+          >
+            {t('buyPoints')}
+          </button>
+        </div>
       </section>
 
       <section className="space-y-3 rounded border border-border bg-background p-4">
@@ -168,7 +150,7 @@ export default function BillingPage() {
                 }`}
               >
                 <div>
-                  <h3 className="text-lg font-semibold">{plan.name}</h3>
+                  <h3 className="text-lg font-semibold">{planLabel(plan)}</h3>
                   <p className="mt-1 text-sm text-muted-foreground">
                     {t('planQuotas', {
                       documents: plan.documentQuota,
@@ -181,25 +163,21 @@ export default function BillingPage() {
                 <div className="mt-4">
                   {isCurrent ? (
                     <span className="text-sm font-medium text-brand">{t('current')}</span>
-                  ) : plan.code === 'ENTERPRISE' ? (
-                    <span className="text-sm text-muted-foreground">{t('contactSales')}</span>
-                  ) : plan.code === 'FREE' ? (
-                    <button
-                      type="button"
-                      className="w-full rounded border px-3 py-2 text-sm"
-                      disabled={changePlanMut.isPending}
-                      onClick={() => changePlanMut.mutate('FREE')}
-                    >
-                      {t('downgrade')}
-                    </button>
                   ) : (
                     <button
                       type="button"
-                      className="w-full rounded bg-brand px-3 py-2 text-sm text-white"
-                      disabled={checkoutMut.isPending}
-                      onClick={() => checkoutMut.mutate(plan.code as 'STARTER' | 'PRO')}
+                      className={`w-full rounded px-3 py-2 text-sm ${
+                        plan.code === 'FREE'
+                          ? 'border'
+                          : 'bg-brand text-white'
+                      }`}
+                      onClick={() => openForPlan(plan)}
                     >
-                      {t('upgradeTo', { plan: plan.name })}
+                      {plan.code === 'ENTERPRISE'
+                        ? t('contactSales')
+                        : plan.code === 'FREE'
+                          ? t('downgrade')
+                          : t('upgradeTo', { plan: planLabel(plan) })}
                     </button>
                   )}
                 </div>
@@ -212,27 +190,23 @@ export default function BillingPage() {
       <section className="space-y-3 rounded border border-border bg-background p-4">
         <h2 className="text-lg font-medium">{t('enterpriseTitle')}</h2>
         <p className="text-sm text-muted-foreground">{t('enterpriseSubtitle')}</p>
-        {enterpriseSent ? (
-          <p className="text-sm text-green-700">{t('enterpriseSent')}</p>
-        ) : (
-          <div className="flex flex-wrap items-start gap-2">
-            <textarea
-              className="min-w-[16rem] flex-1 rounded border px-2 py-1 text-sm"
-              rows={2}
-              placeholder={t('enterpriseMessagePlaceholder')}
-              value={enterpriseMessage}
-              onChange={(e) => setEnterpriseMessage(e.target.value)}
-            />
-            <button
-              type="button"
-              className="rounded border px-3 py-2 text-sm"
-              disabled={enterpriseMut.isPending}
-              onClick={() => enterpriseMut.mutate()}
-            >
-              {t('enterpriseContact')}
-            </button>
-          </div>
-        )}
+        <button
+          type="button"
+          className="rounded border px-3 py-2 text-sm"
+          onClick={() =>
+            setInterest({
+              planCode: 'ENTERPRISE',
+              planLabel:
+                locale === 'ar'
+                  ? (plansQuery.data?.plans.find((p) => p.code === 'ENTERPRISE')?.nameAr ??
+                    t('enterpriseTitle'))
+                  : (plansQuery.data?.plans.find((p) => p.code === 'ENTERPRISE')?.name ??
+                    t('enterpriseTitle')),
+            })
+          }
+        >
+          {t('enterpriseContact')}
+        </button>
       </section>
 
       <section className="space-y-3 rounded border border-border bg-background p-4">
@@ -280,6 +254,12 @@ export default function BillingPage() {
           </table>
         </div>
       </section>
+
+      <WhatsAppUpgradeDialog
+        open={interest !== null}
+        interest={interest}
+        onClose={() => setInterest(null)}
+      />
     </div>
   );
 }

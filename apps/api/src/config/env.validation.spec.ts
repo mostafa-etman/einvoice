@@ -92,4 +92,10 @@ describe('loadEnv', () => {
     });
     expect(prod.SIGNUP_AUTO_APPROVE).toBe(false);
   });
+
+  it('defaults billing to local (manual) and does not require a Stripe key', () => {
+    const env = loadEnv(valid);
+    expect(env.BILLING_PROVIDER).toBe('local');
+    expect(env.STRIPE_SECRET_KEY).toBeUndefined();
+  });
 });

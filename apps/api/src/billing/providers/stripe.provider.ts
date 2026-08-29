@@ -10,11 +10,20 @@ import type {
   CreateCustomerResult,
   NormalizedWebhookEvent,
 } from './billing-provider';
+import {
+  guardStripeCallError,
+  isConfiguredStripeSecret,
+  PaymentProviderDisabledError,
+} from './stripe-config';
 
 const DEFAULT_SUCCESS_URL = 'https://web.localhost/en/billing?checkout=success';
 const DEFAULT_CANCEL_URL = 'https://web.localhost/en/billing?checkout=cancel';
 
-/** Stripe test-mode adapter (research.md R3). Every method fails loudly and clearly when STRIPE_SECRET_KEY is unset. */
+/**
+ * Stripe adapter kept for a future Egyptian gateway swap (same BillingProvider
+ * contract). Charge APIs are disabled unless a real secret is configured —
+ * placeholders like CHANGE_ME must never reach the Stripe SDK.
+ */
 @Injectable()
 export class StripeBillingProvider implements BillingProvider {
   readonly id = 'stripe' as const;
@@ -31,51 +40,66 @@ export class StripeBillingProvider implements BillingProvider {
 
   private getClient(): Stripe {
     const key = this.secretKey;
-    if (!key) {
-      throw new Error(
-        'STRIPE_SECRET_KEY is not configured; cannot use the Stripe billing provider',
+    if (!isConfiguredStripeSecret(key)) {
+      throw new PaymentProviderDisabledError(
+        'Stripe is not configured; online checkout is disabled',
       );
     }
     if (!this.client) {
-      this.client = new Stripe(key);
+      try {
+        this.client = new Stripe(key as string);
+      } catch {
+        this.client = null;
+        throw new PaymentProviderDisabledError(
+          'Stripe is not configured; online checkout is disabled',
+        );
+      }
     }
     return this.client;
   }
 
   async createCustomer(input: BillingCustomerRef): Promise<CreateCustomerResult> {
-    const client = this.getClient();
-    const customer = await client.customers.create({
-      email: input.email,
-      name: input.name ?? undefined,
-      metadata: { tenantId: input.tenantId },
-    });
-    return { providerCustomerId: customer.id };
+    try {
+      const client = this.getClient();
+      const customer = await client.customers.create({
+        email: input.email,
+        name: input.name ?? undefined,
+        metadata: { tenantId: input.tenantId },
+      });
+      return { providerCustomerId: customer.id };
+    } catch (err) {
+      return guardStripeCallError(err);
+    }
   }
 
   async createCheckoutSession(
     input: CreateCheckoutSessionParams,
   ): Promise<CheckoutSessionResult> {
-    const client = this.getClient();
-    if (!input.stripePriceId) {
-      throw new Error(
-        `Plan ${input.planCode} has no stripePriceId configured; cannot start Stripe checkout`,
-      );
+    try {
+      const client = this.getClient();
+      if (!input.stripePriceId) {
+        throw new Error(
+          `Plan ${input.planCode} has no stripePriceId configured; cannot start Stripe checkout`,
+        );
+      }
+      const metadata = { tenantId: input.tenantId, planCode: input.planCode };
+      const session = await client.checkout.sessions.create({
+        mode: 'subscription',
+        line_items: [{ price: input.stripePriceId, quantity: 1 }],
+        customer: input.customerId ?? undefined,
+        client_reference_id: input.tenantId,
+        metadata,
+        subscription_data: { metadata },
+        success_url: input.successUrl ?? DEFAULT_SUCCESS_URL,
+        cancel_url: input.cancelUrl ?? DEFAULT_CANCEL_URL,
+      });
+      if (!session.url) {
+        throw new Error('Stripe did not return a checkout URL');
+      }
+      return { checkoutUrl: session.url };
+    } catch (err) {
+      return guardStripeCallError(err);
     }
-    const metadata = { tenantId: input.tenantId, planCode: input.planCode };
-    const session = await client.checkout.sessions.create({
-      mode: 'subscription',
-      line_items: [{ price: input.stripePriceId, quantity: 1 }],
-      customer: input.customerId ?? undefined,
-      client_reference_id: input.tenantId,
-      metadata,
-      subscription_data: { metadata },
-      success_url: input.successUrl ?? DEFAULT_SUCCESS_URL,
-      cancel_url: input.cancelUrl ?? DEFAULT_CANCEL_URL,
-    });
-    if (!session.url) {
-      throw new Error('Stripe did not return a checkout URL');
-    }
-    return { checkoutUrl: session.url };
   }
 
   verifyAndParseWebhook(

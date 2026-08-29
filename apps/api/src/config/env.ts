@@ -96,7 +96,7 @@ const envSchema = z.object({
   // SaaS layer (013): billing / platform-admin / email.
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
-  BILLING_PROVIDER: z.enum(['stripe', 'local']).default('stripe'),
+  BILLING_PROVIDER: z.enum(['stripe', 'local']).default('local'),
   BILLING_GRACE_DAYS: z.coerce.number().int().positive().default(3),
   BILLING_PAST_DUE_SWEEP_INTERVAL_MS: z.coerce
     .number()
