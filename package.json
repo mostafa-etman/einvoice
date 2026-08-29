@@ -25,6 +25,8 @@
     "prod:up": "docker compose -f docker-compose.prod.yml --env-file .env.prod up -d",
     "prod:down": "docker compose -f docker-compose.prod.yml --env-file .env.prod down",
     "prod:migrate": "bash ./scripts/prod-migrate.sh",
+    "prod:deploy": "bash ./scripts/prod-deploy.sh",
+    "prod:backup": "bash ./scripts/prod-backup.sh",
     "prod:logs": "docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f --tail=200"
   },
   "devDependencies": {

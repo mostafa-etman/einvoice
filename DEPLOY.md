@@ -89,21 +89,32 @@ TLS: Traefik uses HTTP-01 ACME (`le` resolver). Certs persist in volume `einvoic
 
 ---
 
-## Updating (git pull → build → migrate → up)
+## Updating (one command)
 
 ```bash
 cd /opt/einvoice
-git pull
-
-docker compose -f docker-compose.prod.yml --env-file .env.prod build
-./scripts/prod-migrate.sh
-docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
-
-docker compose -f docker-compose.prod.yml --env-file .env.prod ps
-curl -fsS https://etaapi.erp-esafe.com/health/ready
+./scripts/prod-deploy.sh
 ```
 
-If `.env.prod.example` gained new keys, merge them into your server `.env.prod` before rebuild.
+That is the safe path. It always:
+
+1. Writes a timestamped **pg_dump + MinIO** snapshot under `./backups/deploy/` (keeps last 5).
+2. `git pull --ff-only`.
+3. Builds the **api** image, then `prisma migrate deploy` as **MIGRATE_DATABASE_URL** (Postgres owner `einvoice` — never `einvoice_app`).
+4. `docker compose … up -d --build --force-recreate web api worker` (postgres/redis/minio stay up).
+5. Prints `docker compose ps` and curls `/health/live` inside the containers.
+
+Equivalent migrate-only (already used by deploy):
+
+```bash
+./scripts/prod-migrate.sh
+# → docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm --no-deps \
+#     api node ./scripts/migrate.mjs
+```
+
+`apps/api/scripts/migrate.mjs` sets `DATABASE_URL=$MIGRATE_DATABASE_URL` then runs `npx prisma migrate deploy`. It **refuses** to run if the URL is missing or is `einvoice_app` (that role has no DDL and causes permission-denied / skipped migrations).
+
+If `.env.prod.example` gained new keys, merge them into server `.env.prod` before deploy.
 
 ---
 
@@ -144,42 +155,83 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm --no-dep
   node ./scripts/migrate.mjs
 ```
 
-`scripts/migrate.mjs` sets `DATABASE_URL=$MIGRATE_DATABASE_URL` then runs `npx prisma migrate deploy`. Never run migrate as the app role.
+`apps/api/scripts/migrate.mjs` sets `DATABASE_URL=$MIGRATE_DATABASE_URL` then runs `npx prisma migrate deploy`. It refuses `einvoice_app` and refuses a missing URL in production. Never run migrate as the app role.
 
 ---
 
 ## Backup & restore
 
-### Backup
+Host backups land in **`/opt/einvoice/backups`** (the gitignored `./backups` directory on the VPS). That is a **host path**, not a container filesystem, so `docker compose up --build --force-recreate` does not delete them.
+
+Layout:
+
+- `backups/daily/<UTC-stamp>/postgres.sql.gz` + `minio.tar.gz`
+- `backups/weekly/…` — Sunday copy of that day’s daily (keep 4)
+- `backups/deploy/…` — pre-deploy snapshots (keep 5)
+
+Daily job keeps **7 daily + 4 weekly**. Manual: `./scripts/prod-backup.sh --kind daily`
+
+### Install daily cron (once on the VPS)
 
 ```bash
-./scripts/prod-backup.sh
-# → ./backups/<UTC-stamp>/postgres.sql.gz
-# → ./backups/<UTC-stamp>/minio.tar.gz
+cd /opt/einvoice
+chmod +x scripts/prod-*.sh
+sudo touch /var/log/einvoice-backup.log
+sudo chown "$USER" /var/log/einvoice-backup.log
+./scripts/prod-install-backup-cron.sh
+crontab -l
 ```
+
+Equivalent crontab line (02:15 UTC every day):
+
+```cron
+15 2 * * * cd /opt/einvoice && /usr/bin/flock -n /tmp/einvoice-backup.lock /opt/einvoice/scripts/prod-backup.sh --kind daily >> /var/log/einvoice-backup.log 2>&1
+```
+
+### Copy backups OFF the server (required)
+
+A VPS disk failure destroys `./backups` too. From your laptop (or another machine):
+
+```bash
+# Recurring (put in Windows Task Scheduler / local cron)
+rsync -avz -e ssh USER@VPS_IP:/opt/einvoice/backups/ ~/einvoice-backups/
+
+# One-shot
+scp -r USER@VPS_IP:/opt/einvoice/backups/latest-copy .
+```
+
+Keep at least the last weekly dump somewhere that is not the VPS (NAS, another VPS, encrypted USB).
 
 ### Restore Postgres
 
 ```bash
-# Stop writers first (recommended)
-docker compose -f docker-compose.prod.yml --env-file .env.prod stop api worker web
-
-./scripts/prod-restore-postgres.sh backups/<stamp>/postgres.sql.gz
-./scripts/prod-migrate.sh   # ensure schema is current
-
-docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+cd /opt/einvoice
+./scripts/prod-restore-postgres.sh backups/daily/<stamp>/postgres.sql.gz
+# prompts for "yes"; stops api/worker/web; restores as POSTGRES_USER; migrate deploy; starts apps
 ```
 
-### Restore MinIO
+### Restore MinIO (PDFs / uploads)
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod stop api worker
-docker run --rm \
-  -v einvoice_prod_minio:/data \
-  -v "$PWD/backups/<stamp>":/backup \
-  alpine:3.20 sh -c 'rm -rf /data/* && tar xzf /backup/minio.tar.gz -C /data'
-docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+cd /opt/einvoice
+./scripts/prod-restore-minio.sh backups/daily/<stamp>/minio.tar.gz
 ```
+
+---
+
+## Change the owner/admin password
+
+There is no in-app “change password” screen. Do **not** re-run `prod-seed.sh` (it can upsert seed users and is not a password-only tool).
+
+Reset **only** the login hash for one email (argon2id, same as the app). Tenant data is not touched. Refresh cookies for that user are revoked.
+
+```bash
+cd /opt/einvoice
+./scripts/prod-reset-password.sh owner@erp-esafe.com
+# type yes, then the new password twice (min 12 characters)
+```
+
+Then sign in at `https://eta.erp-esafe.com/login`. Use the email that actually exists (seed default is `SEED_OWNER_EMAIL`, often `owner@erp-esafe.com`).
 
 ---
 
