@@ -16,6 +16,7 @@ import {
   getTenant,
   getTenantUsage,
   listAdminPlans,
+  listAdminAddons,
   listTenants,
   provisionTenant,
   rejectTenant,
@@ -24,6 +25,8 @@ import {
   suspendTenant,
   updateSettings,
   upsertPlan,
+  upsertAddon,
+  applyAddon,
   type ImpersonationSessionView,
   type LifecycleStatus,
   type PlanAdmin,
@@ -31,7 +34,7 @@ import {
 } from '@/lib/api/platform-admin';
 import { CopyableTenantId } from '@/components/copyable-tenant-id';
 
-type Tab = 'tenants' | 'plans' | 'costs' | 'settings';
+type Tab = 'tenants' | 'plans' | 'addons' | 'costs' | 'settings';
 
 function TenantDetailPanel({
   tenantId,
@@ -139,6 +142,24 @@ function TenantDetailPanel({
                 {detail.pointsBalance}
               </dd>
             </div>
+            <div>
+              <dt className="text-muted-foreground">{t('trialEndsAt')}</dt>
+              <dd className="font-medium" dir="ltr">
+                {detail.trialEndsAt ? new Date(detail.trialEndsAt).toLocaleString() : '—'}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">{t('extraUsers')}</dt>
+              <dd className="font-medium tabular-nums" dir="ltr">
+                {detail.extraUsers ?? 0}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">{t('extraCompanies')}</dt>
+              <dd className="font-medium tabular-nums" dir="ltr">
+                {detail.extraCompanies ?? 0}
+              </dd>
+            </div>
           </dl>
           <p className="text-sm">
             {detail.entitlements.documentQuota} docs · {detail.entitlements.branchQuota} branches ·{' '}
@@ -154,6 +175,9 @@ function TenantDetailPanel({
               </p>
               <p className="text-sm text-muted-foreground">
                 {t('points')}: {usage.pointsBalance} · consumed {usage.pointsLedger.consumedOnPage}
+                {usage.limits
+                  ? ` · ${usage.limits.users.used}/${usage.limits.users.limit} users · ${usage.limits.companies.used}/${usage.limits.companies.limit} companies`
+                  : ''}
               </p>
             </div>
           ) : null}
@@ -188,6 +212,18 @@ function TenantDetailPanel({
               }}
             >
               {t('adjustPoints')}
+            </button>
+            <button
+              type="button"
+              className="rounded border px-3 py-2 text-sm"
+              onClick={() => {
+                const addonCode = window.prompt(t('applyAddon')) || '';
+                if (!addonCode) return;
+                const reason = window.prompt(t('reason')) || 'addon';
+                void applyAddon(tenantId, addonCode.trim().toUpperCase(), reason).then(invalidate);
+              }}
+            >
+              {t('applyAddon')}
             </button>
           </div>
           <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
@@ -248,18 +284,35 @@ export default function PlatformAdminPage() {
     name: '',
     ownerEmail: '',
     ownerName: '',
-    planCode: 'FREE',
+    planCode: 'BASIC',
     reason: '',
   });
   const [planForm, setPlanForm] = useState({
     code: '',
     nameEn: '',
     nameAr: '',
-    documentQuota: 100,
+    documentQuota: 500,
     branchQuota: 1,
     deviceQuota: 1,
     includedPoints: 0,
+    officialPriceEgp: 0,
+    discountedPriceEgp: 0,
+    maxUsers: 1,
+    maxCompanies: 1,
+    isTrial: false,
+    isPublic: true,
     selfServe: true,
+    isActive: true,
+    sortOrder: 0,
+  });
+  const [addonForm, setAddonForm] = useState({
+    code: '',
+    kind: 'POINTS' as 'POINTS' | 'USER' | 'COMPANY',
+    nameEn: '',
+    nameAr: '',
+    quantity: 1,
+    officialPriceEgp: 0,
+    discountedPriceEgp: 0,
     isActive: true,
     sortOrder: 0,
   });
@@ -273,6 +326,11 @@ export default function PlatformAdminPage() {
     queryKey: ['platform-admin-plans'],
     queryFn: listAdminPlans,
     retry: false,
+  });
+  const addonsQuery = useQuery({
+    queryKey: ['platform-admin-addons'],
+    queryFn: listAdminAddons,
+    enabled: tab === 'addons',
   });
   const costsQuery = useQuery({
     queryKey: ['platform-admin-costs'],
@@ -300,7 +358,7 @@ export default function PlatformAdminPage() {
     mutationFn: () => provisionTenant(form),
     onSuccess: () => {
       setShowProvision(false);
-      setForm({ name: '', ownerEmail: '', ownerName: '', planCode: 'FREE', reason: '' });
+      setForm({ name: '', ownerEmail: '', ownerName: '', planCode: 'BASIC', reason: '' });
       void qc.invalidateQueries({ queryKey: ['platform-admin-tenants'] });
     },
   });
@@ -330,7 +388,7 @@ export default function PlatformAdminPage() {
   return (
     <div className="space-y-4">
       <nav className="flex flex-wrap gap-2 border-b border-border pb-2">
-        {(['tenants', 'plans', 'costs', 'settings'] as Tab[]).map((id) => (
+        {(['tenants', 'plans', 'addons', 'costs', 'settings'] as Tab[]).map((id) => (
           <button
             key={id}
             type="button"
@@ -342,9 +400,11 @@ export default function PlatformAdminPage() {
                 ? 'tabTenants'
                 : id === 'plans'
                   ? 'tabPlans'
-                  : id === 'costs'
-                    ? 'tabCosts'
-                    : 'tabSettings',
+                  : id === 'addons'
+                    ? 'tabAddons'
+                    : id === 'costs'
+                      ? 'tabCosts'
+                      : 'tabSettings',
             )}
           </button>
         ))}
@@ -571,6 +631,40 @@ export default function PlatformAdminPage() {
                 onChange={(e) => setPlanForm((f) => ({ ...f, includedPoints: Number(e.target.value) }))}
               />
             </label>
+            {(
+              [
+                ['officialPriceEgp', t('officialPrice')],
+                ['discountedPriceEgp', t('discountedPrice')],
+                ['maxUsers', t('maxUsers')],
+                ['maxCompanies', t('maxCompanies')],
+              ] as const
+            ).map(([field, label]) => (
+              <label key={field} className="flex flex-col text-sm">
+                {label}
+                <input
+                  type="number"
+                  className="rounded border px-2 py-1"
+                  value={planForm[field]}
+                  onChange={(e) => setPlanForm((f) => ({ ...f, [field]: Number(e.target.value) }))}
+                />
+              </label>
+            ))}
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={planForm.isPublic}
+                onChange={(e) => setPlanForm((f) => ({ ...f, isPublic: e.target.checked }))}
+              />
+              {t('isPublic')}
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={planForm.isTrial}
+                onChange={(e) => setPlanForm((f) => ({ ...f, isTrial: e.target.checked }))}
+              />
+              {t('isTrial')}
+            </label>
             <button type="submit" className="rounded bg-brand px-3 py-2 text-sm text-white">
               {t('savePlan')}
             </button>
@@ -578,8 +672,9 @@ export default function PlatformAdminPage() {
           <ul className="space-y-2 text-sm">
             {plans.map((p) => (
               <li key={p.id} className="rounded border p-3">
-                <strong>{p.code}</strong> — {p.nameEn} / {p.nameAr} · {p.documentQuota} docs · {p.includedPoints}{' '}
-                {t('points')}
+                <strong>{p.code}</strong> — {p.nameEn} / {p.nameAr} · {p.includedPoints}{' '}
+                {t('points')} · {p.discountedPriceEgp}/{p.officialPriceEgp} EGP · {p.maxUsers}u /{' '}
+                {p.maxCompanies}c
                 <button
                   type="button"
                   className="ms-2 text-brand underline"
@@ -592,9 +687,97 @@ export default function PlatformAdminPage() {
                       branchQuota: p.branchQuota,
                       deviceQuota: p.deviceQuota,
                       includedPoints: p.includedPoints,
+                      officialPriceEgp: p.officialPriceEgp,
+                      discountedPriceEgp: p.discountedPriceEgp,
+                      maxUsers: p.maxUsers,
+                      maxCompanies: p.maxCompanies,
+                      isTrial: p.isTrial,
+                      isPublic: p.isPublic,
                       selfServe: p.selfServe,
                       isActive: p.isActive,
                       sortOrder: p.sortOrder,
+                    })
+                  }
+                >
+                  edit
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {tab === 'addons' ? (
+        <div className="space-y-4">
+          <form
+            className="grid gap-3 rounded border p-4 sm:grid-cols-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void upsertAddon(addonForm).then(() => {
+                void qc.invalidateQueries({ queryKey: ['platform-admin-addons'] });
+              });
+            }}
+          >
+            <h2 className="col-span-full text-lg font-medium">{t('tabAddons')}</h2>
+            {(['code', 'nameEn', 'nameAr'] as const).map((field) => (
+              <label key={field} className="flex flex-col text-sm">
+                {field}
+                <input
+                  required
+                  className="rounded border px-2 py-1"
+                  value={addonForm[field]}
+                  onChange={(e) => setAddonForm((f) => ({ ...f, [field]: e.target.value }))}
+                />
+              </label>
+            ))}
+            <label className="flex flex-col text-sm">
+              kind
+              <select
+                className="rounded border px-2 py-1"
+                value={addonForm.kind}
+                onChange={(e) =>
+                  setAddonForm((f) => ({ ...f, kind: e.target.value as typeof f.kind }))
+                }
+              >
+                <option value="POINTS">POINTS</option>
+                <option value="USER">USER</option>
+                <option value="COMPANY">COMPANY</option>
+              </select>
+            </label>
+            {(['quantity', 'officialPriceEgp', 'discountedPriceEgp'] as const).map((field) => (
+              <label key={field} className="flex flex-col text-sm">
+                {field}
+                <input
+                  type="number"
+                  className="rounded border px-2 py-1"
+                  value={addonForm[field]}
+                  onChange={(e) => setAddonForm((f) => ({ ...f, [field]: Number(e.target.value) }))}
+                />
+              </label>
+            ))}
+            <button type="submit" className="rounded bg-brand px-3 py-2 text-sm text-white">
+              {t('savePlan')}
+            </button>
+          </form>
+          <ul className="space-y-2 text-sm">
+            {(addonsQuery.data?.addons ?? []).map((a) => (
+              <li key={a.code} className="rounded border p-3">
+                <strong>{a.code}</strong> — {a.name} / {a.nameAr} · {a.kind} × {a.quantity} ·{' '}
+                {a.discountedPriceEgp}/{a.officialPriceEgp} EGP
+                <button
+                  type="button"
+                  className="ms-2 text-brand underline"
+                  onClick={() =>
+                    setAddonForm({
+                      code: a.code,
+                      kind: a.kind,
+                      nameEn: a.name,
+                      nameAr: a.nameAr,
+                      quantity: a.quantity,
+                      officialPriceEgp: a.officialPriceEgp,
+                      discountedPriceEgp: a.discountedPriceEgp,
+                      isActive: a.isActive,
+                      sortOrder: a.sortOrder,
                     })
                   }
                 >
@@ -617,6 +800,13 @@ export default function PlatformAdminPage() {
                 (e.currentTarget.elements.namedItem(`cost-${row.documentKind}`) as HTMLInputElement)
                   ?.value ?? row.points,
               ),
+              standardPoints: Number(
+                (
+                  e.currentTarget.elements.namedItem(
+                    `std-${row.documentKind}`,
+                  ) as HTMLInputElement
+                )?.value ?? row.standardPoints ?? row.points,
+              ),
             }));
             void setDocumentCosts(items).then(() =>
               qc.invalidateQueries({ queryKey: ['platform-admin-costs'] }),
@@ -624,18 +814,28 @@ export default function PlatformAdminPage() {
           }}
         >
           {(costsQuery.data ?? []).map((row) => (
-            <label key={row.documentKind} className="flex items-center justify-between gap-4 text-sm">
+            <label key={row.documentKind} className="flex flex-wrap items-center justify-between gap-4 text-sm">
               <span>
                 {t('costKind')}: {row.documentKind}
               </span>
-              <input
-                name={`cost-${row.documentKind}`}
-                type="number"
-                min={0}
-                defaultValue={row.points}
-                className="w-24 rounded border px-2 py-1"
-                aria-label={t('costPoints')}
-              />
+              <span className="flex items-center gap-2">
+                <input
+                  name={`cost-${row.documentKind}`}
+                  type="number"
+                  min={0}
+                  defaultValue={row.points}
+                  className="w-24 rounded border px-2 py-1"
+                  aria-label={t('costPoints')}
+                />
+                <input
+                  name={`std-${row.documentKind}`}
+                  type="number"
+                  min={0}
+                  defaultValue={row.standardPoints ?? row.points}
+                  className="w-24 rounded border px-2 py-1"
+                  aria-label={t('costStandard')}
+                />
+              </span>
             </label>
           ))}
           <button type="submit" className="rounded bg-brand px-3 py-2 text-sm text-white">
@@ -656,6 +856,10 @@ export default function PlatformAdminPage() {
               supportWhatsappE164: (formEl.elements.namedItem('waE164') as HTMLInputElement).value,
               supportWhatsappDisplay: (formEl.elements.namedItem('waDisplay') as HTMLInputElement)
                 .value,
+              trialDays: Number((formEl.elements.namedItem('trialDays') as HTMLInputElement).value),
+              trialPoints: Number(
+                (formEl.elements.namedItem('trialPoints') as HTMLInputElement).value,
+              ),
             }).then(() => qc.invalidateQueries({ queryKey: ['platform-admin-settings'] }));
           }}
         >
@@ -681,6 +885,26 @@ export default function PlatformAdminPage() {
               name="waDisplay"
               className="rounded border px-2 py-1"
               defaultValue={settingsQuery.data.supportWhatsappDisplay}
+            />
+          </label>
+          <label className="flex flex-col text-sm">
+            {t('trialDays')}
+            <input
+              name="trialDays"
+              type="number"
+              min={1}
+              className="rounded border px-2 py-1"
+              defaultValue={settingsQuery.data.trialDays}
+            />
+          </label>
+          <label className="flex flex-col text-sm">
+            {t('trialPoints')}
+            <input
+              name="trialPoints"
+              type="number"
+              min={0}
+              className="rounded border px-2 py-1"
+              defaultValue={settingsQuery.data.trialPoints}
             />
           </label>
           <button type="submit" className="rounded bg-brand px-3 py-2 text-sm text-white">

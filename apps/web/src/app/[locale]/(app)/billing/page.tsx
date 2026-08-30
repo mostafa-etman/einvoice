@@ -4,8 +4,8 @@ import { useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useQuery } from '@tanstack/react-query';
 import {
+  fetchCatalog,
   fetchInvoices,
-  fetchPlans,
   fetchQuotas,
   fetchSubscription,
 } from '@/lib/api/billing';
@@ -15,6 +15,7 @@ import {
   WhatsAppUpgradeDialog,
   type BillingInterest,
 } from '@/components/billing/whatsapp-upgrade-dialog';
+import { AddonCards, PlanCards, PromoNote } from '@/components/billing/plan-cards';
 import { useTenant } from '@/lib/tenant-provider';
 
 function QuotaBar({
@@ -52,7 +53,7 @@ export default function BillingPage() {
   const { tenantId } = useTenant();
   const [interest, setInterest] = useState<BillingInterest | null>(null);
 
-  const plansQuery = useQuery({ queryKey: ['billing-plans'], queryFn: fetchPlans });
+  const catalogQuery = useQuery({ queryKey: ['billing-catalog'], queryFn: fetchCatalog });
   const subscriptionQuery = useQuery({
     queryKey: ['billing-subscription'],
     queryFn: fetchSubscription,
@@ -63,14 +64,17 @@ export default function BillingPage() {
   const subscription = subscriptionQuery.data;
   const quotas = quotasQuery.data;
   const currentPlan = subscription?.plan.code;
+  const catalog = catalogQuery.data;
 
   const planLabel = (plan: { code: string; name: string; nameAr: string }) =>
     locale === 'ar' && plan.nameAr ? plan.nameAr : plan.name;
 
-  const currentPlanView = (plansQuery.data?.plans ?? []).find((p) => p.code === currentPlan);
+  const currentPlanView = (catalog?.plans ?? []).find((p) => p.code === currentPlan);
   const currentPlanLabel = currentPlanView
     ? planLabel(currentPlanView)
-    : (subscription?.plan.name ?? null);
+    : (subscription?.plan.nameAr && locale === 'ar'
+        ? subscription.plan.nameAr
+        : (subscription?.plan.name ?? null));
 
   const openForPlan = (plan: { code: string; name: string; nameAr: string }) => {
     setInterest({ kind: 'upgrade', planCode: plan.code, planLabel: planLabel(plan) });
@@ -88,7 +92,11 @@ export default function BillingPage() {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-lg font-medium">{t('currentPlan')}</h2>
-            <p className="text-2xl font-semibold">{subscription?.plan.name ?? '—'}</p>
+            <p className="text-2xl font-semibold">
+              {locale === 'ar' && subscription?.plan.nameAr
+                ? subscription.plan.nameAr
+                : (subscription?.plan.name ?? '—')}
+            </p>
           </div>
           <span
             className={`rounded px-3 py-1 text-sm font-medium ${
@@ -107,11 +115,16 @@ export default function BillingPage() {
             {t('readOnlyWarning')}
           </p>
         ) : null}
-        {subscription?.graceEndsAt ? (
+        {subscription?.trialEndsAt ? (
           <p className="text-sm text-muted-foreground">
-            {t('graceEndsAt', {
-              date: new Date(subscription.graceEndsAt).toLocaleString(),
+            {t('trialEndsAt', {
+              date: new Date(subscription.trialEndsAt).toLocaleString(),
             })}
+          </p>
+        ) : null}
+        {subscription?.sendBlocked ? (
+          <p className="rounded bg-red-50 p-2 text-sm text-red-700" role="alert">
+            {t('sendBlockedMessage')}
           </p>
         ) : null}
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -140,6 +153,12 @@ export default function BillingPage() {
             <QuotaBar label={t('documents')} used={quotas.documents.used} limit={quotas.documents.limit} />
             <QuotaBar label={t('branches')} used={quotas.branches.used} limit={quotas.branches.limit} />
             <QuotaBar label={t('devices')} used={quotas.devices.used} limit={quotas.devices.limit} />
+            {quotas.users ? (
+              <QuotaBar label={t('users')} used={quotas.users.used} limit={quotas.users.limit} />
+            ) : null}
+            {quotas.companies ? (
+              <QuotaBar label={t('companies')} used={quotas.companies.used} limit={quotas.companies.limit} />
+            ) : null}
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">{t('loading')}</p>
@@ -148,71 +167,27 @@ export default function BillingPage() {
 
       <section className="space-y-3">
         <h2 className="text-lg font-medium">{t('plans')}</h2>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {(plansQuery.data?.plans ?? []).map((plan) => {
-            const isCurrent = plan.code === currentPlan;
-            return (
-              <div
-                key={plan.code}
-                className={`flex flex-col justify-between rounded border p-4 ${
-                  isCurrent ? 'border-brand ring-1 ring-brand' : 'border-border'
-                }`}
-              >
-                <div>
-                  <h3 className="text-lg font-semibold">{planLabel(plan)}</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t('planQuotas', {
-                      documents: plan.documentQuota,
-                      branches: plan.branchQuota,
-                      devices: plan.deviceQuota,
-                      points: plan.includedPoints,
-                    })}
-                  </p>
-                </div>
-                <div className="mt-4">
-                  {isCurrent ? (
-                    <span className="text-sm font-medium text-brand">{t('current')}</span>
-                  ) : (
-                    <button
-                      type="button"
-                      className={`w-full rounded px-3 py-2 text-sm ${
-                        plan.code === 'FREE'
-                          ? 'border'
-                          : 'bg-brand text-white'
-                      }`}
-                      onClick={() => openForPlan(plan)}
-                    >
-                      {plan.code === 'ENTERPRISE'
-                        ? t('contactSales')
-                        : plan.code === 'FREE'
-                          ? t('downgrade')
-                          : t('upgradeTo', { plan: planLabel(plan) })}
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        {catalog ? <PromoNote catalog={catalog} /> : null}
+        <PlanCards
+          plans={catalog?.plans ?? []}
+          currentPlanCode={currentPlan}
+          onChoose={openForPlan}
+        />
       </section>
 
       <section className="space-y-3 rounded border border-border bg-background p-4">
-        <h2 className="text-lg font-medium">{t('enterpriseTitle')}</h2>
-        <p className="text-sm text-muted-foreground">{t('enterpriseSubtitle')}</p>
-        <button
-          type="button"
-          className="rounded border px-3 py-2 text-sm"
-          onClick={() => {
-            const enterprise = plansQuery.data?.plans.find((p) => p.code === 'ENTERPRISE');
+        <h2 className="text-lg font-medium">{t('addonsTitle')}</h2>
+        <p className="text-sm text-muted-foreground">{t('addonsSubtitle')}</p>
+        <AddonCards
+          addons={catalog?.addons ?? []}
+          onChoose={(addon) =>
             setInterest({
-              kind: 'upgrade',
-              planCode: 'ENTERPRISE',
-              planLabel: enterprise ? planLabel(enterprise) : t('enterpriseTitle'),
-            });
-          }}
-        >
-          {t('enterpriseContact')}
-        </button>
+              kind: 'addon',
+              planCode: addon.code,
+              planLabel: locale === 'ar' && addon.nameAr ? addon.nameAr : addon.name,
+            })
+          }
+        />
       </section>
 
       <section className="space-y-3 rounded border border-border bg-background p-4">

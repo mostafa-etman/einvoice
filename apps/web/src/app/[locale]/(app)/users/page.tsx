@@ -100,6 +100,9 @@ export default function UsersPage() {
           {t('invite')}
         </button>
       </form>
+      {invite.error instanceof ApiError && invite.error.status === 409 ? (
+        <p className="mt-token-sm text-token-sm text-red-700">{t('limitReached')}</p>
+      ) : null}
       {invite.error instanceof ApiError && invite.error.status === 403 ? (
         <p className="mt-token-sm text-token-sm text-red-700">{t('forbidden')}</p>
       ) : null}

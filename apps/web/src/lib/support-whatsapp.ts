@@ -15,7 +15,7 @@ function present(value?: string | null): string | null {
   return s;
 }
 
-export type WhatsAppRequestKind = 'upgrade' | 'points' | 'activation';
+export type WhatsAppRequestKind = 'upgrade' | 'points' | 'activation' | 'renewal' | 'addon';
 
 export type WhatsAppUpgradeContext = {
   locale: string;
@@ -33,6 +33,8 @@ const AR = {
   upgradeGeneric: 'أرغب في ترقية الباقة أو شحن النقاط.',
   points: 'أرغب في شحن نقاط.',
   activation: 'أرغب في تفعيل حساب شركتي.',
+  renewal: 'انتهت الفترة التجريبية / نفدت النقاط — للتجديد تواصل واتساب: 00201000864620',
+  addon: (name: string) => `أرغب في شراء الإضافة: ${name}.`,
   tenantId: 'رقم المستأجر',
   company: 'اسم الشركة',
   currentPlan: 'الباقة الحالية',
@@ -46,6 +48,8 @@ const EN = {
   upgradeGeneric: 'I would like to upgrade my plan or top up points.',
   points: 'I would like to top up points.',
   activation: 'I would like to activate my company account.',
+  renewal: 'Trial ended / points depleted — please renew via WhatsApp: 00201000864620',
+  addon: (name: string) => `I would like to buy the add-on: ${name}.`,
   tenantId: 'Tenant ID',
   company: 'Company name',
   currentPlan: 'Current plan',
@@ -64,6 +68,10 @@ export function buildWhatsAppUpgradeMessage(ctx: WhatsAppUpgradeContext): string
     requestLine = copy.points;
   } else if (ctx.kind === 'activation') {
     requestLine = copy.activation;
+  } else if (ctx.kind === 'renewal') {
+    requestLine = copy.renewal;
+  } else if (ctx.kind === 'addon' && requestedPlan) {
+    requestLine = copy.addon(requestedPlan);
   } else if (requestedPlan) {
     requestLine = copy.upgradeWithPlan(requestedPlan);
   } else {

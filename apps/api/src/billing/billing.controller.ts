@@ -16,6 +16,12 @@ export class BillingController {
     return this.billing.listPlans();
   }
 
+  @Get('catalog')
+  @UseGuards(JwtAuthGuard)
+  getCatalog() {
+    return this.billing.getCatalog();
+  }
+
   @Get('subscription')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequirePermissions(PERMISSIONS.BILLING_VIEW)

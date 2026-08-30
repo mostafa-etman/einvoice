@@ -45,7 +45,8 @@ export function WhatsAppUpgradeDialog({
   const baseUrl = helpQuery.data?.whatsappUrl ?? FALLBACK_WHATSAPP_URL;
   const companyName = memberships.find((m) => m.tenant.id === tenantId)?.tenant.name ?? null;
   const kind: WhatsAppRequestKind = interest?.kind ?? 'upgrade';
-  const requestedPlan = kind === 'points' || kind === 'activation' ? null : interest?.planLabel;
+  const requestedPlan =
+    kind === 'points' || kind === 'activation' || kind === 'renewal' ? null : interest?.planLabel;
   const prefill = buildWhatsAppUpgradeMessage({
     locale,
     kind,

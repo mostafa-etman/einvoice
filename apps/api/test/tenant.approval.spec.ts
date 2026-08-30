@@ -42,7 +42,7 @@ describe('Tenant approval gate', () => {
     if (app) await app.close();
   });
 
-  it('new signup tenant is PENDING and cannot write until approved', async () => {
+  it('new signup tenant is ACTIVE on trial and can write', async () => {
     if (!dbAvailable) return;
     const t = Date.now();
     const user = await registerUser(app, String(t));
@@ -50,40 +50,12 @@ describe('Tenant approval gate', () => {
     const created = await request(app.getHttpServer())
       .post('/tenants')
       .set('Authorization', `Bearer ${user.token}`)
-      .send({ name: `Pending Co ${t}`, planCode: 'STARTER' })
+      .send({ name: `Trial Co ${t}`, planCode: 'STARTER' })
       .expect(201);
 
-    expect(created.body.activationStatus).toBe('PENDING');
+    expect(created.body.activationStatus).toBe('ACTIVE');
     const tenantId = created.body.id as string;
 
-    const blocked = await request(app.getHttpServer())
-      .post('/branches')
-      .set('Authorization', `Bearer ${user.token}`)
-      .set('X-Tenant-Id', tenantId)
-      .send({ name: 'Second', etaBranchCode: '2', activityCode: '6201' })
-      .expect(403);
-    expect(blocked.body.message).toBe('tenant_pending_approval');
-
-    const prisma = app.get(PrismaService);
-    await prisma.user.update({
-      where: { id: user.userId },
-      data: { isPlatformOperator: true },
-    });
-
-    const approveRes = await request(app.getHttpServer())
-      .post(`/platform-admin/tenants/${tenantId}/approve`)
-      .set('Authorization', `Bearer ${user.token}`)
-      .send({ reason: 'test approve' });
-    expect([200, 201]).toContain(approveRes.status);
-
-    const approved = await request(app.getHttpServer())
-      .get(`/platform-admin/tenants/${tenantId}`)
-      .set('Authorization', `Bearer ${user.token}`)
-      .expect(200);
-    expect(approved.body.activationStatus).toBe('ACTIVE');
-    expect(approved.body.lifecycleStatus).toBe('ACTIVE');
-
-    // Writes work after approval (may 409 quota on second branch — not 403 pending).
     const write = await request(app.getHttpServer())
       .post('/branches')
       .set('Authorization', `Bearer ${user.token}`)
@@ -92,7 +64,7 @@ describe('Tenant approval gate', () => {
     expect(write.status).not.toBe(403);
   });
 
-  it('sub-company created by an approved owner is auto-active', async () => {
+  it('sub-company is blocked on trial (max 1 company) until a paid plan is assigned', async () => {
     if (!dbAvailable) return;
     const t = `sub${Date.now()}`;
     const user = await registerUser(app, t);
@@ -101,17 +73,24 @@ describe('Tenant approval gate', () => {
       .set('Authorization', `Bearer ${user.token}`)
       .send({ name: `Parent ${t}` })
       .expect(201);
-    expect(first.body.activationStatus).toBe('PENDING');
+    expect(first.body.activationStatus).toBe('ACTIVE');
+
+    const blocked = await request(app.getHttpServer())
+      .post('/tenants')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ name: `Child ${t}` });
+    expect(blocked.status).toBe(409);
 
     const prisma = app.get(PrismaService);
     await prisma.user.update({
       where: { id: user.userId },
       data: { isPlatformOperator: true },
     });
-    await request(app.getHttpServer())
-      .post(`/platform-admin/tenants/${first.body.id}/approve`)
+    const assign = await request(app.getHttpServer())
+      .post(`/platform-admin/tenants/${first.body.id}/plan`)
       .set('Authorization', `Bearer ${user.token}`)
-      .send({ reason: 'parent' });
+      .send({ planCode: 'BRONZE', reason: 'upgrade' });
+    expect([200, 201]).toContain(assign.status);
 
     const second = await request(app.getHttpServer())
       .post('/tenants')

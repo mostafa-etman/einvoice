@@ -9,6 +9,7 @@ export type TenantMembership = {
     lifecycleStatus?: 'PENDING' | 'ACTIVE' | 'REJECTED' | 'SUSPENDED';
     suspendedAt?: string | null;
     pointsBalance?: number;
+    trialEndsAt?: string | null;
   };
   role: { id: string; name: string };
 };

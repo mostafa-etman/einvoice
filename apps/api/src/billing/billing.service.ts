@@ -1,5 +1,4 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
-import type { Plan } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
@@ -7,6 +6,8 @@ import { BILLING_AUDIT_ACTIONS } from './billing-audit';
 import { PointsService } from './points.service';
 import { QuotaService } from './quota.service';
 import { SubscriptionService } from './subscription.service';
+import { LimitService } from './limit.service';
+import { toAddonView, toPlanView } from './pricing-view';
 
 export type StartCheckoutInput = {
   planCode: string;
@@ -32,22 +33,67 @@ export class BillingService {
     private readonly quota: QuotaService,
     private readonly subscriptions: SubscriptionService,
     private readonly points: PointsService,
+    private readonly limits: LimitService,
   ) {}
 
+  async invoicePromoPoints(): Promise<number> {
+    const row = await this.prisma.documentPointCost.findUnique({ where: { documentKind: 'INVOICE' } });
+    return row?.points ?? 3;
+  }
+
   async listPlans() {
+    const invoicePoints = await this.invoicePromoPoints();
     const plans = await this.prisma.plan.findMany({
-      where: { isActive: true },
+      where: { isActive: true, isPublic: true },
       orderBy: { sortOrder: 'asc' },
     });
-    return { plans: plans.map((plan) => this.toPlanView(plan)) };
+    return { plans: plans.map((plan) => toPlanView(plan, invoicePoints)) };
+  }
+
+  async getCatalog() {
+    const [invoice, receipt, settings, plans, addons] = await Promise.all([
+      this.prisma.documentPointCost.findUnique({ where: { documentKind: 'INVOICE' } }),
+      this.prisma.documentPointCost.findUnique({ where: { documentKind: 'RECEIPT' } }),
+      this.prisma.platformSettings.upsert({
+        where: { id: 'default' },
+        create: { id: 'default' },
+        update: {},
+      }),
+      this.prisma.plan.findMany({
+        where: { isActive: true, isPublic: true },
+        orderBy: { sortOrder: 'asc' },
+      }),
+      this.prisma.addon.findMany({
+        where: { isActive: true },
+        orderBy: { sortOrder: 'asc' },
+      }),
+    ]);
+    const invoicePoints = invoice?.points ?? 3;
+    return {
+      currency: 'EGP' as const,
+      billingPeriod: 'annual' as const,
+      trialDays: settings.trialDays,
+      trialPoints: settings.trialPoints,
+      costs: {
+        invoicePromo: invoicePoints,
+        invoiceStandard: invoice?.standardPoints ?? 4,
+        receipt: receipt?.points ?? 1,
+      },
+      plans: plans.map((plan) => toPlanView(plan, invoicePoints)),
+      addons: addons.map(toAddonView),
+    };
   }
 
   getSubscriptionView(tenantId: string) {
     return this.subscriptions.getSubscriptionView(tenantId);
   }
 
-  getQuotas(tenantId: string) {
-    return this.quota.getQuotaSnapshot(tenantId);
+  async getQuotas(tenantId: string) {
+    const [quota, limits] = await Promise.all([
+      this.quota.getQuotaSnapshot(tenantId),
+      this.limits.snapshot(tenantId),
+    ]);
+    return { ...quota, users: limits.users, companies: limits.companies };
   }
 
   async startCheckout(
@@ -116,19 +162,5 @@ export class BillingService {
       tx.invoiceRef.findMany({ where: { tenantId }, orderBy: { createdAt: 'desc' } }),
     );
     return { items };
-  }
-
-  private toPlanView(plan: Plan) {
-    return {
-      code: plan.code,
-      name: plan.nameEn,
-      nameAr: plan.nameAr,
-      documentQuota: plan.documentQuota,
-      branchQuota: plan.branchQuota,
-      deviceQuota: plan.deviceQuota,
-      selfServe: plan.selfServe,
-      includedPoints: plan.includedPoints,
-      priceDisplay: null as string | null,
-    };
   }
 }

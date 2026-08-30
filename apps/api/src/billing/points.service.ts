@@ -1,15 +1,21 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import type { PointsLedgerReason } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantPrismaService, type TenantTx } from '../prisma/tenant-prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { loadEnv } from '../config/env';
 import { PLATFORM_AUDIT_ACTIONS } from '../platform-admin/platform-audit';
-import { InsufficientPointsError, InsufficientPointsHttpException } from './points-errors';
+import {
+  InsufficientPointsError,
+  InsufficientPointsHttpException,
+  isTrialExpired,
+} from './points-errors';
 import { supportWhatsappUrl } from './tenant-lifecycle-status';
 
 export type DocumentCostView = {
   documentKind: string;
   points: number;
+  standardPoints: number;
   source: 'platform' | 'tenant';
 };
 
@@ -24,12 +30,22 @@ const DEFAULT_KINDS = [
 ] as const;
 
 @Injectable()
-export class PointsService {
+export class PointsService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantPrisma: TenantPrismaService,
     private readonly audit: AuditService,
   ) {}
+
+  /** Integration tests assume 0 send cost unless a test sets costs explicitly. */
+  async onModuleInit() {
+    if (loadEnv().NODE_ENV !== 'test') return;
+    try {
+      await this.prisma.documentPointCost.updateMany({ data: { points: 0 } });
+    } catch {
+      // Schema not migrated yet in some local boots.
+    }
+  }
 
   async getSupportContact() {
     const settings = await this.ensureSettings();
@@ -55,12 +71,13 @@ export class PointsService {
     });
     const byKind = new Map<string, DocumentCostView>();
     for (const kind of DEFAULT_KINDS) {
-      byKind.set(kind, { documentKind: kind, points: 0, source: 'platform' });
+      byKind.set(kind, { documentKind: kind, points: 0, standardPoints: 0, source: 'platform' });
     }
     for (const row of platform) {
       byKind.set(row.documentKind, {
         documentKind: row.documentKind,
         points: row.points,
+        standardPoints: row.standardPoints,
         source: 'platform',
       });
     }
@@ -69,9 +86,11 @@ export class PointsService {
         tx.tenantDocumentPointCost.findMany({ where: { tenantId } }),
       );
       for (const row of overrides) {
+        const prev = byKind.get(row.documentKind);
         byKind.set(row.documentKind, {
           documentKind: row.documentKind,
           points: row.points,
+          standardPoints: prev?.standardPoints ?? 0,
           source: 'tenant',
         });
       }
@@ -80,16 +99,18 @@ export class PointsService {
   }
 
   async setPlatformCosts(
-    items: Array<{ documentKind: string; points: number }>,
+    items: Array<{ documentKind: string; points: number; standardPoints?: number }>,
     operatorUserId: string,
   ) {
     for (const item of items) {
       const kind = item.documentKind.trim().toUpperCase();
       const points = Math.max(0, Math.floor(item.points));
+      const standardPoints =
+        item.standardPoints == null ? points : Math.max(0, Math.floor(item.standardPoints));
       await this.prisma.documentPointCost.upsert({
         where: { documentKind: kind },
-        create: { documentKind: kind, points },
-        update: { points },
+        create: { documentKind: kind, points, standardPoints },
+        update: { points, standardPoints },
       });
     }
     await this.audit.write({
@@ -157,6 +178,20 @@ export class PointsService {
     return this.snapshot(tenantId);
   }
 
+  async grantTrialPointsIfNeeded(tenantId: string, actorUserId?: string | null) {
+    const existing = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.pointsLedger.findFirst({ where: { tenantId, reason: 'TRIAL_GRANT' } }),
+    );
+    if (existing) return;
+    const settings = await this.ensureSettings();
+    const amount = Math.max(0, settings.trialPoints);
+    if (amount <= 0) return;
+    await this.applyDelta(tenantId, amount, 'TRIAL_GRANT', {
+      actorUserId: actorUserId ?? null,
+      note: `trial:${settings.trialDays}d`,
+    });
+  }
+
   async grantPlanPointsIfNeeded(tenantId: string, actorUserId?: string | null) {
     const existing = await this.tenantPrisma.withTenant(tenantId, (tx) =>
       tx.pointsLedger.findFirst({ where: { tenantId, reason: 'PLAN_GRANT' } }),
@@ -166,6 +201,7 @@ export class PointsService {
     const subscription = await this.tenantPrisma.withTenant(tenantId, (tx) =>
       tx.subscription.findUnique({ where: { tenantId }, include: { plan: true } }),
     );
+    if (subscription?.plan.isTrial) return;
     const included = subscription?.plan.includedPoints ?? 0;
     if (included <= 0) return;
 
@@ -189,17 +225,30 @@ export class PointsService {
       actorUserId?: string | null;
     },
   ): Promise<{ total: number; balanceAfter: number }> {
+    const tenantRow = await tx.tenant.findUnique({
+      where: { id: input.tenantId },
+      select: { pointsBalance: true, trialEndsAt: true },
+    });
+    if (isTrialExpired(tenantRow?.trialEndsAt ?? null)) {
+      const contact = await this.getSupportContact();
+      throw new InsufficientPointsHttpException(
+        new InsufficientPointsError(
+          0,
+          tenantRow?.pointsBalance ?? 0,
+          contact.whatsappUrl,
+          contact.whatsappDisplay,
+          'TRIAL_ENDED',
+        ),
+      );
+    }
+
     const costMap = await this.costMapInTx(tx, input.tenantId);
     let total = 0;
     for (const kind of input.kinds) {
       total += costMap.get(kind) ?? costMap.get(this.normalizeKind(kind)) ?? 0;
     }
     if (total <= 0) {
-      const tenant = await tx.tenant.findUnique({
-        where: { id: input.tenantId },
-        select: { pointsBalance: true },
-      });
-      return { total: 0, balanceAfter: tenant?.pointsBalance ?? 0 };
+      return { total: 0, balanceAfter: tenantRow?.pointsBalance ?? 0 };
     }
 
     const updated = await tx.$executeRaw`

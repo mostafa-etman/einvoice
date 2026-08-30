@@ -310,13 +310,17 @@ model Tenant {
   suspendedAt          DateTime? @map("suspended_at")
   suspendedReason      String?   @map("suspended_reason")
   provisionedByUserId  String?   @map("provisioned_by_user_id") @db.Uuid
-  /// Manual platform-owner gate: new self-serve tenants start PENDING.
+  /// Paid upgrades stay pending until the owner activates them; new signups start on an ACTIVE trial.
   activationStatus     TenantActivationStatus @default(PENDING) @map("activation_status")
   approvedAt           DateTime? @map("approved_at")
   approvedByUserId     String?   @map("approved_by_user_id") @db.Uuid
   rejectedAt           DateTime? @map("rejected_at")
   rejectedReason       String?   @map("rejected_reason")
   pointsBalance        Int       @default(0) @map("points_balance")
+  /// Self-serve trial end. Null for paid / mapped legacy tenants (never trial).
+  trialEndsAt          DateTime? @map("trial_ends_at")
+  extraUsers           Int       @default(0) @map("extra_users")
+  extraCompanies       Int       @default(0) @map("extra_companies")
   subscription         Subscription?
   quotaOverrides       QuotaOverride[]
   paymentCustomers     PaymentCustomer[]
@@ -1553,9 +1557,16 @@ enum TenantActivationStatus {
 
 enum PointsLedgerReason {
   PLAN_GRANT
+  TRIAL_GRANT
   ADMIN_ADJUST
   DOCUMENT_SEND
   REFUND
+}
+
+enum AddonKind {
+  POINTS
+  USER
+  COMPANY
 }
 
 enum SubscriptionStatus {
@@ -1598,7 +1609,7 @@ enum EmailOutboxStatus {
 
 model Plan {
   id              String   @id @default(uuid()) @db.Uuid
-  /// Stable slug (FREE / STARTER / PRO / ENTERPRISE or a custom code).
+  /// Stable slug (BASIC / BRONZE / … or a custom / legacy code).
   code            String   @unique
   nameEn          String   @map("name_en")
   nameAr          String   @map("name_ar")
@@ -1607,8 +1618,15 @@ model Plan {
   documentQuota   Int      @map("document_quota")
   branchQuota     Int      @map("branch_quota")
   deviceQuota     Int      @map("device_quota")
-  /// Points credited once when a tenant is first assigned this plan.
+  /// Points credited once when a tenant is first assigned this paid plan.
   includedPoints  Int      @default(0) @map("included_points")
+  officialPriceEgp    Int      @default(0) @map("official_price_egp")
+  discountedPriceEgp  Int      @default(0) @map("discounted_price_egp")
+  maxUsers            Int      @default(1) @map("max_users")
+  maxCompanies        Int      @default(1) @map("max_companies")
+  isTrial             Boolean  @default(false) @map("is_trial")
+  /// Shown on customer plan cards. Legacy FREE/STARTER/PRO stay hidden.
+  isPublic            Boolean  @default(false) @map("is_public")
   selfServe       Boolean  @default(true) @map("self_serve")
   isActive        Boolean  @default(true) @map("is_active")
   sortOrder       Int      @default(0) @map("sort_order")
@@ -1627,19 +1645,43 @@ model PlatformSettings {
   autoActivateSubCompanies Boolean  @default(true) @map("auto_activate_sub_companies")
   supportWhatsappE164      String   @default("201000864620") @map("support_whatsapp_e164")
   supportWhatsappDisplay   String   @default("00201000864620") @map("support_whatsapp_display")
+  trialDays                Int      @default(7) @map("trial_days")
+  trialPoints              Int      @default(30) @map("trial_points")
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")
 
   @@map("platform_settings")
 }
 
+/// Platform add-on catalog (WhatsApp purchase; applied from super-admin).
+model Addon {
+  id                   String    @id @default(uuid()) @db.Uuid
+  code                 String    @unique
+  kind                 AddonKind
+  nameEn               String    @map("name_en")
+  nameAr               String    @map("name_ar")
+  descriptionEn        String?   @map("description_en")
+  descriptionAr        String?   @map("description_ar")
+  quantity             Int
+  officialPriceEgp     Int       @map("official_price_egp")
+  discountedPriceEgp   Int       @map("discounted_price_egp")
+  isActive             Boolean   @default(true) @map("is_active")
+  sortOrder            Int       @default(0) @map("sort_order")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  @@map("addons")
+}
+
 /// Platform-wide default points cost to *send* a document of this kind.
 model DocumentPointCost {
-  id            String   @id @default(uuid()) @db.Uuid
-  documentKind  String   @unique @map("document_kind")
-  points        Int      @default(0)
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  id              String   @id @default(uuid()) @db.Uuid
+  documentKind    String   @unique @map("document_kind")
+  /// Charged amount (promo when a promo is active).
+  points          Int      @default(0)
+  standardPoints  Int      @default(0) @map("standard_points")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@map("document_point_costs")
 }
@@ -1706,6 +1748,8 @@ model QuotaOverride {
   documentQuota    Int?      @map("document_quota")
   branchQuota      Int?      @map("branch_quota")
   deviceQuota      Int?      @map("device_quota")
+  userQuota        Int?      @map("user_quota")
+  companyQuota     Int?      @map("company_quota")
   reason           String
   createdByUserId  String    @map("created_by_user_id") @db.Uuid
   expiresAt        DateTime? @map("expires_at")

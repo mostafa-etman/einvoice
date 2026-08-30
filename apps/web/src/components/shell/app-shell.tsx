@@ -8,6 +8,7 @@ import { useAuth } from '@/lib/auth-provider';
 import { TenantSwitcher } from '@/components/switchers/tenant-switcher';
 import { BranchSwitcher } from '@/components/switchers/branch-switcher';
 import { EtaEnvironmentBadge } from '@/components/shell/eta-environment-badge';
+import { SendBlockedBanner } from '@/components/billing/send-blocked-banner';
 import { getSidebarCollapsed, setSidebarCollapsed } from '@/lib/session';
 
 type NavIcon =
@@ -263,6 +264,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
+          <SendBlockedBanner />
           <header className="flex flex-wrap items-center gap-token-md border-b border-border bg-surface px-token-lg py-token-md">
             <TenantSwitcher />
             <BranchSwitcher />

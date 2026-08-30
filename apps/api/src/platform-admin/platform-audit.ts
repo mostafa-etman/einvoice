@@ -16,7 +16,10 @@ export const PLATFORM_AUDIT_ACTIONS = {
   POINTS_ADJUST: 'platform.points.adjust',
   POINTS_COSTS_SET: 'platform.points.costs.set',
   PLAN_UPSERT: 'platform.plan.upsert',
+  ADDON_UPSERT: 'platform.addon.upsert',
+  ADDON_APPLY: 'platform.addon.apply',
   SETTINGS_UPDATE: 'platform.settings.update',
+  TENANT_LIMITS: 'platform.tenant.limits',
 } as const;
 
 export type PlatformAuditAction =

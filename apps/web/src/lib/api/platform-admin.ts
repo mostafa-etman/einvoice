@@ -12,6 +12,9 @@ export type TenantSummary = {
   activationStatus: 'PENDING' | 'ACTIVE' | 'REJECTED';
   suspendedAt: string | null;
   pointsBalance: number;
+  trialEndsAt?: string | null;
+  extraUsers?: number;
+  extraCompanies?: number;
   createdAt: string;
   ownerEmail: string | null;
 };
@@ -19,6 +22,17 @@ export type TenantSummary = {
 export type TenantDetail = TenantSummary & {
   ownerId: string | null;
   graceEndsAt: string | null;
+  extraUsers?: number;
+  extraCompanies?: number;
+  trialEndsAt?: string | null;
+  limits?: {
+    maxUsers: number;
+    maxCompanies: number;
+    extraUsers: number;
+    extraCompanies: number;
+    users: { used: number; limit: number };
+    companies: { used: number; limit: number };
+  } | null;
   entitlements: {
     planCode: PlanCode;
     documentQuota: number;
@@ -41,6 +55,10 @@ export type TenantUsage = {
     devices: number;
   };
   pointsBalance: number;
+  limits?: {
+    users: { used: number; limit: number };
+    companies: { used: number; limit: number };
+  };
   pointsLedger: {
     items: Array<{
       id: string;
@@ -67,6 +85,12 @@ export type PlanAdmin = {
   branchQuota: number;
   deviceQuota: number;
   includedPoints: number;
+  officialPriceEgp: number;
+  discountedPriceEgp: number;
+  maxUsers: number;
+  maxCompanies: number;
+  isTrial: boolean;
+  isPublic: boolean;
   selfServe: boolean;
   isActive: boolean;
   sortOrder: number;
@@ -75,7 +99,22 @@ export type PlanAdmin = {
 export type DocumentCostView = {
   documentKind: string;
   points: number;
+  standardPoints?: number;
   source: 'platform' | 'tenant';
+};
+
+export type AddonAdmin = {
+  code: string;
+  kind: 'POINTS' | 'USER' | 'COMPANY';
+  name: string;
+  nameAr: string;
+  descriptionEn: string | null;
+  descriptionAr: string | null;
+  quantity: number;
+  officialPriceEgp: number;
+  discountedPriceEgp: number;
+  isActive: boolean;
+  sortOrder: number;
 };
 
 export type PlatformSettings = {
@@ -83,6 +122,8 @@ export type PlatformSettings = {
   autoActivateSubCompanies: boolean;
   supportWhatsappE164: string;
   supportWhatsappDisplay: string;
+  trialDays: number;
+  trialPoints: number;
 };
 
 export type ImpersonationSessionView = {
@@ -166,6 +207,11 @@ export function assignPlan(
     documentQuota?: number | null;
     branchQuota?: number | null;
     deviceQuota?: number | null;
+    userQuota?: number | null;
+    companyQuota?: number | null;
+    extraUsers?: number;
+    extraCompanies?: number;
+    trialEndsAt?: string | null;
     reason: string;
   },
 ) {
@@ -198,6 +244,12 @@ export function upsertPlan(input: {
   branchQuota: number;
   deviceQuota: number;
   includedPoints: number;
+  officialPriceEgp?: number;
+  discountedPriceEgp?: number;
+  maxUsers?: number;
+  maxCompanies?: number;
+  isTrial?: boolean;
+  isPublic?: boolean;
   selfServe?: boolean;
   isActive?: boolean;
   sortOrder?: number;
@@ -205,11 +257,38 @@ export function upsertPlan(input: {
   return apiFetch<PlanAdmin>('/platform-admin/plans', { method: 'POST', body: input });
 }
 
+export function listAdminAddons() {
+  return apiFetch<{ addons: AddonAdmin[] }>('/platform-admin/addons');
+}
+
+export function upsertAddon(input: {
+  code: string;
+  kind: 'POINTS' | 'USER' | 'COMPANY';
+  nameEn: string;
+  nameAr: string;
+  quantity: number;
+  officialPriceEgp: number;
+  discountedPriceEgp: number;
+  isActive?: boolean;
+  sortOrder?: number;
+}) {
+  return apiFetch<AddonAdmin>('/platform-admin/addons', { method: 'POST', body: input });
+}
+
+export function applyAddon(tenantId: string, addonCode: string, reason?: string) {
+  return apiFetch<TenantDetail>(`/platform-admin/tenants/${tenantId}/addons`, {
+    method: 'POST',
+    body: { addonCode, reason },
+  });
+}
+
 export function getDocumentCosts() {
   return apiFetch<DocumentCostView[]>('/platform-admin/document-costs');
 }
 
-export function setDocumentCosts(items: Array<{ documentKind: string; points: number }>) {
+export function setDocumentCosts(
+  items: Array<{ documentKind: string; points: number; standardPoints?: number }>,
+) {
   return apiFetch<DocumentCostView[]>('/platform-admin/document-costs', {
     method: 'PUT',
     body: { items },

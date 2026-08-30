@@ -17,6 +17,7 @@ import { StripeBillingProvider } from './providers/stripe.provider';
 import { QuotaService } from './quota.service';
 import { SubscriptionService } from './subscription.service';
 import { PointsService } from './points.service';
+import { LimitService } from './limit.service';
 import { TenantAccessGuard, TenantAccessService } from './tenant-access.guard';
 
 @Module({
@@ -34,6 +35,7 @@ import { TenantAccessGuard, TenantAccessService } from './tenant-access.guard';
     QuotaService,
     SubscriptionService,
     PointsService,
+    LimitService,
     TenantAccessService,
     BillingService,
     StripeBillingProvider,
@@ -62,6 +64,6 @@ import { TenantAccessGuard, TenantAccessService } from './tenant-access.guard';
       useClass: TenantAccessGuard,
     },
   ],
-  exports: [QuotaService, SubscriptionService, TenantAccessService, StripeBillingProvider, PointsService],
+  exports: [QuotaService, SubscriptionService, TenantAccessService, StripeBillingProvider, PointsService, LimitService],
 })
 export class BillingModule {}

@@ -48,6 +48,7 @@ export class TenantController {
       id: tenant.id,
       name: tenant.name,
       activationStatus: tenant.activationStatus,
+      trialEndsAt: tenant.trialEndsAt?.toISOString() ?? null,
       accessToken: switched.accessToken,
       expiresIn: switched.expiresIn,
       activeTenantId: switched.activeTenantId,

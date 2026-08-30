@@ -75,6 +75,8 @@ export class PlatformAdminController {
       autoActivateSubCompanies?: boolean;
       supportWhatsappE164?: string;
       supportWhatsappDisplay?: string;
+      trialDays?: number;
+      trialPoints?: number;
     },
   ) {
     return this.tenants.updateSettings(user.userId, body);
@@ -99,12 +101,44 @@ export class PlatformAdminController {
       branchQuota: number;
       deviceQuota: number;
       includedPoints: number;
+      officialPriceEgp?: number;
+      discountedPriceEgp?: number;
+      maxUsers?: number;
+      maxCompanies?: number;
+      isTrial?: boolean;
+      isPublic?: boolean;
       selfServe?: boolean;
       isActive?: boolean;
       sortOrder?: number;
     },
   ) {
     return this.tenants.upsertPlan(user.userId, body);
+  }
+
+  @Get('addons')
+  listAddons() {
+    return this.tenants.listAddons();
+  }
+
+  @Post('addons')
+  upsertAddon(
+    @CurrentUser() user: AuthUser,
+    @Body()
+    body: {
+      code: string;
+      kind: 'POINTS' | 'USER' | 'COMPANY';
+      nameEn: string;
+      nameAr: string;
+      descriptionEn?: string;
+      descriptionAr?: string;
+      quantity: number;
+      officialPriceEgp: number;
+      discountedPriceEgp: number;
+      isActive?: boolean;
+      sortOrder?: number;
+    },
+  ) {
+    return this.tenants.upsertAddon(user.userId, body);
   }
 
   @Get('document-costs')
@@ -115,7 +149,7 @@ export class PlatformAdminController {
   @Put('document-costs')
   setDocumentCosts(
     @CurrentUser() user: AuthUser,
-    @Body() body: { items: Array<{ documentKind: string; points: number }> },
+    @Body() body: { items: Array<{ documentKind: string; points: number; standardPoints?: number }> },
   ) {
     return this.points.setPlatformCosts(body.items ?? [], user.userId);
   }
@@ -171,6 +205,11 @@ export class PlatformAdminController {
       documentQuota?: number | null;
       branchQuota?: number | null;
       deviceQuota?: number | null;
+      userQuota?: number | null;
+      companyQuota?: number | null;
+      extraUsers?: number;
+      extraCompanies?: number;
+      trialEndsAt?: string | null;
       reason: string;
     },
   ) {
@@ -194,6 +233,15 @@ export class PlatformAdminController {
     @Body() body: { delta: number; note?: string },
   ) {
     return this.points.adjustBalance(tenantId, Number(body.delta), user.userId, body.note);
+  }
+
+  @Post('tenants/:tenantId/addons')
+  applyAddon(
+    @Param('tenantId') tenantId: string,
+    @CurrentUser() user: AuthUser,
+    @Body() body: { addonCode: string; reason?: string },
+  ) {
+    return this.tenants.applyAddon(tenantId, body.addonCode, user.userId, body.reason ?? 'addon');
   }
 
   @Put('tenants/:tenantId/document-costs')

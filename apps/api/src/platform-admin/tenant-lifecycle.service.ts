@@ -5,6 +5,8 @@ import { PasswordService } from '../auth/password.service';
 import { QuotaService } from '../billing/quota.service';
 import { PointsService } from '../billing/points.service';
 import { SubscriptionService } from '../billing/subscription.service';
+import { LimitService } from '../billing/limit.service';
+import { toAddonView } from '../billing/pricing-view';
 import { tenantLifecycleStatus, type TenantLifecycleStatus } from '../billing/tenant-lifecycle-status';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -29,6 +31,11 @@ export type AssignPlanInput = {
   documentQuota?: number | null;
   branchQuota?: number | null;
   deviceQuota?: number | null;
+  userQuota?: number | null;
+  companyQuota?: number | null;
+  extraUsers?: number;
+  extraCompanies?: number;
+  trialEndsAt?: string | null;
   reason: string;
   operatorUserId: string;
 };
@@ -59,6 +66,7 @@ export class TenantLifecycleService {
     private readonly quota: QuotaService,
     private readonly passwords: PasswordService,
     private readonly points: PointsService,
+    private readonly limits: LimitService,
   ) {}
 
   async listTenants(query: ListTenantsInput) {
@@ -124,7 +132,11 @@ export class TenantLifecycleService {
       ownerEmail: ownerMembership?.user.email ?? null,
       ownerId: ownerMembership?.user.id ?? null,
       entitlements,
+      limits: await this.limits.snapshot(tenantId).catch(() => null),
       graceEndsAt: subscription?.graceEndsAt?.toISOString() ?? null,
+      trialEndsAt: tenant.trialEndsAt?.toISOString() ?? null,
+      extraUsers: tenant.extraUsers,
+      extraCompanies: tenant.extraCompanies,
     };
   }
 
@@ -215,10 +227,20 @@ export class TenantLifecycleService {
     const before = await this.quota.getEffectiveEntitlements(tenantId);
 
     if (input.planCode) {
+      const plan = await this.prisma.plan.findUnique({ where: { code: input.planCode } });
+      if (!plan) throw new BadRequestException('unknown_plan');
       await this.subscriptions.assignPlan(tenantId, input.planCode, {
         actorUserId: input.operatorUserId,
         reason: input.reason,
+        status: plan.isTrial ? 'TRIAL' : 'ACTIVE',
       });
+      if (!plan.isTrial) {
+        await this.prisma.tenant.update({
+          where: { id: tenantId },
+          data: { trialEndsAt: null },
+        });
+        await this.points.grantPlanPointsIfNeeded(tenantId, input.operatorUserId);
+      }
       await this.audit.write({
         action: PLATFORM_AUDIT_ACTIONS.PLAN_ASSIGN,
         outcome: 'success',
@@ -230,10 +252,24 @@ export class TenantLifecycleService {
       });
     }
 
+    const extras: { extraUsers?: number; extraCompanies?: number; trialEndsAt?: Date | null } = {};
+    if (typeof input.extraUsers === 'number') extras.extraUsers = Math.max(0, Math.floor(input.extraUsers));
+    if (typeof input.extraCompanies === 'number') {
+      extras.extraCompanies = Math.max(0, Math.floor(input.extraCompanies));
+    }
+    if (input.trialEndsAt !== undefined) {
+      extras.trialEndsAt = input.trialEndsAt ? new Date(input.trialEndsAt) : null;
+    }
+    if (Object.keys(extras).length) {
+      await this.prisma.tenant.update({ where: { id: tenantId }, data: extras });
+    }
+
     const hasOverrideFields =
       input.documentQuota !== undefined ||
       input.branchQuota !== undefined ||
-      input.deviceQuota !== undefined;
+      input.deviceQuota !== undefined ||
+      input.userQuota !== undefined ||
+      input.companyQuota !== undefined;
 
     if (hasOverrideFields) {
       await this.tenantPrisma.withTenant(tenantId, (tx) =>
@@ -243,6 +279,8 @@ export class TenantLifecycleService {
             documentQuota: input.documentQuota ?? null,
             branchQuota: input.branchQuota ?? null,
             deviceQuota: input.deviceQuota ?? null,
+            userQuota: input.userQuota ?? null,
+            companyQuota: input.companyQuota ?? null,
             reason: input.reason,
             createdByUserId: input.operatorUserId,
           },
@@ -334,12 +372,16 @@ export class TenantLifecycleService {
       autoActivateSubCompanies?: boolean;
       supportWhatsappE164?: string;
       supportWhatsappDisplay?: string;
+      trialDays?: number;
+      trialPoints?: number;
     },
   ) {
     const data: {
       autoActivateSubCompanies?: boolean;
       supportWhatsappE164?: string;
       supportWhatsappDisplay?: string;
+      trialDays?: number;
+      trialPoints?: number;
     } = {};
     if (typeof patch.autoActivateSubCompanies === 'boolean') {
       data.autoActivateSubCompanies = patch.autoActivateSubCompanies;
@@ -349,6 +391,12 @@ export class TenantLifecycleService {
     }
     if (patch.supportWhatsappDisplay?.trim()) {
       data.supportWhatsappDisplay = patch.supportWhatsappDisplay.trim();
+    }
+    if (typeof patch.trialDays === 'number' && Number.isFinite(patch.trialDays)) {
+      data.trialDays = Math.max(1, Math.floor(patch.trialDays));
+    }
+    if (typeof patch.trialPoints === 'number' && Number.isFinite(patch.trialPoints)) {
+      data.trialPoints = Math.max(0, Math.floor(patch.trialPoints));
     }
     const settings = await this.prisma.platformSettings.upsert({
       where: { id: 'default' },
@@ -383,6 +431,12 @@ export class TenantLifecycleService {
       branchQuota: number;
       deviceQuota: number;
       includedPoints: number;
+      officialPriceEgp?: number;
+      discountedPriceEgp?: number;
+      maxUsers?: number;
+      maxCompanies?: number;
+      isTrial?: boolean;
+      isPublic?: boolean;
       selfServe?: boolean;
       isActive?: boolean;
       sortOrder?: number;
@@ -402,6 +456,12 @@ export class TenantLifecycleService {
         branchQuota: input.branchQuota,
         deviceQuota: input.deviceQuota,
         includedPoints: Math.max(0, Math.floor(input.includedPoints)),
+        officialPriceEgp: Math.max(0, Math.floor(input.officialPriceEgp ?? 0)),
+        discountedPriceEgp: Math.max(0, Math.floor(input.discountedPriceEgp ?? 0)),
+        maxUsers: Math.max(1, Math.floor(input.maxUsers ?? 1)),
+        maxCompanies: Math.max(1, Math.floor(input.maxCompanies ?? 1)),
+        isTrial: input.isTrial ?? false,
+        isPublic: input.isPublic ?? false,
         selfServe: input.selfServe ?? true,
         isActive: input.isActive ?? true,
         sortOrder: input.sortOrder ?? 0,
@@ -415,6 +475,17 @@ export class TenantLifecycleService {
         branchQuota: input.branchQuota,
         deviceQuota: input.deviceQuota,
         includedPoints: Math.max(0, Math.floor(input.includedPoints)),
+        officialPriceEgp:
+          input.officialPriceEgp == null ? undefined : Math.max(0, Math.floor(input.officialPriceEgp)),
+        discountedPriceEgp:
+          input.discountedPriceEgp == null
+            ? undefined
+            : Math.max(0, Math.floor(input.discountedPriceEgp)),
+        maxUsers: input.maxUsers == null ? undefined : Math.max(1, Math.floor(input.maxUsers)),
+        maxCompanies:
+          input.maxCompanies == null ? undefined : Math.max(1, Math.floor(input.maxCompanies)),
+        isTrial: input.isTrial,
+        isPublic: input.isPublic,
         selfServe: input.selfServe,
         isActive: input.isActive,
         sortOrder: input.sortOrder,
@@ -448,7 +519,101 @@ export class TenantLifecycleService {
       meters: usage,
       pointsBalance,
       pointsLedger: ledger,
+      limits: await this.limits.snapshot(tenantId),
     };
+  }
+
+  async listAddons() {
+    const addons = await this.prisma.addon.findMany({ orderBy: { sortOrder: 'asc' } });
+    return { addons: addons.map(toAddonView) };
+  }
+
+  async upsertAddon(
+    operatorUserId: string,
+    input: {
+      code: string;
+      kind: 'POINTS' | 'USER' | 'COMPANY';
+      nameEn: string;
+      nameAr: string;
+      descriptionEn?: string;
+      descriptionAr?: string;
+      quantity: number;
+      officialPriceEgp: number;
+      discountedPriceEgp: number;
+      isActive?: boolean;
+      sortOrder?: number;
+    },
+  ) {
+    const code = input.code.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+    if (!code) throw new BadRequestException('addon_code_required');
+    const addon = await this.prisma.addon.upsert({
+      where: { code },
+      create: {
+        code,
+        kind: input.kind,
+        nameEn: input.nameEn,
+        nameAr: input.nameAr,
+        descriptionEn: input.descriptionEn,
+        descriptionAr: input.descriptionAr,
+        quantity: Math.max(1, Math.floor(input.quantity)),
+        officialPriceEgp: Math.max(0, Math.floor(input.officialPriceEgp)),
+        discountedPriceEgp: Math.max(0, Math.floor(input.discountedPriceEgp)),
+        isActive: input.isActive ?? true,
+        sortOrder: input.sortOrder ?? 0,
+      },
+      update: {
+        kind: input.kind,
+        nameEn: input.nameEn,
+        nameAr: input.nameAr,
+        descriptionEn: input.descriptionEn,
+        descriptionAr: input.descriptionAr,
+        quantity: Math.max(1, Math.floor(input.quantity)),
+        officialPriceEgp: Math.max(0, Math.floor(input.officialPriceEgp)),
+        discountedPriceEgp: Math.max(0, Math.floor(input.discountedPriceEgp)),
+        isActive: input.isActive,
+        sortOrder: input.sortOrder,
+      },
+    });
+    await this.audit.write({
+      action: PLATFORM_AUDIT_ACTIONS.ADDON_UPSERT,
+      outcome: 'success',
+      actorUserId: operatorUserId,
+      resourceType: 'addon',
+      resourceId: addon.id,
+      metadata: { code: addon.code },
+    });
+    return toAddonView(addon);
+  }
+
+  async applyAddon(tenantId: string, addonCode: string, operatorUserId: string, reason: string) {
+    await this.assertTenantExists(tenantId);
+    const addon = await this.prisma.addon.findUnique({ where: { code: addonCode.trim().toUpperCase() } });
+    if (!addon || !addon.isActive) throw new BadRequestException('unknown_addon');
+
+    if (addon.kind === 'POINTS') {
+      await this.points.adjustBalance(tenantId, addon.quantity, operatorUserId, reason || addon.code);
+    } else if (addon.kind === 'USER') {
+      await this.prisma.tenant.update({
+        where: { id: tenantId },
+        data: { extraUsers: { increment: addon.quantity } },
+      });
+    } else if (addon.kind === 'COMPANY') {
+      await this.prisma.tenant.update({
+        where: { id: tenantId },
+        data: { extraCompanies: { increment: addon.quantity } },
+      });
+    }
+
+    await this.audit.write({
+      action: PLATFORM_AUDIT_ACTIONS.ADDON_APPLY,
+      outcome: 'success',
+      actorUserId: operatorUserId,
+      tenantId,
+      resourceType: 'addon',
+      resourceId: addon.id,
+      metadata: { addonCode: addon.code, kind: addon.kind, quantity: addon.quantity, reason },
+    });
+    return this.getTenant(tenantId);
   }
 
   private async tenantSearchWhere(term: string): Promise<Prisma.TenantWhereInput> {
@@ -513,6 +678,9 @@ export class TenantLifecycleService {
       activationStatus: tenant.activationStatus,
       suspendedAt: tenant.suspendedAt,
       pointsBalance: tenant.pointsBalance,
+      trialEndsAt: tenant.trialEndsAt?.toISOString() ?? null,
+      extraUsers: tenant.extraUsers,
+      extraCompanies: tenant.extraCompanies,
       createdAt: tenant.createdAt.toISOString(),
       ownerEmail,
     };
@@ -530,6 +698,12 @@ export class TenantLifecycleService {
       branchQuota: plan.branchQuota,
       deviceQuota: plan.deviceQuota,
       includedPoints: plan.includedPoints,
+      officialPriceEgp: plan.officialPriceEgp,
+      discountedPriceEgp: plan.discountedPriceEgp,
+      maxUsers: plan.maxUsers,
+      maxCompanies: plan.maxCompanies,
+      isTrial: plan.isTrial,
+      isPublic: plan.isPublic,
       selfServe: plan.selfServe,
       isActive: plan.isActive,
       sortOrder: plan.sortOrder,

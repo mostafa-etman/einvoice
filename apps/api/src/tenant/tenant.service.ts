@@ -21,6 +21,7 @@ import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { SubscriptionService } from '../billing/subscription.service';
 import { PointsService } from '../billing/points.service';
+import { LimitService } from '../billing/limit.service';
 import { loadEnv } from '../config/env';
 import { tenantLifecycleStatus } from '../billing/tenant-lifecycle-status';
 import { assertNoPrivilegeEscalation } from '../rbac/role-policy';
@@ -40,6 +41,8 @@ export class TenantService implements OnModuleInit {
     private readonly subscriptions: SubscriptionService,
     @Inject(forwardRef(() => PointsService))
     private readonly points: PointsService,
+    @Inject(forwardRef(() => LimitService))
+    private readonly limits: LimitService,
   ) {}
 
   async onModuleInit() {
@@ -134,10 +137,22 @@ export class TenantService implements OnModuleInit {
     await this.ensurePermissionCatalog();
     const permissions = await this.prisma.permission.findMany();
     const byCode = new Map(permissions.map((p) => [p.code, p.id]));
-    const activationStatus = await this.resolveActivationStatus(userId, opts.activation);
+    const ownerCount = await this.countOwnerTenants(userId);
+    const isFirst = ownerCount === 0;
+    const autoApprove = loadEnv().SIGNUP_AUTO_APPROVE;
+    const startTrial =
+      isFirst && !autoApprove && opts.activation !== 'active' && opts.activation !== 'pending';
+
+    if (!isFirst && opts.activation !== 'active') {
+      await this.limits.assertCanCreateCompany(userId);
+    }
+
+    const activationStatus = startTrial
+      ? 'ACTIVE'
+      : await this.resolveActivationStatus(userId, opts.activation);
 
     const planCode = opts.planCode?.trim();
-    if (planCode) {
+    if (planCode && !startTrial) {
       const plan = await this.prisma.plan.findUnique({ where: { code: planCode } });
       if (!plan || !plan.isActive) {
         throw new BadRequestException('unknown_plan');
@@ -150,7 +165,8 @@ export class TenantService implements OnModuleInit {
           name,
           activationStatus,
           approvedAt: activationStatus === 'ACTIVE' ? new Date() : null,
-          approvedByUserId: activationStatus === 'ACTIVE' && opts.activation === 'active' ? userId : null,
+          approvedByUserId:
+            activationStatus === 'ACTIVE' && opts.activation === 'active' ? userId : null,
         },
       });
       await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenant.id}, true)`;
@@ -190,16 +206,28 @@ export class TenantService implements OnModuleInit {
       return { tenant, branch, membership, roles };
     });
 
-    // Every tenant gets a Free subscription so quota checks work; optional plan
-    // is assigned next. Points grant runs once against the effective plan.
-    await this.subscriptions.ensureFreeSubscription(result.tenant.id);
-    if (planCode && planCode !== 'FREE') {
-      await this.subscriptions.assignPlan(result.tenant.id, planCode, {
-        actorUserId: userId,
-        reason: 'signup_plan',
-      });
+    if (startTrial) {
+      await this.startSelfServeTrial(result.tenant.id, userId);
+    } else {
+      await this.subscriptions.ensureFreeSubscription(result.tenant.id);
+      if (planCode && planCode !== 'FREE') {
+        await this.subscriptions.assignPlan(result.tenant.id, planCode, {
+          actorUserId: userId,
+          reason: 'signup_plan',
+        });
+      } else if (!isFirst && opts.activation !== 'active') {
+        const parentPlan = await this.primaryOwnerPlanCode(userId, result.tenant.id);
+        if (parentPlan && parentPlan !== 'FREE' && parentPlan !== 'TRIAL') {
+          await this.subscriptions.assignPlan(result.tenant.id, parentPlan, {
+            actorUserId: userId,
+            reason: 'sub_company_inherit',
+          });
+        }
+      }
+      if (isFirst || opts.activation === 'active') {
+        await this.points.grantPlanPointsIfNeeded(result.tenant.id, userId);
+      }
     }
-    await this.points.grantPlanPointsIfNeeded(result.tenant.id, userId);
 
     await this.audit.write({
       action: 'tenant.create.success',
@@ -208,16 +236,20 @@ export class TenantService implements OnModuleInit {
       tenantId: result.tenant.id,
       resourceType: 'tenant',
       resourceId: result.tenant.id,
-      metadata: { activationStatus, planCode: planCode ?? 'FREE' },
+      metadata: {
+        activationStatus,
+        planCode: startTrial ? 'TRIAL' : (planCode ?? 'FREE'),
+        trial: startTrial,
+      },
     });
 
-    return result.tenant;
+    return this.prisma.tenant.findUniqueOrThrow({ where: { id: result.tenant.id } });
   }
 
   /**
-   * New self-serve signups are PENDING unless SIGNUP_AUTO_APPROVE (test) or
-   * the caller already owns an ACTIVE tenant and autoActivateSubCompanies is on.
-   * Platform provision passes activation: 'active'.
+   * Platform provision passes activation: 'active'. Tests use SIGNUP_AUTO_APPROVE.
+   * Sub-companies of an ACTIVE owner stay auto-active when autoActivateSubCompanies is on.
+   * First self-serve signup (production) is handled as an ACTIVE trial in createTenant.
    */
   private async resolveActivationStatus(
     userId: string,
@@ -247,6 +279,57 @@ export class TenantService implements OnModuleInit {
     return trusted ? 'ACTIVE' : 'PENDING';
   }
 
+  private async countOwnerTenants(userId: string): Promise<number> {
+    const memberships = await this.tenantPrisma.withUser(userId, (tx) =>
+      tx.membership.findMany({
+        where: { userId, role: { name: 'Owner' } },
+        select: { tenantId: true },
+      }),
+    );
+    return memberships.length;
+  }
+
+  private async primaryOwnerPlanCode(
+    userId: string,
+    excludeTenantId: string,
+  ): Promise<string | null> {
+    const memberships = await this.tenantPrisma.withUser(userId, (tx) =>
+      tx.membership.findMany({
+        where: { userId, role: { name: 'Owner' } },
+        select: { tenantId: true },
+        orderBy: { createdAt: 'asc' },
+      }),
+    );
+    for (const m of memberships) {
+      if (m.tenantId === excludeTenantId) continue;
+      const sub = await this.tenantPrisma.withTenant(m.tenantId, (tx) =>
+        tx.subscription.findUnique({ where: { tenantId: m.tenantId }, include: { plan: true } }),
+      );
+      if (sub?.plan.code) return sub.plan.code;
+    }
+    return null;
+  }
+
+  private async startSelfServeTrial(tenantId: string, userId: string) {
+    const settings = await this.prisma.platformSettings.upsert({
+      where: { id: 'default' },
+      create: { id: 'default' },
+      update: {},
+    });
+    const days = Math.max(1, settings.trialDays || 7);
+    const trialEndsAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+    await this.subscriptions.assignPlan(tenantId, 'TRIAL', {
+      actorUserId: userId,
+      reason: 'signup_trial',
+      status: 'TRIAL',
+    });
+    await this.prisma.tenant.update({
+      where: { id: tenantId },
+      data: { trialEndsAt, extraUsers: 0, extraCompanies: 0 },
+    });
+    await this.points.grantTrialPointsIfNeeded(tenantId, userId);
+  }
+
   async listMyTenants(userId: string) {
     const memberships = await this.tenantPrisma.withUser(userId, (tx) =>
       tx.membership.findMany({
@@ -261,6 +344,7 @@ export class TenantService implements OnModuleInit {
         activationStatus: m.tenant.activationStatus,
         suspendedAt: m.tenant.suspendedAt,
         pointsBalance: m.tenant.pointsBalance,
+        trialEndsAt: m.tenant.trialEndsAt?.toISOString() ?? null,
         lifecycleStatus: tenantLifecycleStatus(m.tenant),
       },
       role: { id: m.role.id, name: m.role.name },
@@ -323,6 +407,7 @@ export class TenantService implements OnModuleInit {
   }
 
   async addMember(tenantId: string, actorUserId: string, email: string, roleId: string) {
+    await this.limits.assertCanAddMember(tenantId);
     const user = await this.prisma.user.findUnique({
       where: { email: email.trim().toLowerCase() },
     });

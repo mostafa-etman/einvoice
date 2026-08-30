@@ -4,18 +4,25 @@ import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { BILLING_AUDIT_ACTIONS } from './billing-audit';
+import { isTrialExpired } from './points-errors';
 
 export type SubscriptionView = {
   status: SubscriptionStatus;
   plan: {
     code: string;
     name: string;
+    nameAr: string;
     documentQuota: number;
     branchQuota: number;
-        deviceQuota: number;
-        selfServe: boolean;
-        includedPoints: number;
-      };
+    deviceQuota: number;
+    selfServe: boolean;
+    includedPoints: number;
+    officialPriceEgp: number;
+    discountedPriceEgp: number;
+    maxUsers: number;
+    maxCompanies: number;
+    isTrial: boolean;
+  };
   graceEndsAt: string | null;
   entitlements: {
     documentQuota: number;
@@ -25,6 +32,12 @@ export type SubscriptionView = {
   };
   accessMode: 'FULL' | 'READ_ONLY' | 'BLOCKED' | 'PENDING';
   pointsBalance: number;
+  trialEndsAt: string | null;
+  trialActive: boolean;
+  sendBlocked: boolean;
+  sendBlockedReason: 'TRIAL_ENDED' | 'INSUFFICIENT_POINTS' | null;
+  extraUsers: number;
+  extraCompanies: number;
 };
 
 export type AssignPlanOpts = {
@@ -173,7 +186,14 @@ export class SubscriptionService {
       ),
       this.prisma.tenant.findUnique({
         where: { id: tenantId },
-        select: { suspendedAt: true, activationStatus: true, pointsBalance: true },
+        select: {
+          suspendedAt: true,
+          activationStatus: true,
+          pointsBalance: true,
+          trialEndsAt: true,
+          extraUsers: true,
+          extraCompanies: true,
+        },
       }),
       this.tenantPrisma.withTenant(tenantId, (tx) =>
         tx.quotaOverride.findFirst({
@@ -182,6 +202,18 @@ export class SubscriptionService {
         }),
       ),
     ]);
+
+    const trialExpired = isTrialExpired(tenant?.trialEndsAt ?? null);
+    const noPoints = (tenant?.pointsBalance ?? 0) <= 0;
+    let sendBlockedReason: SubscriptionView['sendBlockedReason'] = null;
+    if (trialExpired) {
+      sendBlockedReason = 'TRIAL_ENDED';
+    } else if (noPoints && (subscription.plan.isTrial || tenant?.trialEndsAt)) {
+      sendBlockedReason = 'INSUFFICIENT_POINTS';
+    } else if (noPoints) {
+      const costly = await this.prisma.documentPointCost.findFirst({ where: { points: { gt: 0 } } });
+      if (costly) sendBlockedReason = 'INSUFFICIENT_POINTS';
+    }
 
     const accessMode: SubscriptionView['accessMode'] =
       tenant?.activationStatus === 'PENDING'
@@ -197,11 +229,17 @@ export class SubscriptionService {
       plan: {
         code: subscription.plan.code,
         name: subscription.plan.nameEn,
+        nameAr: subscription.plan.nameAr,
         documentQuota: subscription.plan.documentQuota,
         branchQuota: subscription.plan.branchQuota,
         deviceQuota: subscription.plan.deviceQuota,
         selfServe: subscription.plan.selfServe,
         includedPoints: subscription.plan.includedPoints,
+        officialPriceEgp: subscription.plan.officialPriceEgp,
+        discountedPriceEgp: subscription.plan.discountedPriceEgp,
+        maxUsers: subscription.plan.maxUsers,
+        maxCompanies: subscription.plan.maxCompanies,
+        isTrial: subscription.plan.isTrial,
       },
       graceEndsAt: subscription.graceEndsAt?.toISOString() ?? null,
       entitlements: {
@@ -212,6 +250,12 @@ export class SubscriptionService {
       },
       accessMode,
       pointsBalance: tenant?.pointsBalance ?? 0,
+      trialEndsAt: tenant?.trialEndsAt?.toISOString() ?? null,
+      trialActive: Boolean(tenant?.trialEndsAt) && !trialExpired,
+      sendBlocked: sendBlockedReason !== null,
+      sendBlockedReason,
+      extraUsers: tenant?.extraUsers ?? 0,
+      extraCompanies: tenant?.extraCompanies ?? 0,
     };
   }
 }
