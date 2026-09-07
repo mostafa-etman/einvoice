@@ -102,4 +102,30 @@ describe('report-tax-sources', () => {
     });
     expect(taxes[0]?.amount).toBe('99');
   });
+
+  it('reads issued taxes from etaPayloadJson.lineTaxableItems when stored taxes are empty', () => {
+    const taxes = extractIssuedDocumentTaxes({
+      taxTotalsJson: [],
+      lines: [{ taxes: [] }],
+      etaPayloadJson: {
+        status: 'Valid',
+        document: JSON.stringify({
+          invoiceLines: [
+            {
+              taxableItems: null,
+              lineTaxableItems: [
+                { taxType: 'T1', subType: 'V009', rate: 14, amount: 140 },
+              ],
+            },
+          ],
+        }),
+      },
+    });
+    expect(taxes).toHaveLength(1);
+    expect(taxes[0]).toMatchObject({
+      taxType: 'T1',
+      subType: 'V009',
+      amount: '140.00',
+    });
+  });
 });

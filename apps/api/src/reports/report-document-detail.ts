@@ -8,6 +8,10 @@ import {
   extractReceivedDocumentTaxes,
 } from './report-tax-sources';
 import {
+  mapIssuedDetailsLines,
+  splitIssuedEtaDetails,
+} from '../documents/issued-document-import.mapper';
+import {
   attachTaxNames,
   loadItemNamesByCode,
   loadTaxCatalogNames,
@@ -81,9 +85,18 @@ export async function buildSalesDetail(tx: Tx, f: ReportFilters) {
   if (f.status) {
     where.status = f.status as never;
   } else if (!f.includeNonFinancialStatuses) {
-    // Detail reports show all statuses by default when includeOthers is on;
-    // default still VALID-focused unless includeNonFinancialStatuses.
-    where.status = 'VALID' as never;
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+      {
+        OR: [
+          { status: 'VALID' as never },
+          {
+            origin: 'ETA_SYNC',
+            etaStatus: { equals: 'Valid', mode: 'insensitive' },
+          },
+        ],
+      },
+    ];
   }
   if (f.counterparty?.trim()) {
     const c = f.counterparty.trim();
@@ -144,6 +157,7 @@ export async function buildSalesDetail(tx: Tx, f: ReportFilters) {
         netAmount: true,
         totalAmount: true,
         taxTotalsJson: true,
+        etaPayloadJson: true,
         lines: {
           orderBy: { lineNumber: 'asc' },
           select: {
@@ -179,10 +193,31 @@ export async function buildSalesDetail(tx: Tx, f: ReportFilters) {
 
   const rows = docs.map((d) => {
     const issuer = asRecord(d.issuerSnapshotJson);
+    const payloadLines = d.etaPayloadJson
+      ? mapIssuedDetailsLines(
+          splitIssuedEtaDetails(asRecord(d.etaPayloadJson) ?? {}).payload,
+        )
+      : [];
+    const sourceLines = d.lines.length
+      ? d.lines
+      : payloadLines.map((l) => ({
+          lineNumber: l.lineNumber,
+          description: l.description,
+          itemType: l.itemType,
+          itemCode: l.itemCode,
+          unitType: l.unitType,
+          quantity: l.quantity,
+          unitPrice: l.unitPrice,
+          discountAmount: l.discountAmount,
+          netTotal: l.netTotal,
+          total: l.total,
+          taxes: l.taxes,
+        }));
     const docTaxes = attachTaxNames(
       extractIssuedDocumentTaxes({
         taxTotalsJson: d.taxTotalsJson,
-        lines: d.lines,
+        etaPayloadJson: d.etaPayloadJson,
+        lines: sourceLines,
       }).map((t) => ({
         taxType: t.taxType,
         subType: t.subType,
@@ -192,9 +227,12 @@ export async function buildSalesDetail(tx: Tx, f: ReportFilters) {
       catalogs,
     );
     const taxLabel = taxSummaryLabel(docTaxes);
-    const lines = d.lines.map((line) => {
+    const lines = sourceLines.map((line, idx) => {
+      const stored = line.taxes ?? [];
+      const fromPayload = payloadLines[idx]?.taxes ?? [];
+      const rawTaxes = stored.length ? stored : fromPayload;
       const lineTaxes = attachTaxNames(
-        (line.taxes ?? []).map((t) => ({
+        rawTaxes.map((t) => ({
           taxType: t.taxType,
           subType: t.subType,
           rate: t.rate,

@@ -38,6 +38,12 @@ import {
   renderLocalInvoicePdf,
   type LocalInvoicePdfLocale,
 } from './local-invoice-pdf';
+import { extractIssuedDocumentTaxes } from '../reports/report-tax-sources';
+import {
+  issuedEtaLineTaxesRaw,
+  mapIssuedDetailsLines,
+  splitIssuedEtaDetails,
+} from './issued-document-import.mapper';
 import { assertDocumentMutable } from './documents-mutability';
 import {
   creditNoteKindForInvoice,
@@ -197,6 +203,24 @@ export class DocumentsService {
     private readonly eta: EtaService,
     @Inject('ArtifactStorage') private readonly artifacts: ArtifactStorage,
   ) {}
+
+  /** ETA_SYNC drafts must surface the portal status, not Prisma's DRAFT default. */
+  private issuedDisplayStatus(
+    status: DocumentStatus,
+    origin?: DocumentOrigin | string | null,
+    etaStatus?: string | null,
+  ): DocumentStatus {
+    if (
+      origin === 'ETA_SYNC' &&
+      (status === 'DRAFT' ||
+        status === 'READY' ||
+        status === 'PENDING_SIGNATURE')
+    ) {
+      const mapped = mapEtaStatusToLocal(etaStatus);
+      if (mapped) return mapped as DocumentStatus;
+    }
+    return status;
+  }
 
   private lineInputs(dto: DocumentUpsertDto): LineInput[] {
     return dto.lines.map((l) => ({
@@ -438,6 +462,55 @@ export class DocumentsService {
     lines: Array<Record<string, unknown>>;
   }) {
     const etaPayload = doc.etaPayloadJson as JsonObject;
+    const payloadRecord = etaPayload as Record<string, unknown>;
+    const { payload: innerPayload } = splitIssuedEtaDetails(payloadRecord);
+    const mappedFromPayload = mapIssuedDetailsLines(innerPayload);
+    const dbLines = Array.isArray(doc.lines) ? doc.lines : [];
+    const lines =
+      dbLines.length > 0
+        ? dbLines.map((l, idx) => {
+            const row = l as Record<string, unknown>;
+            const existing = Array.isArray(row.taxes) ? row.taxes : [];
+            if (existing.length) return l;
+            const fromPayload = mappedFromPayload[idx]?.taxes ?? [];
+            if (!fromPayload.length) return l;
+            return { ...row, taxes: fromPayload };
+          })
+        : mappedFromPayload.map((l, idx) => ({
+            id: `payload-${idx}`,
+            lineNumber: l.lineNumber,
+            description: l.description,
+            itemType: l.itemType,
+            itemCode: l.itemCode,
+            unitType: l.unitType,
+            quantity: l.quantity,
+            unitPrice: l.unitPrice,
+            discountAmount: l.discountAmount,
+            discountRate: l.discountRate,
+            currencySold: l.currencySold,
+            amountEgp: l.amountEgp,
+            amountSold: l.amountSold,
+            currencyExchangeRate: l.currencyExchangeRate,
+            internalCode: l.internalCode,
+            taxes: l.taxes,
+          }));
+    const storedTotals = Array.isArray(doc.taxTotalsJson)
+      ? doc.taxTotalsJson
+      : [];
+    const extractedTaxes = extractIssuedDocumentTaxes({
+      taxTotalsJson: doc.taxTotalsJson,
+      etaPayloadJson: doc.etaPayloadJson,
+      lines: lines as Array<{ taxes?: Array<{ taxType: string; subType?: string | null; rate?: string | null; amount?: string | null }> }>,
+    });
+    const taxTotals =
+      storedTotals.length > 0
+        ? doc.taxTotalsJson
+        : extractedTaxes.map((t) => ({
+            taxType: t.taxType,
+            subType: t.subType,
+            rate: t.rate,
+            amount: t.amount,
+          }));
     const canonicalString =
       doc.canonicalPreview ?? canonicalSerialize(etaPayload);
     const cooldownUntil = doc.submitCooldownUntil?.toISOString() ?? null;
@@ -447,7 +520,7 @@ export class DocumentsService {
     return {
       id: doc.id,
       kind: doc.kind,
-      status: doc.status,
+      status: this.issuedDisplayStatus(doc.status, doc.origin, doc.etaStatus),
       origin: doc.origin ?? 'LOCAL',
       branchId: doc.branchId,
       currencyCode: doc.currencyCode,
@@ -456,16 +529,16 @@ export class DocumentsService {
       internalId: doc.internalId,
       etaDocumentType: doc.etaDocumentType,
       etaDocumentTypeVersion: doc.etaDocumentTypeVersion,
-      lines: doc.lines,
+      lines,
       totals: {
         totalSalesAmount: doc.totalSalesAmount,
         totalDiscountAmount: doc.totalDiscountAmount,
         netAmount: doc.netAmount,
         totalAmount: doc.totalAmount,
         extraDiscountAmount: doc.extraDiscountAmount,
-        taxTotals: doc.taxTotalsJson,
+        taxTotals,
       },
-      etaPayload,
+      etaPayload: (Object.keys(innerPayload).length ? innerPayload : etaPayload) as JsonObject,
       canonicalString,
       version: doc.version,
       clientIdempotencyKey: doc.clientIdempotencyKey ?? null,
@@ -593,7 +666,7 @@ export class DocumentsService {
       const items = page.map((doc) => ({
         id: doc.id,
         kind: doc.kind,
-        status: doc.status,
+        status: this.issuedDisplayStatus(doc.status, doc.origin, doc.etaStatus),
         origin: doc.origin ?? 'LOCAL',
         internalId: doc.internalId ?? null,
         issueDateTime: doc.issueDateTime?.toISOString?.() ?? null,
@@ -962,9 +1035,7 @@ export class DocumentsService {
         const taxes =
           fromRelation.length > 0
             ? fromRelation
-            : (payloadLine?.taxableItems ??
-              payloadLine?.TaxableItems ??
-              []);
+            : issuedEtaLineTaxesRaw((payloadLine ?? {}) as Record<string, unknown>);
         return {
           description: String(l.description ?? ''),
           itemType: String(l.itemType ?? ''),

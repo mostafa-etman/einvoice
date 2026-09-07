@@ -89,6 +89,16 @@ describe('local invoice PDF (display-only)', () => {
     ).toEqual([
       { taxType: 'T1', subType: 'V001', rate: '14', amount: '28.00' },
     ]);
+    expect(
+      normalizeLineTaxes({
+        taxableItems: null,
+        lineTaxableItems: [
+          { taxType: 'T1', subType: 'V009', rate: 14, amount: 140 },
+        ],
+      }),
+    ).toEqual([
+      { taxType: 'T1', subType: 'V009', rate: '14', amount: '140' },
+    ]);
   });
 
   it('renders Arabic PDF with taxes and unreversed totals', async () => {

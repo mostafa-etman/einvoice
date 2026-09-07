@@ -10,7 +10,9 @@ import { EtaService } from '../eta/eta.service';
 import { EtaDocumentsSearchClient } from '../eta/eta-documents-search.client';
 import { EtaDocumentDetailsClient } from '../eta/eta-document-details.client';
 import { mapEtaIssuedDetailsToImport } from './issued-document-import.mapper';
+import type { IssuedImportMapped } from './issued-document-import.mapper';
 import { mapEtaStatusToLocal, shouldApplyMappedEtaStatus } from '../eta/eta-status-map';
+import { extractEtaDocumentStatus } from '../eta/eta-submission-status.client';
 import {
   isSyncRunStale,
   SYNC_RESET_ERROR,
@@ -35,6 +37,27 @@ import {
   isEtaRateLimitError,
   paceEtaSyncRequest,
 } from '../eta/eta-rate-limit';
+
+function taxTotalsStored(json: unknown): boolean {
+  return Array.isArray(json) && json.length > 0;
+}
+
+/** ETA_SYNC rows that were imported as DRAFT / without taxes must be rewritten. */
+export function etaSyncIssuedNeedsBackfill(existing: {
+  origin: string;
+  status: string;
+  taxTotalsJson?: unknown;
+  lineCount: number;
+  hasLineTax: boolean;
+}): boolean {
+  if (existing.origin !== 'ETA_SYNC') return false;
+  if (existing.status === 'DRAFT') return true;
+  if (existing.lineCount <= 0) return true;
+  if (!existing.hasLineTax && !taxTotalsStored(existing.taxTotalsJson)) {
+    return true;
+  }
+  return false;
+}
 
 @Injectable()
 export class SalesSyncService {
@@ -497,7 +520,13 @@ export class SalesSyncService {
           id: true,
           origin: true,
           internalId: true,
+          status: true,
+          taxTotalsJson: true,
           _count: { select: { lines: true } },
+          lines: {
+            take: 1,
+            select: { taxes: { take: 1, select: { id: true } } },
+          },
         },
       }),
     );
@@ -508,8 +537,18 @@ export class SalesSyncService {
       return 'updated';
     }
 
-    // Already imported with line details — status-only refresh (resume-friendly).
-    if (existing && existing.origin === 'ETA_SYNC' && existing._count.lines > 0) {
+    const needsBackfill =
+      !existing ||
+      etaSyncIssuedNeedsBackfill({
+        origin: existing.origin,
+        status: existing.status,
+        taxTotalsJson: existing.taxTotalsJson,
+        lineCount: existing._count.lines,
+        hasLineTax: existing.lines.some((l) => l.taxes.length > 0),
+      });
+
+    // Already imported complete — status-only refresh (resume-friendly).
+    if (existing && !needsBackfill) {
       await this.refreshLocalIssuedStatus(tenantId, existing.id, row);
       return 'skipped';
     }
@@ -530,26 +569,7 @@ export class SalesSyncService {
     if (!mapped) return 'skipped';
 
     if (existing) {
-      await this.tenantPrisma.withTenant(tenantId, (tx) =>
-        tx.document.update({
-          where: { id: existing.id },
-          data: {
-            etaLongId: mapped.etaLongId,
-            etaStatus: mapped.etaStatus,
-            status: mapped.status,
-            etaStatusUpdatedAt: new Date(),
-            taxTotalsJson: mapped.taxTotalsJson,
-            totalSalesAmount: mapped.totalSalesAmount,
-            totalDiscountAmount: mapped.totalDiscountAmount,
-            netAmount: mapped.netAmount,
-            totalAmount: mapped.totalAmount,
-            etaPayloadJson: mapped.etaPayloadJson,
-            ...(mapped.signaturesJson
-              ? { signaturesJson: mapped.signaturesJson }
-              : {}),
-          },
-        }),
-      );
+      await this.replaceEtaSyncDocument(tenantId, existing.id, mapped);
       return 'updated';
     }
 
@@ -635,44 +655,90 @@ export class SalesSyncService {
           etaEnvironment,
           version: 1,
           lines: {
-            create: mapped.lines.map((l) => ({
-              tenantId,
-              lineNumber: l.lineNumber,
-              description: l.description,
-              itemType: l.itemType,
-              itemCode: l.itemCode,
-              unitType: l.unitType,
-              quantity: l.quantity,
-              unitPrice: l.unitPrice,
-              currencySold: l.currencySold,
-              amountSold: l.amountSold,
-              amountEgp: l.amountEgp,
-              currencyExchangeRate: l.currencyExchangeRate,
-              discountRate: l.discountRate,
-              discountAmount: l.discountAmount,
-              salesTotal: l.salesTotal,
-              netTotal: l.netTotal,
-              total: l.total,
-              valueDifference: l.valueDifference,
-              totalTaxableFees: l.totalTaxableFees,
-              itemsDiscount: l.itemsDiscount,
-              internalCode: l.internalCode,
-              taxes: {
-                create: l.taxes.map((t) => ({
-                  tenantId,
-                  taxType: t.taxType,
-                  subType: t.subType,
-                  rate: t.rate,
-                  amount: t.amount,
-                })),
-              },
-            })),
+            create: this.lineCreates(tenantId, mapped),
           },
         },
       });
     });
 
     return 'new';
+  }
+
+  private lineCreates(tenantId: string, mapped: IssuedImportMapped) {
+    return mapped.lines.map((l) => ({
+      tenantId,
+      lineNumber: l.lineNumber,
+      description: l.description,
+      itemType: l.itemType,
+      itemCode: l.itemCode,
+      unitType: l.unitType,
+      quantity: l.quantity,
+      unitPrice: l.unitPrice,
+      currencySold: l.currencySold,
+      amountSold: l.amountSold,
+      amountEgp: l.amountEgp,
+      currencyExchangeRate: l.currencyExchangeRate,
+      discountRate: l.discountRate,
+      discountAmount: l.discountAmount,
+      salesTotal: l.salesTotal,
+      netTotal: l.netTotal,
+      total: l.total,
+      valueDifference: l.valueDifference,
+      totalTaxableFees: l.totalTaxableFees,
+      itemsDiscount: l.itemsDiscount,
+      internalCode: l.internalCode,
+      taxes: {
+        create: l.taxes.map((t) => ({
+          tenantId,
+          taxType: t.taxType,
+          subType: t.subType,
+          rate: t.rate,
+          amount: t.amount,
+        })),
+      },
+    }));
+  }
+
+  private async replaceEtaSyncDocument(
+    tenantId: string,
+    documentId: string,
+    mapped: IssuedImportMapped,
+  ) {
+    await this.tenantPrisma.withTenant(tenantId, async (tx) => {
+      await tx.documentLine.deleteMany({ where: { documentId } });
+      await tx.document.update({
+        where: { id: documentId },
+        data: {
+          origin: 'ETA_SYNC',
+          kind: mapped.kind,
+          status: mapped.status,
+          currencyCode: mapped.currencyCode,
+          issueDateTime: mapped.issueDateTime,
+          etaDocumentType: mapped.etaDocumentType,
+          etaDocumentTypeVersion: mapped.etaDocumentTypeVersion,
+          typeVersionFetchedAt: new Date(),
+          receiverType: mapped.receiverType,
+          receiverId: mapped.receiverId,
+          receiverName: mapped.receiverName,
+          receiverAddressJson: mapped.receiverAddressJson ?? undefined,
+          issuerSnapshotJson: mapped.issuerSnapshot,
+          extraDiscountAmount: mapped.extraDiscountAmount,
+          totalSalesAmount: mapped.totalSalesAmount,
+          totalDiscountAmount: mapped.totalDiscountAmount,
+          netAmount: mapped.netAmount,
+          totalAmount: mapped.totalAmount,
+          totalItemsDiscountAmount: mapped.totalItemsDiscountAmount,
+          taxTotalsJson: mapped.taxTotalsJson,
+          etaPayloadJson: mapped.etaPayloadJson,
+          signaturesJson: mapped.signaturesJson ?? undefined,
+          signedAt: mapped.signaturesJson ? mapped.issueDateTime : undefined,
+          etaLongId: mapped.etaLongId,
+          etaStatus: mapped.etaStatus,
+          etaStatusUpdatedAt: new Date(),
+          lines: { create: this.lineCreates(tenantId, mapped) },
+        },
+      });
+    });
   }
 
   private async refreshLocalIssuedStatus(
@@ -686,9 +752,7 @@ export class SalesSyncService {
     const longId = String(
       row.longId ?? row.LongId ?? row.longID ?? '',
     ).trim();
-    const etaStatusRaw = String(
-      row.status ?? row.Status ?? row.documentStatus ?? '',
-    ).trim();
+    const etaStatusRaw = extractEtaDocumentStatus(row) ?? '';
     const mapped = mapEtaStatusToLocal(etaStatusRaw);
 
     await this.tenantPrisma.withTenant(tenantId, async (tx) => {

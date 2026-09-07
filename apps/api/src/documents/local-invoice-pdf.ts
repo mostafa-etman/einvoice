@@ -248,6 +248,8 @@ export function normalizeLineTaxes(raw: unknown): LocalInvoicePdfTax[] {
     const o = raw as Record<string, unknown>;
     if (Array.isArray(o.taxableItems)) arr = o.taxableItems;
     else if (Array.isArray(o.TaxableItems)) arr = o.TaxableItems;
+    else if (Array.isArray(o.lineTaxableItems)) arr = o.lineTaxableItems;
+    else if (Array.isArray(o.LineTaxableItems)) arr = o.LineTaxableItems;
     else if (Array.isArray(o.taxes)) arr = o.taxes;
   }
   return arr

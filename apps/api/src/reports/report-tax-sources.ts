@@ -3,8 +3,8 @@
  *
  * Synced purchases often store line taxes in rawJson.lineTaxableItems (or only in
  * rawDetailsJson.taxTotals) while taxesJson is [] — same class of bug as the
- * purchase detail screen. Issued ETA_SYNC docs may have taxTotalsJson and/or
- * DocumentLineTax rows.
+ * purchase detail screen. Issued ETA_SYNC docs may store taxes on DocumentLineTax
+ * / taxTotalsJson, or only inside etaPayloadJson (nested document / lineTaxableItems).
  */
 
 import { normalizeLineTaxes } from '../documents/local-invoice-pdf';
@@ -12,6 +12,10 @@ import {
   extractReceivedLineTaxesRaw,
   mapDetailsLines,
 } from '../purchases/received-document.mapper';
+import {
+  mapIssuedDetailsLines,
+  splitIssuedEtaDetails,
+} from '../documents/issued-document-import.mapper';
 import {
   parseTaxTotalsJson,
   type TaxLineIn,
@@ -127,10 +131,14 @@ export function extractReceivedDocumentTaxes(doc: {
 
 /**
  * Resolve taxes for an issued (sales) document.
- * Prefer line taxes (subtype/rate); else document taxTotalsJson.
+ * Prefer line taxes (subtype/rate); else document taxTotalsJson; else the
+ * stored ETA payload (nested document / lineTaxableItems) — same class of
+ * bug as purchases where taxes live on the raw details, not the structured
+ * columns.
  */
 export function extractIssuedDocumentTaxes(doc: {
   taxTotalsJson?: unknown;
+  etaPayloadJson?: unknown;
   lines?: Array<{
     taxes?: Array<{
       taxType: string;
@@ -154,7 +162,27 @@ export function extractIssuedDocumentTaxes(doc: {
       }
     }
     if (fromLines.length) return fromLines;
-    return fromTotalsJson(doc?.taxTotalsJson);
+
+    const fromTotals = fromTotalsJson(doc?.taxTotalsJson);
+    if (fromTotals.length) return fromTotals;
+
+    const payload = asRecord(doc?.etaPayloadJson);
+    if (!payload) return [];
+    const { payload: inner } = splitIssuedEtaDetails(payload);
+    const mappedLines = mapIssuedDetailsLines(inner);
+    const fromPayloadLines: UnifiedTaxLine[] = [];
+    for (const line of mappedLines) {
+      for (const t of line.taxes) {
+        fromPayloadLines.push({
+          taxType: t.taxType,
+          subType: t.subType,
+          rate: t.rate,
+          amount: t.amount,
+        });
+      }
+    }
+    if (fromPayloadLines.length) return fromPayloadLines;
+    return fromTotalsJson(inner.taxTotals ?? inner.TaxTotals ?? payload.taxTotals);
   } catch {
     return [];
   }

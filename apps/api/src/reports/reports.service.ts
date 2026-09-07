@@ -58,6 +58,7 @@ type IssuedRow = {
   totalAmount: string;
   netAmount: string;
   taxTotalsJson: Prisma.JsonValue;
+  etaPayloadJson?: Prisma.JsonValue | null;
   receiverId: string | null;
   receiverName: string | null;
   lines: Array<{
@@ -190,7 +191,19 @@ export class ReportsService {
     };
     if (f.branchId) where.branchId = f.branchId;
     if (f.currencyCode) where.currencyCode = f.currencyCode;
-    if (!f.includeNonFinancialStatuses) where.status = DocumentStatus.VALID;
+    if (!f.includeNonFinancialStatuses) {
+      where.AND = [
+        {
+          OR: [
+            { status: DocumentStatus.VALID },
+            {
+              origin: 'ETA_SYNC',
+              etaStatus: { equals: 'Valid', mode: 'insensitive' },
+            },
+          ],
+        },
+      ];
+    }
     if (f.documentKinds?.length) {
       where.kind = { in: f.documentKinds as DocumentKind[] };
     }
@@ -206,6 +219,7 @@ export class ReportsService {
         totalAmount: true,
         netAmount: true,
         taxTotalsJson: true,
+        etaPayloadJson: true,
         receiverId: true,
         receiverName: true,
         lines: {
