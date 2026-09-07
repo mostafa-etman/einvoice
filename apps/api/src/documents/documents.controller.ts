@@ -287,6 +287,21 @@ export class DocumentsController {
     return res.send(result.pdf);
   }
 
+  @Post(':id/return')
+  @HttpCode(201)
+  @RequirePermissions(PERMISSIONS.DOCUMENTS_MANAGE)
+  createReturn(
+    @Headers('x-tenant-id') tenantHeader: string | undefined,
+    @CurrentUser() user: { userId: string },
+    @Param('id') id: string,
+  ) {
+    return this.documents.createReturnCreditNote(
+      requireTenant(tenantHeader),
+      user.userId,
+      id,
+    );
+  }
+
   @Post(':id/cancel')
   @HttpCode(200)
   @RequirePermissions(PERMISSIONS.DOCUMENTS_MANAGE)

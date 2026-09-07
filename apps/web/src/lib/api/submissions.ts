@@ -82,6 +82,7 @@ export function refreshDocumentStatus(id: string) {
 
 export function refreshDocumentsStatus(opts: {
   documentIds?: string[];
+  etaUuids?: string[];
   pendingOnly?: boolean;
 }) {
   return apiFetch<StatusRefreshBatchResult>('/documents/refresh-status', {

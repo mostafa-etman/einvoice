@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { DocumentStatus, Prisma } from '@prisma/client';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { UsageEmitService } from '../analytics/usage-emit.service';
-import { mapEtaStatusToLocal } from '../eta/eta-status-map';
+import { mapEtaStatusToLocal, shouldApplyMappedEtaStatus } from '../eta/eta-status-map';
 
 @Injectable()
 export class DocumentStatusEventsService {
@@ -66,6 +66,17 @@ export class DocumentStatusEventsService {
       });
       if (!doc) return null;
       const fromStatus = doc.status;
+      if (!shouldApplyMappedEtaStatus(fromStatus, local)) {
+        await tx.document.update({
+          where: { id: documentId },
+          data: {
+            etaStatus,
+            etaStatusUpdatedAt: new Date(),
+            etaStatusRaw: opts?.raw,
+          },
+        });
+        return { fromStatus, toStatus: fromStatus, changed: false };
+      }
       // Always stamp last-checked time on a successful ETA query, even when
       // the mapped status is unchanged (manual refresh UX).
       if (fromStatus === local) {

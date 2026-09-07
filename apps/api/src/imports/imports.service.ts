@@ -25,9 +25,11 @@ import { ImportErrorReportService } from './import-error-report.service';
 import { resolveImportTerminalStatus } from './import-partial-status';
 import {
   IMPORT_ALL_FIELD_KEYS,
-  notesRows,
-  sampleImportRows,
+  arabicNotesRows,
+  arabicSampleImportRows,
 } from './import-schema';
+import { proposeColumnMapping } from './import-header-map';
+import { importListsAoA, LIST_RANGES } from './import-lists';
 import {
   buildDocumentUpsert,
   groupRowsByInternalId,
@@ -37,6 +39,35 @@ import { QUEUE_IMPORT, type ImportJobData } from '../queues/queue-names';
 import type { ArtifactStorage } from '../storage/storage.module';
 import { loadEnv } from '../config/env';
 import * as XLSX from 'xlsx';
+
+function addTemplateValidations(ws: XLSX.WorkSheet) {
+  const colOf = (key: string) => {
+    const i = IMPORT_ALL_FIELD_KEYS.indexOf(key);
+    return i >= 0 ? XLSX.utils.encode_col(i) : null;
+  };
+  const dv: Array<Record<string, unknown>> = [];
+  const add = (key: string, formula1: string) => {
+    const c = colOf(key);
+    if (!c) return;
+    dv.push({
+      sqref: `${c}2:${c}2000`,
+      type: 'list',
+      formula1,
+      allowBlank: true,
+      showDropDown: true,
+    });
+  };
+  add('receiverType', LIST_RANGES.receiverType);
+  add('itemType', LIST_RANGES.itemType);
+  add('unitType', LIST_RANGES.unitType);
+  add('currencyCode', LIST_RANGES.currencyCode);
+  add('receiverCountry', LIST_RANGES.receiverCountry);
+  add('documentType', LIST_RANGES.documentType);
+  for (let n = 1; n <= 5; n++) add(`taxType${n}`, LIST_RANGES.taxType);
+  (
+    ws as XLSX.WorkSheet & { '!dataValidations'?: Array<Record<string, unknown>> }
+  )['!dataValidations'] = dv;
+}
 
 @Injectable()
 export class ImportsService {
@@ -56,7 +87,7 @@ export class ImportsService {
 
   templateCsv(_documentType = 'I'): Buffer {
     const issued = new Date().toISOString();
-    const rows = sampleImportRows(issued);
+    const rows = arabicSampleImportRows(issued);
     const body = rows
       .map((r) =>
         r
@@ -67,7 +98,7 @@ export class ImportsService {
           .join(','),
       )
       .join('\n');
-    const notes = notesRows()
+    const notes = arabicNotesRows()
       .map((r) =>
         r
           .map((cell) => {
@@ -77,19 +108,46 @@ export class ImportsService {
           .join(','),
       )
       .join('\n');
-    // CSV: Import sheet content + a Notes section after a blank line comment.
-    const combined = `${body}\n\n# --- Column notes (do not import below this line) ---\n${notes}\n`;
+    const combined = `${body}\n\n# --- ملاحظات الأعمدة (لا تستورد ما بعد هذا السطر) ---\n${notes}\n`;
     return Buffer.from(combined, 'utf8');
   }
 
   templateXlsx(_documentType = 'I'): Buffer {
     const issued = new Date().toISOString();
-    const importAoA = sampleImportRows(issued);
-    const notesAoA = notesRows();
+    const importAoA = arabicSampleImportRows(issued);
+    const listsAoA = importListsAoA();
+    const notesAoA = arabicNotesRows();
     const wb = XLSX.utils.book_new();
     const wsImport = XLSX.utils.aoa_to_sheet(importAoA);
+    wsImport['!cols'] = importAoA[0]!.map(() => ({ wch: 22 }));
+    addTemplateValidations(wsImport);
+    const wsLists = XLSX.utils.aoa_to_sheet(listsAoA);
+    wsLists['!cols'] = [
+      { wch: 18 },
+      { wch: 4 },
+      { wch: 16 },
+      { wch: 4 },
+      { wch: 28 },
+      { wch: 4 },
+      { wch: 10 },
+      { wch: 4 },
+      { wch: 42 },
+      { wch: 4 },
+      { wch: 36 },
+      { wch: 4 },
+      { wch: 28 },
+    ];
     const wsNotes = XLSX.utils.aoa_to_sheet(notesAoA);
+    wsNotes['!cols'] = [
+      { wch: 28 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 50 },
+      { wch: 24 },
+      { wch: 18 },
+    ];
     XLSX.utils.book_append_sheet(wb, wsImport, 'Import');
+    XLSX.utils.book_append_sheet(wb, wsLists, 'Lists');
     XLSX.utils.book_append_sheet(wb, wsNotes, 'Notes');
     return Buffer.from(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
   }
@@ -220,11 +278,7 @@ export class ImportsService {
         for (const h of rows[0] ?? []) headers.add(String(h ?? '').trim());
       }
     }
-    const mapping: ColumnMapping = {};
-    for (const field of IMPORT_ALL_FIELD_KEYS) {
-      if (headers.has(field)) mapping[field] = field;
-    }
-    return mapping;
+    return proposeColumnMapping(headers);
   }
 
   async putMapping(

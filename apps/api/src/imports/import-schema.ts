@@ -6,6 +6,8 @@
  * settings (not columns). Up to IMPORT_TAX_SLOTS taxes per line.
  */
 
+import { arabicHeaderForField } from './import-ar-headers';
+
 export const IMPORT_TAX_SLOTS = 5 as const;
 
 export type ImportColumnDef = {
@@ -585,3 +587,56 @@ export function sampleImportRows(issuedIso: string): string[][] {
     headers.map((h) => line2[h] ?? ''),
   ];
 }
+
+export function arabicColumnHeaders(): string[] {
+  return IMPORT_COLUMNS.map((c) => arabicHeaderForField(c.key, c.required));
+}
+
+export function arabicNotesRows(): string[][] {
+  const header = [
+    'العمود',
+    'مطلوب',
+    'المجموعة',
+    'الوصف',
+    'القيم المسموحة',
+    'مثال',
+  ];
+  const rows = IMPORT_COLUMNS.map((c) => [
+    arabicHeaderForField(c.key, c.required),
+    c.required ? 'مطلوب (*)' : 'اختياري',
+    c.group,
+    c.description,
+    c.allowedValues ?? '',
+    c.example ?? '',
+  ]);
+  const auto = [
+    [
+      '(تلقائي)',
+      '—',
+      'settings',
+      'اسم وعنوان ورقم تسجيل المُصدر من الإعدادات — ليست أعمدة في الملف',
+      '',
+      '',
+    ],
+  ];
+  return [header, ...rows, ...auto];
+}
+
+export function arabicSampleImportRows(issuedIso: string): string[][] {
+  const english = sampleImportRows(issuedIso);
+  const data = english.slice(1);
+  const arHeaders = arabicColumnHeaders();
+  const line1 = { ...Object.fromEntries(IMPORT_ALL_FIELD_KEYS.map((k, i) => [k, data[0]?.[i] ?? ''])) };
+  line1.receiverType = 'شركة';
+  line1.taxType1 = 'T1 — ضريبة القيمة المضافة';
+  const line2 = { ...Object.fromEntries(IMPORT_ALL_FIELD_KEYS.map((k, i) => [k, data[1]?.[i] ?? ''])) };
+  line2.receiverType = 'شركة';
+  line2.taxType1 = 'T1 — ضريبة القيمة المضافة';
+  line2.taxType2 = 'T4 — الخصم تحت حساب الضريبة';
+  return [
+    arHeaders,
+    IMPORT_ALL_FIELD_KEYS.map((k) => line1[k] ?? ''),
+    IMPORT_ALL_FIELD_KEYS.map((k) => line2[k] ?? ''),
+  ];
+}
+

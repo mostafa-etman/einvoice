@@ -1,0 +1,1214 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl" data-theme="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>eInvoice — System Design Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=IBM+Plex+Serif:wght@400;600;700&display=swap" rel="stylesheet" />
+<style>
+:root {
+  --color-background: #f3f6f4;
+  --color-foreground: #14231a;
+  --color-foreground-muted: #4a5a52;
+  --color-brand: #0f6b4c;
+  --color-brand-strong: #0a533a;
+  --color-brand-muted: #d7ebe2;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f8fbf9;
+  --color-border: #c5d5cc;
+  --color-border-strong: #94ada2;
+
+  --color-success: #0f8a5f;
+  --color-success-muted: #d9f2e6;
+  --color-warning: #b26a00;
+  --color-warning-muted: #fcecd0;
+  --color-danger: #b0281f;
+  --color-danger-muted: #fadedb;
+  --color-info: #1f5f8a;
+  --color-info-muted: #d6ecf7;
+
+  --color-status-draft: #6b7480;
+  --color-status-draft-muted: #e6e9ed;
+  --color-status-signed: #1f5f8a;
+  --color-status-signed-muted: #d6ecf7;
+  --color-status-submitted: #b26a00;
+  --color-status-submitted-muted: #fcecd0;
+  --color-status-valid: #0f8a5f;
+  --color-status-valid-muted: #d9f2e6;
+  --color-status-invalid: #b0281f;
+  --color-status-invalid-muted: #fadedb;
+  --color-status-cancelled: #6b7480;
+  --color-status-cancelled-muted: #e6e9ed;
+  --color-status-rejected: #7a1e17;
+  --color-status-rejected-muted: #f5cfcb;
+
+  --space-2xs: 0.125rem;
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2.5rem;
+  --space-2xl: 4rem;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  --shadow-sm: 0 1px 2px rgba(20, 35, 26, 0.06), 0 1px 1px rgba(20, 35, 26, 0.04);
+  --shadow-md: 0 4px 12px rgba(20, 35, 26, 0.08), 0 2px 4px rgba(20, 35, 26, 0.05);
+  --shadow-lg: 0 12px 32px rgba(20, 35, 26, 0.12), 0 4px 8px rgba(20, 35, 26, 0.06);
+
+  --font-sans: "IBM Plex Sans Arabic", "Segoe UI", sans-serif;
+  --font-display: "IBM Plex Serif", Georgia, serif;
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.25rem;
+  --font-size-xl: 2rem;
+
+  --ring: 0 0 0 2px var(--color-surface), 0 0 0 4px var(--color-brand);
+}
+
+:root[data-theme="dark"] {
+  --color-background: #0d1613;
+  --color-foreground: #e6ede9;
+  --color-foreground-muted: #9fb2a8;
+  --color-brand: #4dbf95;
+  --color-brand-strong: #7fd6b1;
+  --color-brand-muted: #16332a;
+  --color-surface: #14231a;
+  --color-surface-alt: #1a2d22;
+  --color-border: #26382e;
+  --color-border-strong: #3a5147;
+
+  --color-success: #4dbf95;
+  --color-success-muted: #16332a;
+  --color-warning: #e0a151;
+  --color-warning-muted: #3a2a12;
+  --color-danger: #e26b60;
+  --color-danger-muted: #3a1e1a;
+  --color-info: #6fb0d8;
+  --color-info-muted: #17303d;
+
+  --color-status-draft: #a4b0b8;
+  --color-status-draft-muted: #26302e;
+  --color-status-signed: #6fb0d8;
+  --color-status-signed-muted: #17303d;
+  --color-status-submitted: #e0a151;
+  --color-status-submitted-muted: #3a2a12;
+  --color-status-valid: #4dbf95;
+  --color-status-valid-muted: #16332a;
+  --color-status-invalid: #e26b60;
+  --color-status-invalid-muted: #3a1e1a;
+  --color-status-cancelled: #a4b0b8;
+  --color-status-cancelled-muted: #26302e;
+  --color-status-rejected: #f08b81;
+  --color-status-rejected-muted: #4a1e1a;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.35);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+  --shadow-lg: 0 12px 32px rgba(0,0,0,0.5);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-md);
+  line-height: 1.5;
+  min-height: 100vh;
+  transition: background 0.2s, color 0.2s;
+}
+
+/* ============ Demo shell ============ */
+.demo-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-md) var(--space-xl);
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+.demo-title {
+  font-family: var(--font-display);
+  font-size: var(--font-size-lg);
+  color: var(--color-brand);
+  font-weight: 700;
+  margin: 0;
+}
+.demo-sub {
+  color: var(--color-foreground-muted);
+  font-size: var(--font-size-sm);
+}
+.demo-actions {
+  margin-inline-start: auto;
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+}
+.demo-nav {
+  display: flex;
+  gap: var(--space-xs);
+  padding: var(--space-md) var(--space-xl);
+  background: var(--color-surface-alt);
+  border-bottom: 1px solid var(--color-border);
+  overflow-x: auto;
+  flex-wrap: wrap;
+}
+.demo-nav button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--color-foreground-muted);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+.demo-nav button:hover {
+  background: var(--color-brand-muted);
+  color: var(--color-brand);
+}
+.demo-nav button[aria-selected="true"] {
+  background: var(--color-brand);
+  color: white;
+  border-color: var(--color-brand);
+  font-weight: 500;
+}
+.demo-panel { padding: var(--space-xl); max-width: 1400px; margin: 0 auto; }
+.demo-panel[hidden] { display: none; }
+.demo-section-title {
+  font-family: var(--font-display);
+  font-size: var(--font-size-lg);
+  margin: 0 0 var(--space-md);
+  color: var(--color-foreground);
+}
+.demo-section-sub {
+  color: var(--color-foreground-muted);
+  font-size: var(--font-size-sm);
+  margin: 0 0 var(--space-lg);
+  max-width: 720px;
+}
+
+/* ============ Primitives ============ */
+.btn {
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  transition: all 0.15s;
+  line-height: 1.2;
+}
+.btn:focus-visible { outline: none; box-shadow: var(--ring); }
+.btn-primary { background: var(--color-brand); color: white; }
+.btn-primary:hover { background: var(--color-brand-strong); }
+.btn-secondary { background: var(--color-surface); color: var(--color-foreground); border-color: var(--color-border); }
+.btn-secondary:hover { background: var(--color-brand-muted); border-color: var(--color-brand); color: var(--color-brand); }
+.btn-ghost { background: transparent; color: var(--color-foreground-muted); }
+.btn-ghost:hover { background: var(--color-brand-muted); color: var(--color-brand); }
+.btn-danger { background: var(--color-danger); color: white; }
+.btn-danger:hover { filter: brightness(0.92); }
+.btn-sm { padding: var(--space-xs) var(--space-sm); font-size: var(--font-size-xs); }
+.btn-lg { padding: var(--space-md) var(--space-lg); font-size: var(--font-size-md); }
+.btn[disabled] { opacity: 0.6; cursor: not-allowed; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 2px var(--space-sm);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  line-height: 1.6;
+}
+.badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.75;
+}
+.badge-draft { background: var(--color-status-draft-muted); color: var(--color-status-draft); }
+.badge-signed { background: var(--color-status-signed-muted); color: var(--color-status-signed); }
+.badge-submitted { background: var(--color-status-submitted-muted); color: var(--color-status-submitted); }
+.badge-valid { background: var(--color-status-valid-muted); color: var(--color-status-valid); }
+.badge-invalid { background: var(--color-status-invalid-muted); color: var(--color-status-invalid); }
+.badge-cancelled { background: var(--color-status-cancelled-muted); color: var(--color-status-cancelled); }
+.badge-rejected { background: var(--color-status-rejected-muted); color: var(--color-status-rejected); }
+.badge-neutral { background: var(--color-brand-muted); color: var(--color-brand); }
+.badge-plain { background: var(--color-surface-alt); color: var(--color-foreground-muted); border: 1px solid var(--color-border); }
+.badge-plain::before { display: none; }
+
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  box-shadow: var(--shadow-sm);
+}
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--space-md);
+  gap: var(--space-md);
+}
+.card-title { font-family: var(--font-display); font-size: var(--font-size-md); font-weight: 600; margin: 0; }
+.card-desc { color: var(--color-foreground-muted); font-size: var(--font-size-sm); margin: var(--space-2xs) 0 0; }
+
+.input, .select, .textarea {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-foreground);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.input:focus, .select:focus, .textarea:focus { outline: none; border-color: var(--color-brand); box-shadow: 0 0 0 3px var(--color-brand-muted); }
+
+.field { display: flex; flex-direction: column; gap: var(--space-xs); margin-bottom: var(--space-md); }
+.field-label { font-size: var(--font-size-sm); font-weight: 500; }
+.field-hint { font-size: var(--font-size-xs); color: var(--color-foreground-muted); }
+.field-error { font-size: var(--font-size-xs); color: var(--color-danger); }
+
+/* ============ Screen: Tokens ============ */
+.token-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-md);
+}
+.token-chip {
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+.token-swatch {
+  height: 60px;
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-sm);
+  border: 1px solid var(--color-border);
+}
+.token-name { font-size: var(--font-size-xs); font-weight: 600; margin: 0; }
+.token-value { font-size: var(--font-size-xs); color: var(--color-foreground-muted); font-family: ui-monospace, monospace; margin: 2px 0 0; }
+
+.spacing-row { display: flex; align-items: center; gap: var(--space-md); margin-bottom: var(--space-sm); }
+.spacing-bar { background: var(--color-brand); height: 12px; border-radius: 2px; }
+.spacing-label { font-size: var(--font-size-xs); color: var(--color-foreground-muted); font-family: ui-monospace, monospace; min-width: 80px; }
+
+/* ============ Screen: App shell mock ============ */
+.app-shell {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  min-height: 700px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--color-background);
+  box-shadow: var(--shadow-md);
+}
+.app-sidebar {
+  background: var(--color-surface);
+  border-inline-end: 1px solid var(--color-border);
+  padding: var(--space-lg) var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+.app-brand {
+  font-family: var(--font-display);
+  font-size: var(--font-size-lg);
+  color: var(--color-brand);
+  font-weight: 700;
+  padding: 0 var(--space-sm);
+}
+.nav-section { display: flex; flex-direction: column; gap: 2px; }
+.nav-section-title {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-foreground-muted);
+  padding: 0 var(--space-sm);
+  margin-bottom: var(--space-xs);
+  font-weight: 600;
+}
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-md);
+  color: var(--color-foreground);
+  text-decoration: none;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+.nav-link:hover { background: var(--color-brand-muted); color: var(--color-brand); }
+.nav-link[aria-current="page"] { background: var(--color-brand-muted); color: var(--color-brand); font-weight: 500; }
+.nav-link svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+.app-main { display: flex; flex-direction: column; min-width: 0; }
+.app-topbar {
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-sm) var(--space-lg);
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+.tenant-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+.eta-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-pill);
+  background: var(--color-warning-muted);
+  color: var(--color-warning);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+.eta-badge.production { background: var(--color-danger-muted); color: var(--color-danger); }
+.user-menu {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+.user-menu:hover { background: var(--color-brand-muted); }
+.avatar {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: var(--color-brand);
+  color: white;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 600;
+  font-size: var(--font-size-xs);
+}
+.app-content { padding: var(--space-lg); flex: 1; overflow: auto; }
+
+/* ============ Screen: Dashboard ============ */
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: var(--space-lg);
+  flex-wrap: wrap;
+  gap: var(--space-md);
+}
+.page-title { font-family: var(--font-display); font-size: 1.75rem; margin: 0; font-weight: 700; }
+.page-subtitle { color: var(--color-foreground-muted); font-size: var(--font-size-sm); margin: var(--space-2xs) 0 0; }
+.breadcrumbs { display: flex; gap: var(--space-xs); font-size: var(--font-size-xs); color: var(--color-foreground-muted); margin-bottom: var(--space-xs); }
+.breadcrumbs a { color: inherit; text-decoration: none; }
+.breadcrumbs a:hover { color: var(--color-brand); }
+
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-md); margin-bottom: var(--space-lg); }
+.stat-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-md) var(--space-lg);
+}
+.stat-label { color: var(--color-foreground-muted); font-size: var(--font-size-sm); margin: 0 0 var(--space-xs); }
+.stat-value { font-family: var(--font-display); font-size: 1.75rem; font-weight: 700; margin: 0; line-height: 1.2; }
+.stat-delta { display: inline-flex; align-items: center; gap: 2px; font-size: var(--font-size-xs); margin-top: var(--space-xs); font-weight: 500; }
+.stat-delta.up { color: var(--color-success); }
+.stat-delta.down { color: var(--color-danger); }
+.stat-delta.flat { color: var(--color-foreground-muted); }
+
+.dash-grid { display: grid; grid-template-columns: 2fr 1fr; gap: var(--space-md); }
+.quick-actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-sm); }
+.quick-action {
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  cursor: pointer;
+  text-align: start;
+  transition: all 0.15s;
+  display: flex; gap: var(--space-sm); align-items: center;
+  font-family: inherit; font-size: var(--font-size-sm); color: var(--color-foreground);
+}
+.quick-action:hover { border-color: var(--color-brand); color: var(--color-brand); background: var(--color-brand-muted); }
+.quick-action-icon {
+  width: 36px; height: 36px;
+  border-radius: var(--radius-md);
+  background: var(--color-brand-muted);
+  color: var(--color-brand);
+  display: flex; align-items: center; justify-content: center;
+}
+
+.checklist { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-sm); }
+.checklist li { display: flex; align-items: center; gap: var(--space-sm); font-size: var(--font-size-sm); }
+.check-dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--color-border); display: flex; align-items: center; justify-content: center; }
+.check-dot.done { background: var(--color-success); border-color: var(--color-success); color: white; }
+
+/* ============ Screen: Table ============ */
+.table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }
+.data-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-sm); }
+.data-table th, .data-table td { padding: var(--space-sm) var(--space-md); text-align: start; }
+.data-table thead { background: var(--color-surface-alt); }
+.data-table th {
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-foreground-muted);
+  font-weight: 600;
+  border-bottom: 1px solid var(--color-border);
+}
+.data-table tbody tr { border-bottom: 1px solid var(--color-border); }
+.data-table tbody tr:last-child { border-bottom: none; }
+.data-table tbody tr:hover { background: var(--color-surface-alt); }
+.data-table td.num, .data-table th.num { text-align: end; font-variant-numeric: tabular-nums; }
+.data-table .row-actions { display: flex; gap: var(--space-xs); justify-content: flex-end; }
+
+.filter-bar {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-md);
+  flex-wrap: wrap;
+}
+.filter-chip {
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  display: inline-flex; align-items: center; gap: var(--space-xs);
+}
+.filter-chip.active { background: var(--color-brand-muted); border-color: var(--color-brand); color: var(--color-brand); }
+
+.bulk-bar {
+  display: flex; align-items: center; gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-brand);
+  color: white;
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-md);
+}
+.bulk-bar .btn { background: rgba(255,255,255,0.15); color: white; border: 1px solid rgba(255,255,255,0.3); }
+.bulk-bar .btn:hover { background: rgba(255,255,255,0.25); }
+
+/* ============ Screen: Document detail ============ */
+.detail-grid { display: grid; grid-template-columns: 2fr 1fr; gap: var(--space-md); }
+.timeline { list-style: none; padding: 0; margin: 0; position: relative; }
+.timeline::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 11px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--color-border);
+}
+.timeline li { position: relative; padding-inline-start: 32px; padding-bottom: var(--space-md); }
+.timeline-dot {
+  position: absolute;
+  inset-inline-start: 4px;
+  top: 4px;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  border: 3px solid var(--color-brand);
+}
+.timeline-dot.done { background: var(--color-brand); }
+.timeline-dot.pending { border-color: var(--color-border); }
+.timeline-title { font-weight: 500; font-size: var(--font-size-sm); }
+.timeline-meta { font-size: var(--font-size-xs); color: var(--color-foreground-muted); }
+
+.desc-list { display: grid; grid-template-columns: 140px 1fr; gap: var(--space-sm) var(--space-md); font-size: var(--font-size-sm); }
+.desc-list dt { color: var(--color-foreground-muted); }
+.desc-list dd { margin: 0; font-weight: 500; }
+
+.action-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  margin-top: var(--space-md);
+  box-shadow: var(--shadow-md);
+  flex-wrap: wrap;
+}
+.action-bar .grow { margin-inline-start: auto; display: flex; gap: var(--space-sm); }
+
+/* ============ Screen: Login ============ */
+.login-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 600px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+}
+.login-brand-panel {
+  background: linear-gradient(135deg, var(--color-brand) 0%, var(--color-brand-strong) 100%);
+  color: white;
+  padding: var(--space-2xl) var(--space-xl);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.login-brand-title { font-family: var(--font-display); font-size: 2.5rem; margin: 0; font-weight: 700; }
+.login-brand-tagline { font-size: var(--font-size-lg); opacity: 0.9; margin: var(--space-md) 0 0; }
+.login-features { list-style: none; padding: 0; margin: var(--space-xl) 0 0; display: flex; flex-direction: column; gap: var(--space-md); }
+.login-features li { display: flex; align-items: center; gap: var(--space-sm); font-size: var(--font-size-sm); opacity: 0.95; }
+.login-form-panel { background: var(--color-surface); padding: var(--space-2xl) var(--space-xl); display: flex; flex-direction: column; justify-content: center; }
+.login-form-panel h2 { font-family: var(--font-display); margin: 0 0 var(--space-xs); }
+.login-form-panel .desc { color: var(--color-foreground-muted); margin: 0 0 var(--space-xl); font-size: var(--font-size-sm); }
+
+/* ============ Screen: Settings hub ============ */
+.settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-md); }
+.settings-tile {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  cursor: pointer;
+  transition: all 0.15s;
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+.settings-tile:hover { border-color: var(--color-brand); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.settings-tile-icon {
+  width: 44px; height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--color-brand-muted);
+  color: var(--color-brand);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: var(--space-sm);
+}
+.settings-tile h3 { font-family: var(--font-display); font-size: var(--font-size-md); margin: 0 0 var(--space-xs); }
+.settings-tile p { color: var(--color-foreground-muted); font-size: var(--font-size-sm); margin: 0; }
+.settings-group-title { font-family: var(--font-display); font-size: var(--font-size-lg); margin: var(--space-xl) 0 var(--space-md); }
+.settings-group-title:first-child { margin-top: 0; }
+
+/* ============ Screen: Empty state ============ */
+.empty-state {
+  text-align: center;
+  padding: var(--space-2xl) var(--space-lg);
+  background: var(--color-surface);
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+}
+.empty-icon {
+  width: 72px; height: 72px;
+  border-radius: 50%;
+  background: var(--color-brand-muted);
+  color: var(--color-brand);
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto var(--space-md);
+}
+.empty-title { font-family: var(--font-display); font-size: var(--font-size-lg); margin: 0 0 var(--space-xs); }
+.empty-desc { color: var(--color-foreground-muted); max-width: 400px; margin: 0 auto var(--space-md); font-size: var(--font-size-sm); }
+
+/* ============ Utilities ============ */
+.stack-md > * + * { margin-top: var(--space-md); }
+.stack-sm > * + * { margin-top: var(--space-sm); }
+.row { display: flex; gap: var(--space-sm); align-items: center; flex-wrap: wrap; }
+.row-between { display: flex; gap: var(--space-sm); justify-content: space-between; align-items: center; flex-wrap: wrap; }
+.muted { color: var(--color-foreground-muted); }
+.mono { font-family: ui-monospace, monospace; font-size: var(--font-size-xs); }
+
+@media (max-width: 900px) {
+  .app-shell { grid-template-columns: 1fr; }
+  .app-sidebar { display: none; }
+  .dash-grid, .detail-grid, .login-layout { grid-template-columns: 1fr; }
+  .demo-panel { padding: var(--space-md); }
+}
+</style>
+</head>
+<body>
+
+<header class="demo-topbar">
+  <div>
+    <h1 class="demo-title">eInvoice — System Design Demo</h1>
+    <p class="demo-sub">مراجعة نظام التصميم والشاشات الأساسية قبل بدء التنفيذ</p>
+  </div>
+  <div class="demo-actions">
+    <button class="btn btn-secondary btn-sm" onclick="toggleDir()">
+      <span id="dir-label">LTR ↔ RTL</span>
+    </button>
+    <button class="btn btn-primary btn-sm" onclick="toggleTheme()">
+      <span id="theme-label">🌙 داكن</span>
+    </button>
+  </div>
+</header>
+
+<nav class="demo-nav" role="tablist" aria-label="شاشات العرض">
+  <button role="tab" aria-selected="true" data-tab="tokens">نظام التصميم</button>
+  <button role="tab" aria-selected="false" data-tab="dashboard">لوحة التحكم</button>
+  <button role="tab" aria-selected="false" data-tab="documents">قائمة المستندات</button>
+  <button role="tab" aria-selected="false" data-tab="document-detail">تفاصيل مستند</button>
+  <button role="tab" aria-selected="false" data-tab="settings">الإعدادات</button>
+  <button role="tab" aria-selected="false" data-tab="login">تسجيل الدخول</button>
+  <button role="tab" aria-selected="false" data-tab="empty">حالات فارغة</button>
+</nav>
+
+<!-- ============ TAB 1: Tokens ============ -->
+<section class="demo-panel" id="tab-tokens">
+  <h2 class="demo-section-title">نظام التصميم (Design Tokens)</h2>
+  <p class="demo-section-sub">الأساس اللي كل الشاشات تبني عليه: ألوان دلالية، مسافات ثابتة، ظلال، حواف، وطباعة موحّدة. أي تعديل مركزي هنا ينعكس على كل الواجهة.</p>
+
+  <div class="card stack-md">
+    <h3 class="card-title">ألوان الهوية</h3>
+    <div class="token-grid">
+      <div class="token-chip"><div class="token-swatch" style="background:var(--color-brand)"></div><p class="token-name">brand</p><p class="token-value">اللون الرئيسي</p></div>
+      <div class="token-chip"><div class="token-swatch" style="background:var(--color-brand-strong)"></div><p class="token-name">brand-strong</p><p class="token-value">Hover / نشط</p></div>
+      <div class="token-chip"><div class="token-swatch" style="background:var(--color-brand-muted)"></div><p class="token-name">brand-muted</p><p class="token-value">خلفيات هادئة</p></div>
+      <div class="token-chip"><div class="token-swatch" style="background:var(--color-surface); border:1px solid var(--color-border)"></div><p class="token-name">surface</p><p class="token-value">خلفية البطاقات</p></div>
+      <div class="token-chip"><div class="token-swatch" style="background:var(--color-background); border:1px solid var(--color-border)"></div><p class="token-name">background</p><p class="token-value">خلفية الصفحة</p></div>
+      <div class="token-chip"><div class="token-swatch" style="background:var(--color-border)"></div><p class="token-name">border</p><p class="token-value">حواف</p></div>
+    </div>
+  </div>
+
+  <div class="card stack-md" style="margin-top: var(--space-md)">
+    <h3 class="card-title">ألوان دلالية</h3>
+    <div class="token-grid">
+      <div class="token-chip"><div class="token-swatch" style="background:var(--color-success)"></div><p class="token-name">success</p><p class="token-value">نجاح / VALID</p></div>
+      <div class="token-chip"><div class="token-swatch" style="background:var(--color-warning)"></div><p class="token-name">warning</p><p class="token-value">تنبيه</p></div>
+      <div class="token-chip"><div class="token-swatch" style="background:var(--color-danger)"></div><p class="token-name">danger</p><p class="token-value">خطر / INVALID</p></div>
+      <div class="token-chip"><div class="token-swatch" style="background:var(--color-info)"></div><p class="token-name">info</p><p class="token-value">معلومة / SIGNED</p></div>
+    </div>
+  </div>
+
+  <div class="card stack-md" style="margin-top: var(--space-md)">
+    <h3 class="card-title">حالات مستندات ETA</h3>
+    <div class="row">
+      <span class="badge badge-draft">مسودة (DRAFT)</span>
+      <span class="badge badge-signed">مُوقّع (SIGNED)</span>
+      <span class="badge badge-submitted">مُقدَّم (SUBMITTED)</span>
+      <span class="badge badge-valid">صالح (VALID)</span>
+      <span class="badge badge-invalid">غير صالح (INVALID)</span>
+      <span class="badge badge-cancelled">مُلغَى (CANCELLED)</span>
+      <span class="badge badge-rejected">مرفوض (REJECTED)</span>
+    </div>
+  </div>
+
+  <div class="card stack-md" style="margin-top: var(--space-md)">
+    <h3 class="card-title">المسافات (Spacing scale)</h3>
+    <div>
+      <div class="spacing-row"><span class="spacing-label">--space-2xs</span><div class="spacing-bar" style="width: 2px"></div><span class="muted">2px</span></div>
+      <div class="spacing-row"><span class="spacing-label">--space-xs</span><div class="spacing-bar" style="width: 4px"></div><span class="muted">4px</span></div>
+      <div class="spacing-row"><span class="spacing-label">--space-sm</span><div class="spacing-bar" style="width: 8px"></div><span class="muted">8px</span></div>
+      <div class="spacing-row"><span class="spacing-label">--space-md</span><div class="spacing-bar" style="width: 16px"></div><span class="muted">16px</span></div>
+      <div class="spacing-row"><span class="spacing-label">--space-lg</span><div class="spacing-bar" style="width: 24px"></div><span class="muted">24px</span></div>
+      <div class="spacing-row"><span class="spacing-label">--space-xl</span><div class="spacing-bar" style="width: 40px"></div><span class="muted">40px</span></div>
+      <div class="spacing-row"><span class="spacing-label">--space-2xl</span><div class="spacing-bar" style="width: 64px"></div><span class="muted">64px</span></div>
+    </div>
+  </div>
+
+  <div class="card stack-md" style="margin-top: var(--space-md)">
+    <h3 class="card-title">مكونات أساسية (Primitives)</h3>
+    <p class="muted" style="font-size: var(--font-size-sm)">أزرار</p>
+    <div class="row">
+      <button class="btn btn-primary">حفظ التغييرات</button>
+      <button class="btn btn-secondary">إلغاء</button>
+      <button class="btn btn-ghost">تخطي</button>
+      <button class="btn btn-danger">حذف</button>
+      <button class="btn btn-primary" disabled>معطّل</button>
+      <button class="btn btn-primary btn-sm">صغير</button>
+      <button class="btn btn-primary btn-lg">كبير</button>
+    </div>
+    <p class="muted" style="font-size: var(--font-size-sm); margin-top: var(--space-md)">حقول</p>
+    <div style="max-width: 400px">
+      <div class="field">
+        <label class="field-label">البريد الإلكتروني</label>
+        <input class="input" type="email" placeholder="name@company.com" />
+        <span class="field-hint">هنستخدمه للتنبيهات فقط</span>
+      </div>
+      <div class="field">
+        <label class="field-label">كلمة المرور</label>
+        <input class="input" type="password" value="wrong" />
+        <span class="field-error">كلمة المرور لازم تكون 8 حروف على الأقل</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TAB 2: Dashboard ============ -->
+<section class="demo-panel" id="tab-dashboard" hidden>
+  <h2 class="demo-section-title">لوحة التحكم (Home)</h2>
+  <p class="demo-section-sub">شاشة أول ما المستخدم يدخل: أرقام سريعة + أول خطوات التفعيل + آخر النشاطات + حالة اتصال ETA.</p>
+
+  <div class="app-shell">
+    <aside class="app-sidebar">
+      <div class="app-brand">eInvoice</div>
+      <div class="nav-section">
+        <div class="nav-section-title">المبيعات</div>
+        <a class="nav-link" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>الرئيسية</a>
+        <a class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5"/></svg>المستندات</a>
+        <a class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>العملاء</a>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-title">المشتريات</div>
+        <a class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6h15l-1.5 9H8L6 6z"/></svg>المشتريات المستلمة</a>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-title">حركة البيانات</div>
+        <a class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M8 11l4 4 4-4"/></svg>استيراد</a>
+        <a class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3M8 7l4-4 4 4"/></svg>تصدير</a>
+        <a class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-15.5 6.4M3 12a9 9 0 0 1 15.5-6.4"/></svg>المزامنة</a>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-title">التحليلات</div>
+        <a class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5M4 19h16"/></svg>التحليلات</a>
+        <a class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/></svg>التقارير</a>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-title">الإدارة</div>
+        <a class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3"/></svg>الإعدادات</a>
+      </div>
+    </aside>
+    <div class="app-main">
+      <div class="app-topbar">
+        <div class="tenant-pill">🏢 شركة الأمل التجارية</div>
+        <div class="tenant-pill">🏬 الفرع الرئيسي</div>
+        <span class="eta-badge">ETA · Sandbox</span>
+        <div style="margin-inline-start:auto" class="row">
+          <button class="btn btn-ghost btn-sm">🔍 بحث</button>
+          <button class="btn btn-ghost btn-sm">🌙</button>
+          <button class="btn btn-ghost btn-sm">AR / EN</button>
+          <div class="user-menu"><div class="avatar">م.ط</div><span style="font-size: var(--font-size-sm)">مصطفى</span></div>
+        </div>
+      </div>
+      <div class="app-content">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">مرحبًا، مصطفى 👋</h1>
+            <p class="page-subtitle">إليك ملخص اليوم على مستوى شركة الأمل التجارية</p>
+          </div>
+          <div class="row">
+            <button class="btn btn-secondary">استيراد CSV</button>
+            <button class="btn btn-primary">➕ مستند جديد</button>
+          </div>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat-card">
+            <p class="stat-label">مستندات الشهر</p>
+            <p class="stat-value">1,284</p>
+            <span class="stat-delta up">▲ 12% عن الشهر السابق</span>
+          </div>
+          <div class="stat-card">
+            <p class="stat-label">مقدّم إلى ETA</p>
+            <p class="stat-value">1,197</p>
+            <span class="stat-delta up">▲ 8% </span>
+          </div>
+          <div class="stat-card">
+            <p class="stat-label">مرفوض</p>
+            <p class="stat-value" style="color: var(--color-danger)">14</p>
+            <span class="stat-delta down">▼ يحتاج مراجعة</span>
+          </div>
+          <div class="stat-card">
+            <p class="stat-label">مشتريات مستلمة</p>
+            <p class="stat-value">302</p>
+            <span class="stat-delta flat">— بدون تغيير</span>
+          </div>
+        </div>
+
+        <div class="dash-grid">
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h3 class="card-title">آخر المستندات</h3>
+                <p class="card-desc">أحدث 5 مستندات على النظام</p>
+              </div>
+              <a class="btn btn-ghost btn-sm">عرض الكل ←</a>
+            </div>
+            <div class="table-wrap" style="border:none">
+              <table class="data-table">
+                <thead><tr><th>الرقم الداخلي</th><th>المستلم</th><th>الحالة</th><th class="num">الإجمالي</th></tr></thead>
+                <tbody>
+                  <tr><td class="mono">INV-2026-01284</td><td>شركة النور</td><td><span class="badge badge-valid">صالح</span></td><td class="num">45,200.00</td></tr>
+                  <tr><td class="mono">INV-2026-01283</td><td>مؤسسة السلام</td><td><span class="badge badge-submitted">مُقدَّم</span></td><td class="num">12,850.00</td></tr>
+                  <tr><td class="mono">INV-2026-01282</td><td>شركة الفجر</td><td><span class="badge badge-signed">مُوقّع</span></td><td class="num">8,400.00</td></tr>
+                  <tr><td class="mono">INV-2026-01281</td><td>محلات ابن سينا</td><td><span class="badge badge-invalid">غير صالح</span></td><td class="num">3,200.00</td></tr>
+                  <tr><td class="mono">INV-2026-01280</td><td>شركة الرشيد</td><td><span class="badge badge-draft">مسودة</span></td><td class="num">72,900.00</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="stack-md">
+            <div class="card">
+              <h3 class="card-title">إجراءات سريعة</h3>
+              <div class="quick-actions" style="margin-top: var(--space-md)">
+                <button class="quick-action"><span class="quick-action-icon">➕</span>مستند جديد</button>
+                <button class="quick-action"><span class="quick-action-icon">↑</span>استيراد CSV</button>
+                <button class="quick-action"><span class="quick-action-icon">⟳</span>مزامنة الآن</button>
+                <button class="quick-action"><span class="quick-action-icon">📊</span>تقرير سريع</button>
+              </div>
+            </div>
+            <div class="card">
+              <h3 class="card-title">قائمة التفعيل</h3>
+              <p class="card-desc" style="margin-bottom: var(--space-md)">3 من 4 خطوات مكتملة</p>
+              <ul class="checklist">
+                <li><span class="check-dot done">✓</span>بيانات الشركة مكتملة</li>
+                <li><span class="check-dot done">✓</span>اعتمادات ETA مفعلة</li>
+                <li><span class="check-dot done">✓</span>أول مستند مقدّم</li>
+                <li><span class="check-dot"></span>دعوة أول مستخدم</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TAB 3: Documents list ============ -->
+<section class="demo-panel" id="tab-documents" hidden>
+  <h2 class="demo-section-title">قائمة المستندات</h2>
+  <p class="demo-section-sub">جدول موحّد بفلاتر + شريط إجراءات جماعية يظهر لمّا تختار سطور. نفس النمط بيتكرر في المشتريات والعملاء والاستيراد.</p>
+
+  <div class="page-header">
+    <div>
+      <div class="breadcrumbs"><a>الرئيسية</a> › <span>المستندات</span></div>
+      <h1 class="page-title">المستندات</h1>
+      <p class="page-subtitle">1,284 مستند · آخر مزامنة قبل 3 دقائق</p>
+    </div>
+    <div class="row">
+      <button class="btn btn-secondary">تصدير</button>
+      <button class="btn btn-primary">➕ مستند جديد</button>
+    </div>
+  </div>
+
+  <div class="filter-bar">
+    <input class="input" placeholder="🔍 ابحث برقم المستند أو اسم العميل..." style="max-width: 320px" />
+    <span class="filter-chip active">الكل · 1284</span>
+    <span class="filter-chip">مسودة · 42</span>
+    <span class="filter-chip">مُوقّع · 18</span>
+    <span class="filter-chip">مُقدَّم · 12</span>
+    <span class="filter-chip">صالح · 1197</span>
+    <span class="filter-chip">غير صالح · 15</span>
+    <span class="filter-chip">مرفوض · 0</span>
+    <span style="margin-inline-start:auto" class="row">
+      <button class="btn btn-ghost btn-sm">📅 آخر 30 يوم</button>
+      <button class="btn btn-ghost btn-sm">إعادة تعيين</button>
+    </span>
+  </div>
+
+  <div class="bulk-bar">
+    <span>✓ تم اختيار 3 مستندات</span>
+    <button class="btn btn-sm">تقديم دفعة إلى ETA</button>
+    <button class="btn btn-sm">تحديث الحالة</button>
+    <button class="btn btn-sm">تنزيل الطباعة</button>
+    <button class="btn btn-sm" style="background: rgba(255,100,100,0.25)">إلغاء</button>
+  </div>
+
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width: 32px"><input type="checkbox" checked/></th>
+          <th>الرقم الداخلي</th>
+          <th>المستلم</th>
+          <th>تاريخ الإصدار</th>
+          <th>الحالة</th>
+          <th>ETA UUID</th>
+          <th class="num">الإجمالي</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><input type="checkbox" checked/></td><td class="mono">INV-2026-01284</td><td>شركة النور<br><span class="muted" style="font-size: var(--font-size-xs)">100-200-300</span></td><td>1 سبتمبر 2026<br><span class="muted" style="font-size: var(--font-size-xs)">14:22</span></td><td><span class="badge badge-valid">صالح</span></td><td class="mono">A1B2...F9E8 📋</td><td class="num">45,200.00 EGP</td><td><div class="row-actions"><button class="btn btn-ghost btn-sm">⋯</button></div></td></tr>
+        <tr><td><input type="checkbox" checked/></td><td class="mono">INV-2026-01283</td><td>مؤسسة السلام<br><span class="muted" style="font-size: var(--font-size-xs)">200-300-400</span></td><td>1 سبتمبر 2026</td><td><span class="badge badge-submitted">مُقدَّم</span></td><td class="mono">C3D4...E5F6 📋</td><td class="num">12,850.00 EGP</td><td><div class="row-actions"><button class="btn btn-ghost btn-sm">⋯</button></div></td></tr>
+        <tr><td><input type="checkbox" checked/></td><td class="mono">INV-2026-01282</td><td>شركة الفجر</td><td>1 سبتمبر 2026</td><td><span class="badge badge-signed">مُوقّع</span> <span class="badge badge-plain" title="متأخر">⚠︎ متأخر</span></td><td class="muted">—</td><td class="num">8,400.00 EGP</td><td><div class="row-actions"><button class="btn btn-ghost btn-sm">⋯</button></div></td></tr>
+        <tr><td><input type="checkbox"/></td><td class="mono">INV-2026-01281</td><td>محلات ابن سينا</td><td>31 أغسطس 2026</td><td><span class="badge badge-invalid">غير صالح</span></td><td class="mono">B7C8...A9B0 📋</td><td class="num">3,200.00 EGP</td><td><div class="row-actions"><button class="btn btn-ghost btn-sm">⋯</button></div></td></tr>
+        <tr><td><input type="checkbox"/></td><td class="mono">INV-2026-01280</td><td>شركة الرشيد</td><td>31 أغسطس 2026</td><td><span class="badge badge-draft">مسودة</span></td><td class="muted">—</td><td class="num">72,900.00 EGP</td><td><div class="row-actions"><button class="btn btn-ghost btn-sm">⋯</button></div></td></tr>
+        <tr><td><input type="checkbox"/></td><td class="mono">INV-2026-01279</td><td>شركة الأندلس</td><td>30 أغسطس 2026</td><td><span class="badge badge-cancelled">مُلغَى</span></td><td class="mono">D9E0...C1D2 📋</td><td class="num">1,050.00 EGP</td><td><div class="row-actions"><button class="btn btn-ghost btn-sm">⋯</button></div></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="row-between" style="margin-top: var(--space-md)">
+    <span class="muted" style="font-size: var(--font-size-sm)">عرض 1–6 من 1,284</span>
+    <div class="row">
+      <select class="select" style="width:auto">
+        <option>50 / صفحة</option><option>100 / صفحة</option>
+      </select>
+      <button class="btn btn-secondary btn-sm">→ السابق</button>
+      <button class="btn btn-secondary btn-sm">التالي ←</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TAB 4: Document detail ============ -->
+<section class="demo-panel" id="tab-document-detail" hidden>
+  <h2 class="demo-section-title">تفاصيل مستند</h2>
+  <p class="demo-section-sub">شاشة تفصيلية لمستند واحد: ملخص + خط زمني + سطور المستند + إجراءات مثبتة أسفل الصفحة.</p>
+
+  <div class="page-header">
+    <div>
+      <div class="breadcrumbs"><a>المستندات</a> › <span>INV-2026-01284</span></div>
+      <h1 class="page-title">فاتورة INV-2026-01284</h1>
+      <div class="row" style="margin-top: var(--space-xs)">
+        <span class="badge badge-valid">صالح لدى ETA</span>
+        <span class="muted" style="font-size: var(--font-size-sm)">آخر تحديث: منذ ٥ دقائق</span>
+      </div>
+    </div>
+    <div class="row">
+      <button class="btn btn-secondary">📄 تنزيل الطباعة</button>
+      <button class="btn btn-secondary">🔍 معاينة PDF</button>
+    </div>
+  </div>
+
+  <div class="detail-grid">
+    <div class="stack-md">
+      <div class="card">
+        <h3 class="card-title">سطور الفاتورة</h3>
+        <div class="table-wrap" style="border:none; margin-top: var(--space-sm)">
+          <table class="data-table">
+            <thead><tr><th>الوصف</th><th>الكود</th><th class="num">الكمية</th><th class="num">السعر</th><th class="num">الضريبة</th><th class="num">الإجمالي</th></tr></thead>
+            <tbody>
+              <tr><td>خدمة استشارية — شهر أغسطس</td><td class="mono">SERV-001</td><td class="num">1</td><td class="num">35,000.00</td><td class="num">14% VAT</td><td class="num">39,900.00</td></tr>
+              <tr><td>رخصة سنوية</td><td class="mono">LIC-2026</td><td class="num">1</td><td class="num">4,650.00</td><td class="num">14% VAT</td><td class="num">5,301.00</td></tr>
+            </tbody>
+            <tfoot>
+              <tr><td colspan="5" style="text-align: end">المجموع قبل الضريبة</td><td class="num">39,650.00</td></tr>
+              <tr><td colspan="5" style="text-align: end">الضريبة (14%)</td><td class="num">5,551.00</td></tr>
+              <tr><td colspan="5" style="text-align: end; font-weight: 700">الإجمالي</td><td class="num" style="font-weight: 700">45,201.00 EGP</td></tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 class="card-title">استجابة ETA</h3>
+        <div class="desc-list">
+          <dt>UUID</dt><dd class="mono">A1B2C3D4-E5F6-7890-ABCD-EF1234567890 📋</dd>
+          <dt>Long ID</dt><dd class="mono">ATABC123XYZ456...</dd>
+          <dt>قُدِّم في</dt><dd>1 سبتمبر 2026 · 14:23</dd>
+          <dt>مقدَّم بواسطة</dt><dd>mostafa@company.com</dd>
+        </div>
+      </div>
+    </div>
+
+    <div class="stack-md">
+      <div class="card">
+        <h3 class="card-title">الملخص</h3>
+        <dl class="desc-list" style="margin-top: var(--space-sm)">
+          <dt>المستلم</dt><dd>شركة النور</dd>
+          <dt>الرقم الضريبي</dt><dd class="mono">100-200-300</dd>
+          <dt>تاريخ الإصدار</dt><dd>1 سبتمبر 2026</dd>
+          <dt>الفرع</dt><dd>الرئيسي</dd>
+          <dt>البيئة</dt><dd><span class="eta-badge">Sandbox</span></dd>
+        </dl>
+      </div>
+      <div class="card">
+        <h3 class="card-title">الخط الزمني</h3>
+        <ul class="timeline" style="margin-top: var(--space-sm)">
+          <li><span class="timeline-dot done"></span><div class="timeline-title">تم الإنشاء</div><div class="timeline-meta">1 سبت · 14:00 · مصطفى</div></li>
+          <li><span class="timeline-dot done"></span><div class="timeline-title">تم التوقيع</div><div class="timeline-meta">1 سبت · 14:20 · Agent-01</div></li>
+          <li><span class="timeline-dot done"></span><div class="timeline-title">قُدِّم إلى ETA</div><div class="timeline-meta">1 سبت · 14:23 · Sandbox</div></li>
+          <li><span class="timeline-dot done"></span><div class="timeline-title">اعتمدته ETA</div><div class="timeline-meta">1 سبت · 14:23</div></li>
+          <li><span class="timeline-dot pending"></span><div class="timeline-title">في انتظار الأرشفة</div><div class="timeline-meta muted">—</div></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="action-bar">
+    <button class="btn btn-secondary">حفظ كمسودة</button>
+    <button class="btn btn-ghost">مضاعفة</button>
+    <div class="grow">
+      <button class="btn btn-danger">إلغاء لدى ETA</button>
+      <button class="btn btn-primary">تحديث الحالة</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TAB 5: Settings ============ -->
+<section class="demo-panel" id="tab-settings" hidden>
+  <h2 class="demo-section-title">مركز الإعدادات</h2>
+  <p class="demo-section-sub">صفحة hub بتجمع كل الإعدادات في ٣ مجموعات واضحة بدل قائمة طويلة.</p>
+
+  <div class="page-header">
+    <div>
+      <div class="breadcrumbs"><a>الرئيسية</a> › <span>الإعدادات</span></div>
+      <h1 class="page-title">الإعدادات</h1>
+      <p class="page-subtitle">إدارة بيانات الشركة، اتصال ETA، والكتالوج</p>
+    </div>
+  </div>
+
+  <h3 class="settings-group-title">الشركة</h3>
+  <div class="settings-grid">
+    <a class="settings-tile"><div class="settings-tile-icon">🏢</div><h3>بيانات الشركة</h3><p>الاسم التجاري، الرقم الضريبي، العنوان، وسائل الاتصال</p></a>
+    <a class="settings-tile"><div class="settings-tile-icon">🏬</div><h3>الفروع</h3><p>4 فروع مسجلة</p></a>
+    <a class="settings-tile"><div class="settings-tile-icon">#</div><h3>ترقيم الفواتير</h3><p>INV-YYYY-NNNNN</p></a>
+  </div>
+
+  <h3 class="settings-group-title">مصلحة الضرائب</h3>
+  <div class="settings-grid">
+    <a class="settings-tile" style="border-color: var(--color-warning)">
+      <div class="settings-tile-icon" style="background: var(--color-warning-muted); color: var(--color-warning)">🔐</div>
+      <h3>اعتمادات ETA</h3>
+      <p>البيئة: <b>Sandbox</b> · آخر اختبار ناجح: قبل ساعتين</p>
+    </a>
+    <a class="settings-tile"><div class="settings-tile-icon">📋</div><h3>أنواع المستندات</h3><p>مزامنة تلقائية من ETA · 12 نوع</p></a>
+  </div>
+
+  <h3 class="settings-group-title">الكتالوج</h3>
+  <div class="settings-grid">
+    <a class="settings-tile"><div class="settings-tile-icon">💱</div><h3>العملات</h3><p>EGP (افتراضي) · USD · EUR · SAR</p></a>
+    <a class="settings-tile"><div class="settings-tile-icon">📦</div><h3>كودات الأصناف</h3><p>342 صنف مسجل</p></a>
+  </div>
+</section>
+
+<!-- ============ TAB 6: Login ============ -->
+<section class="demo-panel" id="tab-login" hidden>
+  <h2 class="demo-section-title">تسجيل الدخول</h2>
+  <p class="demo-section-sub">شاشة مقسّمة عمودين: هوية بصرية قوية + نموذج نظيف. تصبح عمود واحد على الموبايل.</p>
+
+  <div class="login-layout">
+    <div class="login-brand-panel">
+      <div>
+        <h1 class="login-brand-title">eInvoice</h1>
+        <p class="login-brand-tagline">منصة الفوترة الإلكترونية لمصلحة الضرائب المصرية</p>
+      </div>
+      <ul class="login-features">
+        <li>✓ توقيع وتقديم تلقائي إلى ETA</li>
+        <li>✓ متعدد الفروع والمستأجرين</li>
+        <li>✓ يعمل offline ويزامن تلقائيًا</li>
+        <li>✓ تقارير مطابقة لمتطلبات ETA</li>
+      </ul>
+      <p style="opacity: 0.75; font-size: var(--font-size-xs); margin: 0">© 2026 eInvoice</p>
+    </div>
+    <div class="login-form-panel">
+      <h2>مرحبًا بعودتك</h2>
+      <p class="desc">سجّل الدخول بحسابك للمتابعة</p>
+      <form onsubmit="event.preventDefault()">
+        <div class="field">
+          <label class="field-label">البريد الإلكتروني</label>
+          <input class="input" type="email" placeholder="name@company.com" />
+        </div>
+        <div class="field">
+          <label class="field-label">كلمة المرور</label>
+          <input class="input" type="password" placeholder="••••••••" />
+          <span class="field-hint">8 حروف على الأقل</span>
+        </div>
+        <div class="row-between" style="margin-bottom: var(--space-md)">
+          <label style="font-size: var(--font-size-sm)"><input type="checkbox"/> تذكرني</label>
+          <a style="color: var(--color-brand); font-size: var(--font-size-sm)">نسيت كلمة المرور؟</a>
+        </div>
+        <button class="btn btn-primary btn-lg" style="width: 100%">تسجيل الدخول</button>
+        <p style="text-align: center; margin-top: var(--space-md); font-size: var(--font-size-sm)" class="muted">
+          ليس لديك حساب؟ <a style="color: var(--color-brand)">أنشئ حسابًا</a>
+        </p>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TAB 7: Empty state ============ -->
+<section class="demo-panel" id="tab-empty" hidden>
+  <h2 class="demo-section-title">حالات فارغة / تحميل / خطأ</h2>
+  <p class="demo-section-sub">كل صفحة عندها ٤ حالات جاهزة: تحميل (Skeleton)، فارغة، خطأ، نجاح. اللي تحت مثال على كل واحدة.</p>
+
+  <div class="stack-md">
+    <div class="card">
+      <h3 class="card-title">حالة فارغة</h3>
+      <div class="empty-state" style="margin-top: var(--space-md)">
+        <div class="empty-icon">📄</div>
+        <h4 class="empty-title">لا توجد مستندات بعد</h4>
+        <p class="empty-desc">ابدأ بإنشاء أول مستند لتظهر هنا. تقدر كمان تستورد دفعة واحدة من ملف CSV.</p>
+        <div class="row" style="justify-content: center">
+          <button class="btn btn-primary">➕ مستند جديد</button>
+          <button class="btn btn-secondary">استيراد CSV</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title">حالة تحميل (Skeleton)</h3>
+      <div class="stack-sm" style="margin-top: var(--space-md)">
+        <div style="height: 20px; background: var(--color-brand-muted); border-radius: 4px; width: 40%; opacity: 0.5"></div>
+        <div style="height: 16px; background: var(--color-brand-muted); border-radius: 4px; width: 80%; opacity: 0.5"></div>
+        <div style="height: 16px; background: var(--color-brand-muted); border-radius: 4px; width: 65%; opacity: 0.5"></div>
+        <div style="height: 16px; background: var(--color-brand-muted); border-radius: 4px; width: 90%; opacity: 0.5"></div>
+      </div>
+    </div>
+
+    <div class="card" style="border-color: var(--color-danger); background: var(--color-danger-muted)">
+      <h3 class="card-title" style="color: var(--color-danger)">حالة خطأ</h3>
+      <p style="margin: var(--space-sm) 0 var(--space-md); color: var(--color-foreground)">تعذّر تحميل المستندات. تحقّق من اتصالك بالإنترنت وحاول مرة أخرى.</p>
+      <button class="btn btn-danger btn-sm">↻ إعادة المحاولة</button>
+    </div>
+  </div>
+</section>
+
+<script>
+// Tabs
+const tabs = document.querySelectorAll('[role="tab"]');
+tabs.forEach(t => t.addEventListener('click', () => {
+  tabs.forEach(x => x.setAttribute('aria-selected', 'false'));
+  t.setAttribute('aria-selected', 'true');
+  document.querySelectorAll('.demo-panel').forEach(p => p.hidden = true);
+  document.getElementById('tab-' + t.dataset.tab).hidden = false;
+  window.scrollTo({top: 0, behavior: 'smooth'});
+}));
+
+// Theme
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute('data-theme');
+  const next = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  document.getElementById('theme-label').textContent = next === 'dark' ? '☀️ فاتح' : '🌙 داكن';
+}
+
+// Direction
+function toggleDir() {
+  const cur = document.documentElement.getAttribute('dir');
+  const next = cur === 'rtl' ? 'ltr' : 'rtl';
+  document.documentElement.setAttribute('dir', next);
+  document.documentElement.setAttribute('lang', next === 'rtl' ? 'ar' : 'en');
+  document.getElementById('dir-label').textContent = next === 'rtl' ? 'LTR ↔ RTL' : 'RTL ↔ LTR';
+}
+</script>
+</body>
+</html>

@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { checkLateSubmission } from '@einvoice/eta-core';
 import { ApiError } from '@/lib/api/client';
 import {
+  createReturnCreditNote,
   deleteDocument,
   downloadLocalPrintout,
   latestSalesSync,
@@ -27,6 +28,8 @@ import {
   type StatusRefreshBatchResult,
 } from '@/lib/api/submissions';
 import { LocalPdfPreviewModal } from '@/components/local-pdf-preview-modal';
+import { canCreateReturnCreditNote } from '@/lib/document-actions';
+import { resolveDocumentStatus } from '@/lib/document-status-display';
 import { formatMoneyDisplay } from '@/lib/format-number';
 
 type DocRow = DocumentListItem;
@@ -492,6 +495,24 @@ export default function DocumentsPage() {
       triggerBrowserDownload(blob, filename);
     } catch (e) {
       setError(e instanceof Error ? e.message : t('downloadFailed'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runReturnOne = async (id: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await createReturnCreditNote(id);
+      const newId = String(created.id ?? '');
+      if (!newId) {
+        setError(t('returnCreditNoteFailed'));
+        return;
+      }
+      router.push(`/${locale}/documents/${newId}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('returnCreditNoteFailed'));
     } finally {
       setBusy(false);
     }
@@ -1039,9 +1060,9 @@ export default function DocumentsPage() {
                   </td>
                   <td className={tdClass}>
                     <span
-                      className={`inline-block rounded px-token-xs text-token-xs ${statusBadgeClass(doc.status)}`}
+                      className={`inline-block rounded px-token-xs text-token-xs ${statusBadgeClass(resolveDocumentStatus(doc.status, doc.etaStatus))}`}
                     >
-                      {statusLabel(doc.status)}
+                      {statusLabel(resolveDocumentStatus(doc.status, doc.etaStatus))}
                     </span>
                     {doc.needsAttention ? (
                       <span className="ms-token-xs text-token-xs text-amber-800">
@@ -1088,6 +1109,10 @@ export default function DocumentsPage() {
                           void runDownloadPrintout(doc.id);
                           return;
                         }
+                        if (action === 'return') {
+                          void runReturnOne(doc.id);
+                          return;
+                        }
                         if (action === 'cancel') {
                           void runCancelOne(doc.id);
                           return;
@@ -1118,6 +1143,13 @@ export default function DocumentsPage() {
                       ) : null}
                       {canDownloadEta(doc.status, doc.etaUuid) ? (
                         <option value="printout">{t('downloadPrintout')}</option>
+                      ) : null}
+                      {canCreateReturnCreditNote(
+                        doc.kind,
+                        resolveDocumentStatus(doc.status, doc.etaStatus),
+                        doc.etaUuid,
+                      ) ? (
+                        <option value="return">{t('returnCreditNote')}</option>
                       ) : null}
                       {canCancel(doc.status, doc.etaUuid) ? (
                         <option value="cancel">{t('cancelDocument')}</option>

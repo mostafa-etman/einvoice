@@ -7,8 +7,11 @@ describe('extractEtaDocumentStatus', () => {
     expect(extractEtaDocumentStatus({ status: 'Valid' })).toBe('Valid');
     expect(extractEtaDocumentStatus({ Status: 'Invalid' })).toBe('Invalid');
     expect(
-      extractEtaDocumentStatus({ document: { status: 'Submitted' } }),
-    ).toBe('Submitted');
+      extractEtaDocumentStatus({ documentExtended: { status: 'Cancelled' } }),
+    ).toBe('Cancelled');
+    expect(
+      extractEtaDocumentStatus({ DocumentStatus: 'Valid' }),
+    ).toBe('Valid');
   });
 
   it('returns null when missing', () => {

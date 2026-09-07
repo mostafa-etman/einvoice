@@ -7,15 +7,10 @@ import {
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { EtaService } from '../eta/eta.service';
-import {
-  buildEtaSearchWindows,
-  EtaDocumentsSearchClient,
-} from '../eta/eta-documents-search.client';
+import { EtaDocumentsSearchClient } from '../eta/eta-documents-search.client';
 import { EtaDocumentDetailsClient } from '../eta/eta-document-details.client';
-import {
-  ETA_STATUS_TO_LOCAL,
-  mapEtaIssuedDetailsToImport,
-} from './issued-document-import.mapper';
+import { mapEtaIssuedDetailsToImport } from './issued-document-import.mapper';
+import { mapEtaStatusToLocal, shouldApplyMappedEtaStatus } from '../eta/eta-status-map';
 import {
   isSyncRunStale,
   SYNC_RESET_ERROR,
@@ -25,11 +20,16 @@ import {
 import {
   DEFAULT_SYNC_LOOKBACK_DAYS,
   defaultLookbackRange,
-  MAX_SYNC_WINDOWS,
   parseSyncDateRange,
   type SyncDateRange,
   type SyncDateRangeInput,
 } from '../sync/sync-range';
+import {
+  collectEtaSearchRows,
+  ETA_SYNC_DATE_FIELD,
+  retryOnEtaRateLimit,
+  syncSearchWindows,
+} from '../sync/eta-sync-collect';
 import {
   ETA_RATE_LIMIT_MESSAGE,
   isEtaRateLimitError,
@@ -310,52 +310,31 @@ export class SalesSyncService {
 
       const range =
         rangeOverride ?? (await this.resolveSyncRange(tenantId));
-      const windows = buildEtaSearchWindows(range.from, range.to).slice(
-        -MAX_SYNC_WINDOWS,
-      );
+      const windows = syncSearchWindows(range.from, range.to);
       this.logger.log(
-        `Sales sync ${tenantId} windows=${windows.length} from=${range.from.toISOString()} to=${range.to.toISOString()}`,
+        `Sales sync ${tenantId} windows=${windows.length} from=${range.from.toISOString()} to=${range.to.toISOString()} dateField=${ETA_SYNC_DATE_FIELD}`,
       );
 
-      for (const win of windows) {
-        // Reuse cache; cheap if token still valid.
-        accessToken = await this.eta.getAccessToken(tenantId);
-        let token: string | null | undefined = undefined;
-        try {
-          do {
-            await paceEtaSyncRequest();
-            const page = await clients.search.searchSent(accessToken, {
-              pageSize: 100,
-              continuationToken: token || undefined,
-              window: { from: win.from, to: win.to, dateField: 'submission' },
-            });
-            for (const row of page.result) {
-              const uuid = String(
-                row.uuid ??
-                  row.UUID ??
-                  row.documentUUID ??
-                  row.documentUuid ??
-                  '',
-              ).trim();
-              if (!uuid) {
-                counters.skippedCount += 1;
-                continue;
-              }
-              byUuid.set(uuid, row);
-            }
-            token = page.continuationToken;
-          } while (token);
-        } catch (err) {
-          if (isEtaRateLimitError(err)) {
-            rateLimited = true;
-            errors.push(ETA_RATE_LIMIT_MESSAGE);
-            this.logger.warn(
-              `Sales sync rate-limited during search; continuing with ${byUuid.size} uuid(s) collected`,
-            );
-            break;
-          }
-          throw err;
-        }
+      const collected = await collectEtaSearchRows({
+        windows,
+        searchPage: async ({ continuationToken, window }) => {
+          accessToken = await this.eta.getAccessToken(tenantId);
+          return clients.search.searchSent(accessToken, {
+            pageSize: 100,
+            continuationToken,
+            window: {
+              from: window.from,
+              to: window.to,
+              dateField: ETA_SYNC_DATE_FIELD,
+            },
+          });
+        },
+      });
+      for (const [uuid, row] of collected.byUuid) byUuid.set(uuid, row);
+      counters.skippedCount += collected.skippedCount;
+      if (collected.searchIncomplete) {
+        rateLimited = true;
+        errors.push(...collected.errors);
       }
 
       counters.fetchedCount = byUuid.size;
@@ -367,12 +346,14 @@ export class SalesSyncService {
           if (detailIndex % 25 === 0) {
             accessToken = await this.eta.getAccessToken(tenantId);
           }
-          const outcome = await this.upsertIssued(
-            tenantId,
-            accessToken,
-            row,
-            clients.details,
-            etaEnvironment,
+          const outcome = await retryOnEtaRateLimit(() =>
+            this.upsertIssued(
+              tenantId,
+              accessToken,
+              row,
+              clients.details,
+              etaEnvironment,
+            ),
           );
           if (outcome === 'new') counters.newCount += 1;
           else if (outcome === 'updated') counters.updatedCount += 1;
@@ -382,7 +363,6 @@ export class SalesSyncService {
           if (isEtaRateLimitError(err)) {
             rateLimited = true;
             errors.push(`${uuid}: ${ETA_RATE_LIMIT_MESSAGE}`);
-            // Keep going — later UUIDs may already be local (skip details).
             continue;
           }
           const msg = err instanceof Error ? err.message : String(err);
@@ -391,15 +371,12 @@ export class SalesSyncService {
       }
 
       const imported = counters.newCount + counters.updatedCount;
-      const failed =
-        !rateLimited &&
-        counters.failedCount > 0 &&
-        imported === 0 &&
-        byUuid.size > 0;
+      const incomplete =
+        collected.searchIncomplete || counters.failedCount > 0;
       const summaryParts = [
         ...errors.slice(0, 15),
-        rateLimited && imported > 0
-          ? `${ETA_RATE_LIMIT_MESSAGE} (partial: ${imported} saved)`
+        incomplete && imported > 0
+          ? `Incomplete sync (partial: ${imported} saved; retry to resume)`
           : null,
       ].filter(Boolean) as string[];
 
@@ -407,7 +384,7 @@ export class SalesSyncService {
         tx.issuedDocumentSyncRun.update({
           where: { id: runId },
           data: {
-            status: failed ? 'FAILED' : 'SUCCEEDED',
+            status: incomplete ? 'FAILED' : 'SUCCEEDED',
             finishedAt: new Date(),
             ...counters,
             errorSummary: summaryParts.length
@@ -420,8 +397,8 @@ export class SalesSyncService {
       );
 
       await this.audit.write({
-        action: failed ? 'sales.sync.failure' : 'sales.sync.success',
-        outcome: failed ? 'failure' : 'success',
+        action: incomplete ? 'sales.sync.failure' : 'sales.sync.success',
+        outcome: incomplete ? 'failure' : 'success',
         actorUserId: triggeredByUserId,
         tenantId,
         resourceType: 'issued_document_sync_run',
@@ -429,6 +406,7 @@ export class SalesSyncService {
         metadata: {
           ...counters,
           rateLimited,
+          searchIncomplete: collected.searchIncomplete,
           rangeFrom: range.from.toISOString(),
           rangeTo: range.to.toISOString(),
         },
@@ -444,13 +422,12 @@ export class SalesSyncService {
         tx.issuedDocumentSyncRun.update({
           where: { id: runId },
           data: {
-            // Partial imports stay; mark SUCCEEDED when something was saved.
-            status: imported > 0 ? 'SUCCEEDED' : 'FAILED',
+            status: 'FAILED',
             finishedAt: new Date(),
             ...counters,
             errorSummary: (
               imported > 0
-                ? `${message} (partial: ${imported} saved)`
+                ? `${message} (partial: ${imported} saved; retry to resume)`
                 : message
             ).slice(0, 1000),
           },
@@ -471,8 +448,8 @@ export class SalesSyncService {
   }
 
   /**
-   * Prefer explicit UI range; else last DEFAULT_SYNC_LOOKBACK_DAYS
-   * (or earlier if first local VALID is older — still capped by MAX_SYNC_WINDOWS).
+   * Prefer explicit UI range; else last DEFAULT_SYNC_LOOKBACK_DAYS.
+   * Older history is not auto-expanded — pick the VAT period in the UI.
    */
   private async resolveSyncRange(
     tenantId: string,
@@ -712,19 +689,27 @@ export class SalesSyncService {
     const etaStatusRaw = String(
       row.status ?? row.Status ?? row.documentStatus ?? '',
     ).trim();
-    const localStatus = ETA_STATUS_TO_LOCAL[etaStatusRaw.toLowerCase()];
+    const mapped = mapEtaStatusToLocal(etaStatusRaw);
 
-    await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.document.update({
+    await this.tenantPrisma.withTenant(tenantId, async (tx) => {
+      const current = await tx.document.findFirst({
+        where: { id: documentId, tenantId },
+        select: { status: true },
+      });
+      const applyStatus =
+        mapped &&
+        current &&
+        shouldApplyMappedEtaStatus(current.status, mapped);
+      await tx.document.update({
         where: { id: documentId },
         data: {
           ...(uuid ? { etaUuid: uuid } : {}),
           ...(longId ? { etaLongId: longId } : {}),
           ...(etaStatusRaw ? { etaStatus: etaStatusRaw } : {}),
-          ...(localStatus ? { status: localStatus } : {}),
+          ...(applyStatus ? { status: mapped } : {}),
           etaStatusUpdatedAt: new Date(),
         },
-      }),
-    );
+      });
+    });
   }
 }

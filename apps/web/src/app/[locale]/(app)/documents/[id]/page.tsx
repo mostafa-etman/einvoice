@@ -8,6 +8,7 @@ import { LocalPdfPreviewModal } from '@/components/local-pdf-preview-modal';
 import { CustomerPicker } from '@/components/customers/customer-picker';
 import {
   createDocument,
+  createReturnCreditNote,
   downloadLocalPrintoutFromBody,
   getDocument,
   listDocuments,
@@ -31,6 +32,8 @@ import {
   refreshDocumentStatus,
   triggerBrowserDownload,
 } from '@/lib/api/submissions';
+import { canCreateReturnCreditNote, canPrepareDocumentForSubmit } from '@/lib/document-actions';
+import { resolveDocumentStatus } from '@/lib/document-status-display';
 import { listEtaCodes, type EtaCodeEntry } from '@/lib/api/eta-codes';
 import { listItemCodes, type ItemCode } from '@/lib/api/item-codes';
 import { apiFetch, ApiError } from '@/lib/api/client';
@@ -227,6 +230,34 @@ function AddressFields(props: {
   );
 }
 
+function documentStatusLabel(
+  status: string,
+  t: (key: string) => string,
+): string {
+  switch (status) {
+    case 'DRAFT':
+      return t('statusDraft');
+    case 'READY':
+      return t('statusReady');
+    case 'PENDING_SIGNATURE':
+      return t('statusPendingSignature');
+    case 'SIGNED':
+      return t('statusSigned');
+    case 'SUBMITTED':
+      return t('statusSubmitted');
+    case 'VALID':
+      return t('statusValid');
+    case 'INVALID':
+      return t('statusInvalid');
+    case 'CANCELLED':
+      return t('statusCancelled');
+    case 'REJECTED':
+      return t('statusRejected');
+    default:
+      return status;
+  }
+}
+
 export default function DocumentEditorPage() {
   const t = useTranslations('documents');
   const tOffline = useTranslations('offline');
@@ -351,6 +382,7 @@ export default function DocumentEditorPage() {
   const [issues, setIssues] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [docStatus, setDocStatus] = useState<string>('DRAFT');
+  const [etaStatusRaw, setEtaStatusRaw] = useState<string | null>(null);
   const [documentOrigin, setDocumentOrigin] = useState<string>('LOCAL');
   const [previewOpen, setPreviewOpen] = useState(false);
   const readOnlyHistorical = documentOrigin === 'ETA_SYNC';
@@ -366,6 +398,16 @@ export default function DocumentEditorPage() {
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const cooldownActive = Boolean(cooldownUntil && new Date(cooldownUntil).getTime() > nowMs);
+  const displayStatus = resolveDocumentStatus(docStatus, etaStatusRaw);
+  const canPrepareForSubmit = canPrepareDocumentForSubmit(
+    documentOrigin,
+    displayStatus,
+  );
+  const canReturnCreditNote = canCreateReturnCreditNote(
+    kind,
+    displayStatus,
+    etaUuid,
+  );
 
   useEffect(() => {
     if (!cooldownUntil) return;
@@ -582,6 +624,7 @@ export default function DocumentEditorPage() {
         setIssueDateTime(String(doc.issueDateTime).slice(0, 16));
         setVersion(Number(doc.version));
         setDocStatus(String(doc.status ?? 'DRAFT'));
+        setEtaStatusRaw(doc.etaStatus ? String(doc.etaStatus) : null);
         setDocumentOrigin(String((doc as { origin?: string }).origin ?? 'LOCAL'));
         setNeedsAttention(Boolean(doc.needsAttention));
         setNeedsAttentionReason(doc.needsAttentionReason ? String(doc.needsAttentionReason) : null);
@@ -973,7 +1016,8 @@ export default function DocumentEditorPage() {
         {!isNew ? (
           <div className="space-y-token-xs rounded border border-border bg-surface p-token-sm text-token-sm">
             <p>
-              <span className="font-medium">{t('status')}:</span> {docStatus}
+              <span className="font-medium">{t('status')}:</span>{' '}
+              {documentStatusLabel(displayStatus, t)}
               {readOnlyHistorical ? (
                 <span className="ms-token-sm rounded bg-amber-100 px-token-xs py-token-xs text-token-xs text-amber-900">
                   {t('importedBadge')}
@@ -1065,6 +1109,7 @@ export default function DocumentEditorPage() {
                         setError(null);
                         await cancelDocument(params.id, reason.trim());
                         setDocStatus('CANCELLED');
+                        setEtaStatusRaw('Cancelled');
                         setIssues([
                           t('batchCancelSummary', {
                             cancelled: 1,
@@ -1080,6 +1125,35 @@ export default function DocumentEditorPage() {
                     }}
                   >
                     {t('cancelDocument')}
+                  </button>
+                ) : null}
+                {canReturnCreditNote ? (
+                  <button
+                    type="button"
+                    disabled={submitting}
+                    className="rounded border border-border px-token-sm py-token-xs text-token-sm disabled:opacity-50"
+                    title={t('returnCreditNoteHint')}
+                    onClick={async () => {
+                      try {
+                        setSubmitting(true);
+                        setError(null);
+                        const created = await createReturnCreditNote(params.id);
+                        const newId = String(created.id ?? '');
+                        if (!newId) {
+                          setError(t('returnCreditNoteFailed'));
+                          return;
+                        }
+                        router.push(`/${locale}/documents/${newId}`);
+                      } catch (e) {
+                        setError(
+                          e instanceof Error ? e.message : t('returnCreditNoteFailed'),
+                        );
+                      } finally {
+                        setSubmitting(false);
+                      }
+                    }}
+                  >
+                    {t('returnCreditNote')}
                   </button>
                 ) : null}
                 {docStatus === 'REJECTED' ? (
@@ -1150,12 +1224,12 @@ export default function DocumentEditorPage() {
             {error}
           </p>
         ) : null}
-        {docStatus === 'VALID' && etaUuid ? (
+        {displayStatus === 'VALID' && etaUuid ? (
           <p
             role="status"
             className="rounded border-2 border-green-600 bg-green-50 px-token-md py-token-md text-token-sm font-medium text-green-900"
           >
-            {t('submitSuccessBanner', { uuid: etaUuid, status: docStatus })}
+            {t('submitSuccessBanner', { uuid: etaUuid, status: displayStatus })}
           </p>
         ) : null}
         {docStatus === 'SUBMITTED' ? (
@@ -2086,6 +2160,8 @@ export default function DocumentEditorPage() {
           {offlineHint ? <span className="text-token-sm text-amber-800">{offlineHint}</span> : null}
           {!isNew ? (
             <>
+              {canPrepareForSubmit ? (
+              <>
               <button
                 type="button"
                 className="rounded border border-border px-token-md py-token-sm"
@@ -2217,11 +2293,13 @@ export default function DocumentEditorPage() {
               >
                 {t('sendForSignature')}
               </button>
-              {docStatus === 'SUBMITTED' ||
-              docStatus === 'VALID' ||
-              docStatus === 'INVALID' ||
-              docStatus === 'CANCELLED' ||
-              docStatus === 'REJECTED' ? (
+              </>
+              ) : null}
+              {displayStatus === 'SUBMITTED' ||
+              displayStatus === 'VALID' ||
+              displayStatus === 'INVALID' ||
+              displayStatus === 'CANCELLED' ||
+              displayStatus === 'REJECTED' ? (
                 <button
                   type="button"
                   disabled={submitting}
@@ -2232,6 +2310,7 @@ export default function DocumentEditorPage() {
                       setError(null);
                       const res = await refreshDocumentStatus(params.id);
                       if (res.status) setDocStatus(res.status);
+                      if (res.etaStatus) setEtaStatusRaw(res.etaStatus);
                       setIssues([
                         t('refreshOneSummary', {
                           internalId: res.internalId,

@@ -64,4 +64,24 @@ describe('issued-document-import.mapper', () => {
     });
     expect(mapped!.totalAmount).toBe('16552.80');
   });
+
+  it('maps Cancelled search status to CANCELLED (never defaults to VALID)', () => {
+    const mapped = mapEtaIssuedDetailsToImport(
+      {
+        uuid: '22222222-2222-2222-2222-222222222222',
+        internalId: 'INV-CAN-1',
+        documentType: 'I',
+        status: 'Cancelled',
+        dateTimeIssued: '2026-01-15T10:00:00Z',
+        netAmount: '100.00',
+        totalAmount: '114.00',
+      },
+      {
+        uuid: '22222222-2222-2222-2222-222222222222',
+        documentType: 'I',
+        invoiceLines: [],
+      },
+    );
+    expect(mapped?.status).toBe('CANCELLED');
+  });
 });

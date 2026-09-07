@@ -85,13 +85,14 @@ export class SubmissionsController {
   refreshMany(
     @Headers('x-tenant-id') tenantHeader: string | undefined,
     @CurrentUser() user: AuthUser,
-    @Body() body: { documentIds?: string[]; pendingOnly?: boolean },
+    @Body() body: { documentIds?: string[]; etaUuids?: string[]; pendingOnly?: boolean },
   ) {
     return this.statusRefresh.refreshMany(
       requireTenant(tenantHeader),
       user.userId,
       {
         documentIds: body?.documentIds,
+        etaUuids: body?.etaUuids,
         pendingOnly: Boolean(body?.pendingOnly),
       },
     );

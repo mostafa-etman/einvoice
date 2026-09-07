@@ -4,6 +4,8 @@ import {
   IMPORT_REQUIRED_FIELDS,
   IMPORT_TAX_SLOTS,
 } from './import-schema';
+import { arabicHeaderForField } from './import-ar-headers';
+import { normalizeMappedImportValues } from './import-value-aliases';
 import {
   groupRowsByInternalId,
   headerConflicts,
@@ -53,16 +55,18 @@ function cell(mapped: Record<string, string>, key: string): string {
  */
 export function validateMappedRow(
   rowNumber: number,
-  mapped: Record<string, string>,
+  mappedInput: Record<string, string>,
 ): RowValidationResult {
+  const mapped = normalizeMappedImportValues(mappedInput);
   const errors: FieldError[] = [];
+  const ar = (field: string) => arabicHeaderForField(field, false);
   for (const field of IMPORT_REQUIRED_FIELDS) {
     const v = cell(mapped, field);
     if (!v) {
       errors.push({
         field,
         code: 'REQUIRED',
-        message: `${field} is required`,
+        message: `${ar(field)} مطلوب`,
       });
     }
   }
@@ -72,7 +76,7 @@ export function validateMappedRow(
     errors.push({
       field: 'quantity',
       code: 'INVALID_NUMBER',
-      message: 'quantity must be a positive number',
+      message: `${ar('quantity')} يجب أن يكون رقماً أكبر من صفر`,
     });
   }
   const price = Number(mapped.unitPrice);
@@ -80,7 +84,7 @@ export function validateMappedRow(
     errors.push({
       field: 'unitPrice',
       code: 'INVALID_NUMBER',
-      message: 'unitPrice must be a non-negative number',
+      message: `${ar('unitPrice')} يجب أن يكون رقماً صفر أو أكبر`,
     });
   }
 
@@ -92,7 +96,7 @@ export function validateMappedRow(
       errors.push({
         field: `taxSubType${n}`,
         code: 'REQUIRED',
-        message: `taxSubType${n} is required when taxType${n} is set`,
+        message: `${ar(`taxSubType${n}`)} مطلوب عند تحديد ${ar(`taxType${n}`)}`,
       });
     }
     if (isFixedAmountTaxType(taxType)) {
@@ -101,13 +105,13 @@ export function validateMappedRow(
         errors.push({
           field: `taxAmount${n}`,
           code: 'REQUIRED',
-          message: `taxAmount${n} is required for fixed-amount tax type ${taxType}`,
+          message: `${ar(`taxAmount${n}`)} مطلوب لنوع الضريبة الثابتة ${taxType}`,
         });
       } else if (Number.isNaN(Number(amount)) || Number(amount) < 0) {
         errors.push({
           field: `taxAmount${n}`,
           code: 'INVALID_NUMBER',
-          message: `taxAmount${n} must be a non-negative number`,
+          message: `${ar(`taxAmount${n}`)} يجب أن يكون رقماً صفر أو أكبر`,
         });
       }
     } else {
@@ -116,7 +120,7 @@ export function validateMappedRow(
         errors.push({
           field: `taxRate${n}`,
           code: 'INVALID_NUMBER',
-          message: `taxRate${n} must be a non-negative number`,
+          message: `${ar(`taxRate${n}`)} يجب أن يكون رقماً صفر أو أكبر`,
         });
       }
     }
@@ -127,7 +131,7 @@ export function validateMappedRow(
     errors.push({
       field: 'documentType',
       code: 'INVALID_VALUE',
-      message: `documentType must be one of ${Object.keys(DOC_TYPE_TO_KIND).join(', ')}`,
+      message: `${ar('documentType')} يجب أن يكون أحد: ${Object.keys(DOC_TYPE_TO_KIND).join(', ')} أو فاتورة/مرتجع من ورقة القوائم`,
     });
   }
 
@@ -172,7 +176,7 @@ function applyInvoiceLevelChecks(
           {
             field: 'internalID',
             code: 'HEADER_CONFLICT',
-            message: `Rows for ${group.internalId} disagree on: ${conflicts.join(', ')}`,
+            message: `صفوف ${group.internalId} غير متفقة في: ${conflicts.map((f) => arabicHeaderForField(f, false)).join('، ')}`,
           },
         ];
         delete result.mapped;
@@ -197,7 +201,7 @@ function applyInvoiceLevelChecks(
           {
             field: 'references',
             code: 'REQUIRED',
-            message: 'references (original ETA UUID) required for credit/debit notes',
+            message: 'الرقم المرجعي للمستند الأصلي مطلوب لإشعار الدائن/المدين (مرتجع)',
           },
         ];
         delete result.mapped;

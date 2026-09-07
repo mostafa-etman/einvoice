@@ -93,18 +93,25 @@ describe('import builder produces markReady-valid invoices', () => {
     await app.close();
   });
 
-  it('template XLSX has Import + Notes sheets and sample multi-line invoice', () => {
+  it('template XLSX has Import + Lists + Notes sheets and sample multi-line invoice', () => {
     const imports = app.get(ImportsService);
     const buf = imports.templateXlsx('I');
     const wb = XLSX.read(buf, { type: 'buffer' });
-    expect(wb.SheetNames).toEqual(expect.arrayContaining(['Import', 'Notes']));
-    const rows = XLSX.utils.sheet_to_json<Record<string, string>>(
-      wb.Sheets.Import!,
+    expect(wb.SheetNames).toEqual(
+      expect.arrayContaining(['Import', 'Lists', 'Notes']),
     );
-    expect(rows.length).toBeGreaterThanOrEqual(2);
-    expect(rows[0]!.internalID).toBe(rows[1]!.internalID);
-    expect(rows[0]!.taxType1).toBe('T1');
-    expect(rows[0]!.taxSubType1).toBe('V009');
+    const raw = XLSX.utils.sheet_to_json<string[]>(wb.Sheets.Import!, {
+      header: 1,
+    });
+    const headers = (raw[0] ?? []).map((h) => String(h ?? ''));
+    expect(headers.some((h) => h.includes('الرقم الداخلي'))).toBe(true);
+    expect(headers.some((h) => h.includes('نوع الضريبة 1'))).toBe(true);
+    const lists = XLSX.utils.sheet_to_json<string[]>(wb.Sheets.Lists!, {
+      header: 1,
+    });
+    expect(String(lists[0]?.[0])).toContain('نوع المستلم');
+    expect(String(lists[1]?.[0])).toBe('شركة');
+    expect(raw.length).toBeGreaterThanOrEqual(3);
   });
 
   it('2-line import DTO create + markReady matches manual path', async () => {

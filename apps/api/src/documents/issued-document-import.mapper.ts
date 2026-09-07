@@ -1,6 +1,7 @@
 import type { DocumentKind, DocumentStatus, Prisma } from '@prisma/client';
 import { KIND_TO_ETA_TYPE } from '@einvoice/eta-core';
 import { normalizeLineTaxes } from '../documents/local-invoice-pdf';
+import { mapEtaStatusToLocal } from '../eta/eta-status-map';
 
 function pickString(row: Record<string, unknown>, ...keys: string[]): string {
   for (const k of keys) {
@@ -41,15 +42,6 @@ export function etaDocumentTypeToKind(typeCode: string): DocumentKind | null {
   if (/EXPORT/.test(t)) return 'EXPORT_INVOICE';
   return null;
 }
-
-export const ETA_STATUS_TO_LOCAL: Record<string, DocumentStatus> = {
-  valid: 'VALID',
-  invalid: 'INVALID',
-  rejected: 'REJECTED',
-  cancelled: 'CANCELLED',
-  canceled: 'CANCELLED',
-  submitted: 'SUBMITTED',
-};
 
 export type IssuedImportLine = {
   lineNumber: number;
@@ -166,8 +158,7 @@ export function mapEtaIssuedDetailsToImport(
   if (Number.isNaN(issueDateTime.getTime())) return null;
 
   const etaStatus = pickString(merged, 'status', 'Status', 'documentStatus') || null;
-  const status =
-    ETA_STATUS_TO_LOCAL[(etaStatus ?? '').toLowerCase()] ?? 'VALID';
+  const status = mapEtaStatusToLocal(etaStatus) ?? 'SUBMITTED';
 
   const issuer =
     pickObj(merged, 'issuer', 'Issuer') ??

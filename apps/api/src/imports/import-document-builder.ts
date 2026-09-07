@@ -5,6 +5,7 @@ import {
   DOC_TYPE_TO_KIND,
   IMPORT_TAX_SLOTS,
 } from './import-schema';
+import { normalizeMappedImportValues } from './import-value-aliases';
 
 export type MappedImportRow = {
   rowNumber: number;
@@ -53,7 +54,10 @@ export function resolveDocumentKind(
   rowType: string | undefined,
   jobDocumentType: string,
 ): DocumentKind {
-  const code = (rowType || jobDocumentType || 'I').trim().toUpperCase();
+  const normalized = normalizeMappedImportValues({
+    documentType: rowType || jobDocumentType || 'I',
+  }).documentType;
+  const code = (normalized || 'I').trim().toUpperCase();
   const kind = DOC_TYPE_TO_KIND[code];
   return (kind as DocumentKind) ?? 'INVOICE';
 }
@@ -172,21 +176,25 @@ export function buildDocumentUpsert(
   group: InvoiceGroup,
   ctx: BuildContext,
 ): DocumentUpsertDto {
-  const head = group.rows[0]!.mapped;
+  const rows = group.rows.map((r) => ({
+    ...r,
+    mapped: normalizeMappedImportValues(r.mapped),
+  }));
+  const head = rows[0]!.mapped;
   const kind = resolveDocumentKind(
-    firstNonEmpty(group.rows, 'documentType'),
+    firstNonEmpty(rows, 'documentType'),
     ctx.jobDocumentType,
   );
   const currencyCode =
-    firstNonEmpty(group.rows, 'currencyCode') || 'EGP';
-  const branchCode = firstNonEmpty(group.rows, 'branchCode');
+    firstNonEmpty(rows, 'currencyCode') || 'EGP';
+  const branchCode = firstNonEmpty(rows, 'branchCode');
   const resolvedBranch =
     (branchCode && ctx.resolveBranchId?.(branchCode)) || undefined;
   const branchId = resolvedBranch || ctx.defaultBranchId;
 
-  const activity = firstNonEmpty(group.rows, 'taxpayerActivityCode');
+  const activity = firstNonEmpty(rows, 'taxpayerActivityCode');
   const issueDateTime =
-    firstNonEmpty(group.rows, 'dateTimeIssued') || new Date().toISOString();
+    firstNonEmpty(rows, 'dateTimeIssued') || new Date().toISOString();
 
   return {
     kind,
@@ -197,45 +205,45 @@ export function buildDocumentUpsert(
     version: 0,
     ...(activity ? { taxpayerActivityCode: activity } : {}),
     purchaseOrderReference:
-      firstNonEmpty(group.rows, 'purchaseOrderReference') || undefined,
+      firstNonEmpty(rows, 'purchaseOrderReference') || undefined,
     purchaseOrderDescription:
-      firstNonEmpty(group.rows, 'purchaseOrderDescription') || undefined,
+      firstNonEmpty(rows, 'purchaseOrderDescription') || undefined,
     salesOrderReference:
-      firstNonEmpty(group.rows, 'salesOrderReference') || undefined,
+      firstNonEmpty(rows, 'salesOrderReference') || undefined,
     salesOrderDescription:
-      firstNonEmpty(group.rows, 'salesOrderDescription') || undefined,
+      firstNonEmpty(rows, 'salesOrderDescription') || undefined,
     proformaInvoiceNumber:
-      firstNonEmpty(group.rows, 'proformaInvoiceNumber') || undefined,
+      firstNonEmpty(rows, 'proformaInvoiceNumber') || undefined,
     serviceDeliveryDate:
-      firstNonEmpty(group.rows, 'serviceDeliveryDate') || undefined,
+      firstNonEmpty(rows, 'serviceDeliveryDate') || undefined,
     extraDiscountAmount:
-      firstNonEmpty(group.rows, 'extraDiscountAmount') || '0.00',
+      firstNonEmpty(rows, 'extraDiscountAmount') || '0.00',
     receiver: {
-      type: firstNonEmpty(group.rows, 'receiverType') || 'B',
-      id: firstNonEmpty(group.rows, 'receiverId'),
-      name: firstNonEmpty(group.rows, 'receiverName'),
+      type: firstNonEmpty(rows, 'receiverType') || 'B',
+      id: firstNonEmpty(rows, 'receiverId'),
+      name: firstNonEmpty(rows, 'receiverName'),
       address: {
-        country: firstNonEmpty(group.rows, 'receiverCountry') || 'EG',
-        governate: firstNonEmpty(group.rows, 'receiverGovernate') || undefined,
+        country: firstNonEmpty(rows, 'receiverCountry') || 'EG',
+        governate: firstNonEmpty(rows, 'receiverGovernate') || undefined,
         regionCity:
-          firstNonEmpty(group.rows, 'receiverRegionCity') || undefined,
-        street: firstNonEmpty(group.rows, 'receiverStreet') || undefined,
+          firstNonEmpty(rows, 'receiverRegionCity') || undefined,
+        street: firstNonEmpty(rows, 'receiverStreet') || undefined,
         buildingNumber:
-          firstNonEmpty(group.rows, 'receiverBuildingNumber') || undefined,
+          firstNonEmpty(rows, 'receiverBuildingNumber') || undefined,
         postalCode:
-          firstNonEmpty(group.rows, 'receiverPostalCode') || undefined,
-        floor: firstNonEmpty(group.rows, 'receiverFloor') || undefined,
-        room: firstNonEmpty(group.rows, 'receiverRoom') || undefined,
-        landmark: firstNonEmpty(group.rows, 'receiverLandmark') || undefined,
+          firstNonEmpty(rows, 'receiverPostalCode') || undefined,
+        floor: firstNonEmpty(rows, 'receiverFloor') || undefined,
+        room: firstNonEmpty(rows, 'receiverRoom') || undefined,
+        landmark: firstNonEmpty(rows, 'receiverLandmark') || undefined,
         additionalInformation:
-          firstNonEmpty(group.rows, 'receiverAdditionalInformation') ||
+          firstNonEmpty(rows, 'receiverAdditionalInformation') ||
           undefined,
       },
     },
     payment: buildPayment(head),
     delivery: buildDelivery(head),
-    references: parseReferences(firstNonEmpty(group.rows, 'references')),
-    lines: group.rows.map((r) => buildLine(r.mapped, currencyCode)),
+    references: parseReferences(firstNonEmpty(rows, 'references')),
+    lines: rows.map((r) => buildLine(r.mapped, currencyCode)),
   };
 }
 

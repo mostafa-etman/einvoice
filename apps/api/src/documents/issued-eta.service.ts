@@ -136,16 +136,18 @@ export class IssuedEtaService {
           : err instanceof Error
             ? err.message
             : 'ETA cancel failed';
-      await this.audit.write({
-        action: 'documents.cancel',
-        outcome: 'failure',
-        actorUserId,
-        tenantId,
-        resourceType: 'document',
-        resourceId: id,
-        metadata: { etaUuid: doc.etaUuid, reason: trimmed, message },
-      });
-      throw new BadRequestException(message);
+      if (!isAlreadyCancelledEtaError(err, message)) {
+        await this.audit.write({
+          action: 'documents.cancel',
+          outcome: 'failure',
+          actorUserId,
+          tenantId,
+          resourceType: 'document',
+          resourceId: id,
+          metadata: { etaUuid: doc.etaUuid, reason: trimmed, message },
+        });
+        throw new BadRequestException(message);
+      }
     }
 
     await this.statusEvents.applyEtaStatus(tenantId, id, 'Cancelled', {
@@ -300,4 +302,22 @@ export class IssuedEtaService {
       };
     });
   }
+}
+
+function isAlreadyCancelledEtaError(err: unknown, message: string): boolean {
+  const http =
+    err && typeof err === 'object'
+      ? (err as { httpStatus?: number }).httpStatus
+      : undefined;
+  const text = [
+    message,
+    err instanceof EtaDocumentLifecycleError ? err.bodyText ?? '' : '',
+  ]
+    .join(' ')
+    .toLowerCase();
+  if (/already\s+cancel|is\s+cancelled|is\s+canceled|status.*cancell/i.test(text)) {
+    return true;
+  }
+  // ETA often returns 400 when the document is already in Cancelled state.
+  return http === 400 && /cancell/i.test(text);
 }

@@ -197,6 +197,13 @@ export function createDocument(body: DocumentUpsert) {
   });
 }
 
+export function createReturnCreditNote(id: string) {
+  return apiFetch<Record<string, unknown>>(`/documents/${id}/return`, {
+    method: 'POST',
+    tenantScoped: true,
+  });
+}
+
 export function updateDocument(id: string, body: DocumentUpsert) {
   return apiFetch<Record<string, unknown>>(`/documents/${id}`, {
     method: 'PUT',

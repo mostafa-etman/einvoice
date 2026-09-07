@@ -47,16 +47,39 @@ export function extractEtaDocumentStatus(
   payload: Record<string, unknown> | null | undefined,
 ): string | null {
   if (!payload) return null;
-  const candidates = [
-    payload.status,
-    payload.Status,
-    payload.documentStatus,
-    payload.DocumentStatus,
-    (payload.document as Record<string, unknown> | undefined)?.status,
-    (payload.document as Record<string, unknown> | undefined)?.Status,
+  const nested = [
+    payload,
+    asRecord(payload.document),
+    asRecord(payload.Document),
+    asRecord(payload.documentExtended),
+    asRecord(payload.DocumentExtended),
+    asRecord(payload.metadata),
+    asRecord(payload.Metadata),
+  ].filter((x): x is Record<string, unknown> => Boolean(x));
+
+  const keys = [
+    'status',
+    'Status',
+    'documentStatus',
+    'DocumentStatus',
+    'currentStatus',
+    'CurrentStatus',
+    'publicStatus',
+    'validationStatus',
+    'ValidationStatus',
   ];
-  for (const c of candidates) {
-    if (typeof c === 'string' && c.trim()) return c.trim();
+  for (const obj of nested) {
+    for (const k of keys) {
+      const c = obj[k];
+      if (typeof c === 'string' && c.trim()) return c.trim();
+    }
+  }
+  return null;
+}
+
+function asRecord(v: unknown): Record<string, unknown> | null {
+  if (v && typeof v === 'object' && !Array.isArray(v)) {
+    return v as Record<string, unknown>;
   }
   return null;
 }

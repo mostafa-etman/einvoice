@@ -3,6 +3,7 @@ import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { EtaService } from '../eta/eta.service';
 import { EtaDocumentDetailsClient } from '../eta/eta-document-details.client';
+import { EtaDocumentRawClient } from '../eta/eta-document-raw.client';
 import {
   EtaSubmissionStatusClient,
   extractEtaDocumentStatus,
@@ -54,6 +55,7 @@ export class DocumentStatusRefreshService {
     const base = await this.eta.getApiBaseUrl(tenantId);
     return {
       details: new EtaDocumentDetailsClient(base),
+      raw: new EtaDocumentRawClient(base),
       submissions: new EtaSubmissionStatusClient(base),
     };
   }
@@ -79,7 +81,7 @@ export class DocumentStatusRefreshService {
   async refreshMany(
     tenantId: string,
     actorUserId: string,
-    opts: { documentIds?: string[]; pendingOnly?: boolean },
+    opts: { documentIds?: string[]; etaUuids?: string[]; pendingOnly?: boolean },
   ): Promise<StatusRefreshBatchResult> {
     const docs = await this.tenantPrisma.withTenant(tenantId, async (tx) => {
       const select = {
@@ -104,10 +106,17 @@ export class DocumentStatusRefreshService {
           select,
         });
       }
-      const ids = opts.documentIds ?? [];
-      if (!ids.length) return [];
+      const ids = [...new Set(opts.documentIds ?? [])];
+      const uuids = [...new Set((opts.etaUuids ?? []).map((u) => u.trim()).filter(Boolean))];
+      if (!ids.length && !uuids.length) return [];
       return tx.document.findMany({
-        where: { tenantId, id: { in: ids } },
+        where: {
+          tenantId,
+          OR: [
+            ...(ids.length ? [{ id: { in: ids } }] : []),
+            ...(uuids.length ? [{ etaUuid: { in: uuids } }] : []),
+          ],
+        },
         select,
       });
     });
@@ -157,7 +166,7 @@ export class DocumentStatusRefreshService {
         let etaStatus: string | null;
         try {
           etaStatus = await this.queryDocumentStatus(
-            clients.details,
+            clients,
             token,
             doc.etaUuid,
           );
@@ -183,7 +192,7 @@ export class DocumentStatusRefreshService {
           });
           tokenCache.set(cacheKey, token);
           etaStatus = await this.queryDocumentStatus(
-            clients.details,
+            clients,
             token,
             doc.etaUuid,
           );
@@ -307,12 +316,31 @@ export class DocumentStatusRefreshService {
   }
 
   private async queryDocumentStatus(
-    details: EtaDocumentDetailsClient,
+    clients: {
+      details: EtaDocumentDetailsClient;
+      raw: EtaDocumentRawClient;
+    },
     accessToken: string,
     etaUuid: string,
   ): Promise<string | null> {
-    const body = await details.getDetails(accessToken, etaUuid);
-    return extractEtaDocumentStatus(body);
+    const fromDetails = extractEtaDocumentStatus(
+      await clients.details.getDetails(accessToken, etaUuid),
+    );
+    if (fromDetails && mapEtaStatusToLocal(fromDetails) === 'CANCELLED') {
+      return fromDetails;
+    }
+    try {
+      const raw = await clients.raw.getRaw(accessToken, etaUuid);
+      const fromRaw = extractEtaDocumentStatus(raw.json);
+      const mappedRaw = mapEtaStatusToLocal(fromRaw);
+      if (mappedRaw === 'CANCELLED' || mappedRaw === 'REJECTED' || mappedRaw === 'INVALID') {
+        return fromRaw;
+      }
+      if (fromRaw && !fromDetails) return fromRaw;
+    } catch {
+      // Raw is best-effort; details status still used.
+    }
+    return fromDetails;
   }
 
   private async querySubmissionDocumentStatus(

@@ -30,6 +30,7 @@ import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { QuotaService } from '../billing/quota.service';
 import { EtaService } from '../eta/eta.service';
+import { mapEtaStatusToLocal } from '../eta/eta-status-map';
 import { branchAddressToIssuerAddress } from '../settings/branches/branches.service';
 import type { ArtifactStorage } from '../storage/storage.module';
 import {
@@ -38,6 +39,10 @@ import {
   type LocalInvoicePdfLocale,
 } from './local-invoice-pdf';
 import { assertDocumentMutable } from './documents-mutability';
+import {
+  creditNoteKindForInvoice,
+  returnCreditNoteInternalId,
+} from './document-return';
 
 export { assertDocumentMutable } from './documents-mutability';
 
@@ -1253,6 +1258,94 @@ export class DocumentsService {
       failed: results.filter((r) => !r.ok).length,
       results,
     };
+  }
+
+  /**
+   * Create a DRAFT credit note prefilled from a VALID invoice.
+   * Does not sign or submit — caller uses the existing credit-note flow.
+   */
+  async createReturnCreditNote(
+    tenantId: string,
+    actorUserId: string,
+    sourceId: string,
+  ) {
+    const source = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.document.findFirst({
+        where: { id: sourceId, tenantId },
+        include: { lines: { include: { taxes: true }, orderBy: { lineNumber: 'asc' } } },
+      }),
+    );
+    if (!source) throw new NotFoundException('Document not found');
+
+    const creditKind = creditNoteKindForInvoice(source.kind);
+    if (!creditKind) {
+      throw new BadRequestException({
+        code: 'RETURN_REQUIRES_INVOICE',
+        message: 'Return is only available for invoices',
+      });
+    }
+
+    const etaMapped = mapEtaStatusToLocal(source.etaStatus);
+    const isValid =
+      source.status === 'VALID' || etaMapped === 'VALID';
+    if (!isValid || source.status === 'CANCELLED' || etaMapped === 'CANCELLED') {
+      throw new BadRequestException({
+        code: 'RETURN_REQUIRES_VALID',
+        message: 'Return is only available for a VALID invoice',
+      });
+    }
+    if (!source.etaUuid?.trim()) {
+      throw new BadRequestException({
+        code: 'RETURN_REQUIRES_ETA_UUID',
+        message: 'Original invoice has no ETA UUID to reference',
+      });
+    }
+    if (!source.lines.length) {
+      throw new BadRequestException({
+        code: 'RETURN_REQUIRES_LINES',
+        message: 'Original invoice has no lines to copy',
+      });
+    }
+
+    const dto = this.upsertDtoFromStored({
+      ...source,
+      extraDiscountAmount: String(source.extraDiscountAmount ?? '0'),
+    });
+    dto.kind = creditKind;
+    dto.version = 1;
+    dto.issueDateTime = new Date().toISOString();
+    dto.references = [source.etaUuid];
+
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      dto.internalId = returnCreditNoteInternalId(
+        source.internalId,
+        Date.now() + attempt,
+      );
+      try {
+        const created = await this.create(tenantId, actorUserId, dto);
+        await this.audit.write({
+          action: 'documents.return_credit_note.create',
+          outcome: 'success',
+          actorUserId,
+          tenantId,
+          resourceType: 'document',
+          resourceId: created.id,
+          metadata: {
+            sourceDocumentId: source.id,
+            sourceInternalId: source.internalId,
+            sourceEtaUuid: source.etaUuid,
+            kind: creditKind,
+          },
+        });
+        return created;
+      } catch (err) {
+        lastErr = err;
+        if (err instanceof ConflictException) continue;
+        throw err;
+      }
+    }
+    throw lastErr;
   }
 
   /** Rebuild an upsert DTO from a stored draft so totals can be recomputed. */

@@ -19,6 +19,7 @@ import {
 import { listBranches, type Branch } from '@/lib/api/branches';
 import {
   IMPORT_COMMON_OPTIONAL_FIELDS,
+  IMPORT_FIELD_AR,
   IMPORT_REQUIRED_FIELDS,
 } from '@/lib/imports/import-columns';
 import { useTenant } from '@/lib/tenant-provider';
@@ -303,6 +304,7 @@ export default function ImportsPage() {
             {mappingFields.map((field) => (
               <label key={field} className="text-token-sm">
                 {t('targetField')}: {field}
+                {IMPORT_FIELD_AR[field] ? ` — ${IMPORT_FIELD_AR[field]}` : ''}
                 {(IMPORT_REQUIRED_FIELDS as readonly string[]).includes(field) ? (
                   <span className="text-danger"> *</span>
                 ) : null}
