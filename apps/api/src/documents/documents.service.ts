@@ -44,13 +44,17 @@ import {
   mapIssuedDetailsLines,
   splitIssuedEtaDetails,
 } from './issued-document-import.mapper';
-import { assertDocumentMutable } from './documents-mutability';
+import { assertDocumentCanMutate } from './documents-mutability';
 import {
   creditNoteKindForInvoice,
   returnCreditNoteInternalId,
 } from './document-return';
 
-export { assertDocumentMutable } from './documents-mutability';
+export {
+  assertDocumentCanMutate,
+  assertDocumentEditable,
+  assertDocumentMutable,
+} from './documents-mutability';
 
 /** Parse list filter dates; ignore invalid values so bad query params never 500. */
 function parseOptionalDate(value?: string): Date | undefined {
@@ -836,7 +840,7 @@ export class DocumentsService {
     const updated = await this.tenantPrisma.withTenant(tenantId, async (tx) => {
       const existing = await tx.document.findFirst({ where: { id, tenantId } });
       if (!existing) throw new NotFoundException('Document not found');
-      assertDocumentMutable(existing.origin);
+      assertDocumentCanMutate(existing.origin, existing.status);
       if (existing.version !== dto.version) {
         throw new ConflictException('Stale version');
       }
@@ -929,7 +933,7 @@ export class DocumentsService {
     await this.tenantPrisma.withTenant(tenantId, async (tx) => {
       const existing = await tx.document.findFirst({ where: { id, tenantId } });
       if (!existing) throw new NotFoundException('Document not found');
-      assertDocumentMutable(existing.origin);
+      assertDocumentCanMutate(existing.origin, existing.status);
       await tx.document.delete({ where: { id } });
     });
     await this.audit.write({
@@ -1138,7 +1142,7 @@ export class DocumentsService {
 
   async markReady(tenantId: string, actorUserId: string, id: string) {
     const detail = await this.get(tenantId, id);
-    assertDocumentMutable(detail.origin);
+    assertDocumentCanMutate(detail.origin, detail.status);
     const result = await this.runValidation(tenantId, detail);
     if (!result.ok) {
       await this.audit.write({
@@ -1191,7 +1195,7 @@ export class DocumentsService {
         },
       });
       if (!existing) throw new NotFoundException('Document not found');
-      assertDocumentMutable(existing.origin);
+      assertDocumentCanMutate(existing.origin, existing.status);
 
       if (
         !DocumentsService.RECALCULABLE_STATUSES.includes(existing.status) ||

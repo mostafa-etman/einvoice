@@ -9,6 +9,12 @@ export function canPrepareDocumentForSubmit(
   );
 }
 
+/** Content edits (header, lines, taxes, totals, save, mark-ready). */
+export function canEditDocument(origin: string, status: string): boolean {
+  if (origin === 'ETA_SYNC') return false;
+  return status === 'DRAFT' || status === 'READY';
+}
+
 /** Credit-note return is only valid against an accepted invoice with an ETA UUID. */
 export function canCreateReturnCreditNote(
   kind: string,

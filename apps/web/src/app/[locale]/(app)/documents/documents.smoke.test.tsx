@@ -30,7 +30,10 @@ describe('documents smoke', () => {
     expect(ar.documents.refreshAllPending).toBeTruthy();
     expect(ar.documents.lateSubmitConfirm).toContain('{days}');
     expect(ar.documents.taxSubtypeMismatch).toContain('{subType}');
-    expect(ar.documents.save).toBeTruthy();
+    expect(en.documents.importedFromEta).toBeTruthy();
+    expect(en.documents.readOnlyValidBadge).toBeTruthy();
+    expect(ar.documents.readOnlyValidBadge).toBeTruthy();
+    expect(en.documents.save).toBeTruthy();
     expect(ar.documents.taxModeNone).toBeTruthy();
     expect(ar.documents.serviceDeliveryDate).toBeTruthy();
     expect(ar.nav.documents).toBeTruthy();

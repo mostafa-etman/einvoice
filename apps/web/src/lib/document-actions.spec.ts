@@ -1,5 +1,6 @@
 import {
   canCreateReturnCreditNote,
+  canEditDocument,
   canPrepareDocumentForSubmit,
 } from './document-actions';
 
@@ -26,6 +27,33 @@ describe('canPrepareDocumentForSubmit', () => {
   it('never shows pre-submission actions on historical ETA imports', () => {
     expect(canPrepareDocumentForSubmit('ETA_SYNC', 'DRAFT')).toBe(false);
     expect(canPrepareDocumentForSubmit('ETA_SYNC', 'VALID')).toBe(false);
+  });
+});
+
+describe('canEditDocument', () => {
+  it('allows draft and ready local documents', () => {
+    expect(canEditDocument('LOCAL', 'DRAFT')).toBe(true);
+    expect(canEditDocument('LOCAL', 'READY')).toBe(true);
+    expect(canEditDocument('FILE_IMPORT', 'DRAFT')).toBe(true);
+  });
+
+  it('locks VALID, submitted, cancelled, rejected, and signed documents', () => {
+    for (const status of [
+      'SIGNED',
+      'SUBMITTED',
+      'VALID',
+      'INVALID',
+      'CANCELLED',
+      'REJECTED',
+      'PENDING_SIGNATURE',
+    ]) {
+      expect(canEditDocument('LOCAL', status)).toBe(false);
+    }
+  });
+
+  it('never allows editing historical ETA imports', () => {
+    expect(canEditDocument('ETA_SYNC', 'DRAFT')).toBe(false);
+    expect(canEditDocument('ETA_SYNC', 'VALID')).toBe(false);
   });
 });
 

@@ -28,7 +28,7 @@ import {
   type StatusRefreshBatchResult,
 } from '@/lib/api/submissions';
 import { LocalPdfPreviewModal } from '@/components/local-pdf-preview-modal';
-import { canCreateReturnCreditNote } from '@/lib/document-actions';
+import { canCreateReturnCreditNote, canEditDocument } from '@/lib/document-actions';
 import { resolveDocumentStatus } from '@/lib/document-status-display';
 import { formatMoneyDisplay } from '@/lib/format-number';
 
@@ -1154,10 +1154,10 @@ export default function DocumentsPage() {
                       {canCancel(doc.status, doc.etaUuid) ? (
                         <option value="cancel">{t('cancelDocument')}</option>
                       ) : null}
-                      {doc.origin !== 'ETA_SYNC' &&
-                      (doc.status === 'DRAFT' ||
-                        doc.status === 'READY' ||
-                        doc.status === 'SIGNED') ? (
+                      {canEditDocument(
+                        doc.origin,
+                        resolveDocumentStatus(doc.status, doc.etaStatus),
+                      ) ? (
                         <option value="delete">{t('delete')}</option>
                       ) : null}
                     </select>

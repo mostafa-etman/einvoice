@@ -28,6 +28,7 @@ import {
   type CooldownState,
 } from './submit-cooldown';
 import { MAX_DUPLICATE_RETRIES } from './duplicate-submission';
+import { documentNotEditableException } from '../documents/documents-mutability';
 import { checkLateSubmission, parseEtaDocument, type JsonObject } from '@einvoice/eta-core';
 import { UsageEmitService } from '../analytics/usage-emit.service';
 import { QuotaService } from '../billing/quota.service';
@@ -255,6 +256,15 @@ export class SubmissionsService implements OnModuleDestroy {
           throw new BadRequestException(
             `Document ${doc.internalId} was imported from ETA and cannot be re-submitted`,
           );
+        }
+        if (
+          doc.status === 'VALID' ||
+          doc.status === 'SUBMITTED' ||
+          doc.status === 'CANCELLED' ||
+          doc.status === 'REJECTED' ||
+          doc.status === 'INVALID'
+        ) {
+          throw documentNotEditableException();
         }
         if (doc.status !== 'SIGNED') {
           throw new BadRequestException(

@@ -32,7 +32,7 @@ import {
   refreshDocumentStatus,
   triggerBrowserDownload,
 } from '@/lib/api/submissions';
-import { canCreateReturnCreditNote, canPrepareDocumentForSubmit } from '@/lib/document-actions';
+import { canCreateReturnCreditNote, canEditDocument, canPrepareDocumentForSubmit } from '@/lib/document-actions';
 import { resolveDocumentStatus } from '@/lib/document-status-display';
 import { listEtaCodes, type EtaCodeEntry } from '@/lib/api/eta-codes';
 import { listItemCodes, type ItemCode } from '@/lib/api/item-codes';
@@ -408,6 +408,8 @@ export default function DocumentEditorPage() {
     displayStatus,
     etaUuid,
   );
+  const documentReadOnly =
+    !isNew && !canEditDocument(documentOrigin, displayStatus);
 
   useEffect(() => {
     if (!cooldownUntil) return;
@@ -1018,6 +1020,15 @@ export default function DocumentEditorPage() {
             <p>
               <span className="font-medium">{t('status')}:</span>{' '}
               {documentStatusLabel(displayStatus, t)}
+              {displayStatus === 'VALID' ? (
+                <span className="ms-token-sm rounded bg-green-100 px-token-xs py-token-xs text-token-xs text-green-900">
+                  {t('readOnlyValidBadge')}
+                </span>
+              ) : documentReadOnly && !readOnlyHistorical ? (
+                <span className="ms-token-sm rounded bg-amber-100 px-token-xs py-token-xs text-token-xs text-amber-900">
+                  {t('readOnlyFinalBadge')}
+                </span>
+              ) : null}
               {readOnlyHistorical ? (
                 <span className="ms-token-sm rounded bg-amber-100 px-token-xs py-token-xs text-token-xs text-amber-900">
                   {t('importedBadge')}
@@ -1027,6 +1038,14 @@ export default function DocumentEditorPage() {
             {readOnlyHistorical ? (
               <p className="text-amber-900" role="status">
                 {t('importedFromEta')}
+              </p>
+            ) : displayStatus === 'VALID' ? (
+              <p className="text-green-900" role="status">
+                {t('readOnlyValidBanner')}
+              </p>
+            ) : documentReadOnly ? (
+              <p className="text-amber-900" role="status">
+                {t('readOnlyFinalBanner')}
               </p>
             ) : null}
             {submissionUuid ? (
@@ -1242,6 +1261,10 @@ export default function DocumentEditorPage() {
           </p>
         ) : null}
 
+        <fieldset
+          disabled={documentReadOnly}
+          className="min-w-0 space-y-token-lg border-0 p-0 disabled:opacity-[0.92]"
+        >
         <section className="grid grid-cols-1 gap-token-sm rounded border border-border bg-surface p-token-sm sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           <div className="sm:col-span-2 lg:col-span-3 xl:col-span-4">
             {sectionTitle(t('sectionHeader'))}
@@ -1465,7 +1488,7 @@ export default function DocumentEditorPage() {
             >
               {showIssuer ? t('hideIssuer') : t('showIssuer')}
             </button>
-            {showIssuer ? (
+            {showIssuer || documentReadOnly ? (
               <div className="space-y-token-sm rounded border border-border bg-surface p-token-sm">
                 {sectionTitle(t('sectionIssuer'))}
                 <label className="block text-token-sm">
@@ -1520,6 +1543,7 @@ export default function DocumentEditorPage() {
                 {sectionTitle(t('sectionReceiver'))}
                 <CustomerPicker
                   receiver={receiver}
+                  disabled={documentReadOnly}
                   onPick={(next) => {
                     setReceiver({
                       type: next.type || 'B',
@@ -1658,20 +1682,24 @@ export default function DocumentEditorPage() {
         <section className="space-y-token-sm rounded border border-border bg-surface p-token-sm">
           <div className="flex items-center justify-between">
             {sectionTitle(t('lines'))}
-            <button type="button" className="text-token-sm text-brand" onClick={addLine}>
-              {t('addLine')}
-            </button>
+            {!documentReadOnly ? (
+              <button type="button" className="text-token-sm text-brand" onClick={addLine}>
+                {t('addLine')}
+              </button>
+            ) : null}
           </div>
           {lines.length === 0 ? (
             <div className="space-y-token-sm rounded border border-dashed border-border p-token-md text-center">
               <p className="text-token-sm text-foreground/70">{t('noLines')}</p>
-              <button
-                type="button"
-                className="rounded border border-border px-token-md py-token-xs text-token-sm text-brand"
-                onClick={addLine}
-              >
-                {t('addLine')}
-              </button>
+              {!documentReadOnly ? (
+                <button
+                  type="button"
+                  className="rounded border border-border px-token-md py-token-xs text-token-sm text-brand"
+                  onClick={addLine}
+                >
+                  {t('addLine')}
+                </button>
+              ) : null}
             </div>
           ) : null}
           {lines.length ? (
@@ -1830,6 +1858,7 @@ export default function DocumentEditorPage() {
                             {lineTotalDisplay(line)}
                           </td>
                           <td className="px-token-xs py-token-xs text-end">
+                            {!documentReadOnly ? (
                             <button
                               type="button"
                               className="inline-flex items-center rounded border border-danger/40 px-token-xs py-token-xs text-token-xs text-danger"
@@ -1850,6 +1879,7 @@ export default function DocumentEditorPage() {
                                 <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6" />
                               </svg>
                             </button>
+                            ) : null}
                           </td>
                         </tr>
                         <tr className="border-b border-border">
@@ -2024,6 +2054,7 @@ export default function DocumentEditorPage() {
             ) : null}
           </section>
         </div>
+        </fieldset>
 
         {issues.length ? (
           <ul
@@ -2107,10 +2138,11 @@ export default function DocumentEditorPage() {
           >
             {t('previewPrint')}
           </button>
+          {!documentReadOnly ? (
           <button
             type="button"
             className="rounded bg-brand px-token-md py-token-sm text-white"
-            disabled={readOnlyHistorical || submitting}
+            disabled={submitting}
             onClick={async () => {
               try {
                 setError(null);
@@ -2157,10 +2189,11 @@ export default function DocumentEditorPage() {
           >
             {t('save')}
           </button>
+          ) : null}
           {offlineHint ? <span className="text-token-sm text-amber-800">{offlineHint}</span> : null}
           {!isNew ? (
             <>
-              {canPrepareForSubmit ? (
+              {canPrepareForSubmit && !documentReadOnly ? (
               <>
               <button
                 type="button"
@@ -2541,7 +2574,7 @@ export default function DocumentEditorPage() {
         </div>
       </div>
 
-      {taxModalLine && taxModalLineIdx != null ? (
+      {taxModalLine && taxModalLineIdx != null && !documentReadOnly ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-token-md"
           role="dialog"

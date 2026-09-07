@@ -10,7 +10,7 @@ import { parseEtaDocument } from '@einvoice/eta-core';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { SubmissionsService } from '../submissions/submissions.service';
-import { assertDocumentMutable } from '../documents/documents-mutability';
+import { assertDocumentCanMutate } from '../documents/documents-mutability';
 
 const CLAIM_LEASE_MINUTES = 5;
 
@@ -48,7 +48,7 @@ export class SigningService {
     const job = await this.tenantPrisma.withTenant(tenantId, async (tx) => {
       const doc = await tx.document.findFirst({ where: { id: documentId, tenantId } });
       if (!doc) throw new NotFoundException('Document not found');
-      assertDocumentMutable(doc.origin);
+      assertDocumentCanMutate(doc.origin, doc.status);
       if (doc.status !== 'READY') {
         throw new BadRequestException('Document must be READY to send for signature');
       }
