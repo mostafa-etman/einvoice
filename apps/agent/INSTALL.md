@@ -64,7 +64,7 @@ Absolute path on this machine (after publish):
    Or double-click `Run-Agent.cmd` after editing the API URL inside it.
 3. Tray icon appears → first-run wizard: **pair** with the web code → confirm **auto-detected** library/certificate (or pick manually).
 4. From the web app, send a document for signature. Agent prompts for **PIN** (stays on this PC only).
-5. Tray menu: **Pair device…**, **Token / certificate…**, **Clear PIN**, Quit.
+5. Tray menu: **Pair device…** (first setup only), **Unpair / re-pair…**, **Token / certificate…**, **Clear PIN**, Quit.
 
 Confirmed by design: auto-detect → local config; pair + claim/sign over the API; PIN never leaves the machine (see [AGENT-CREDENTIALS.md](./AGENT-CREDENTIALS.md)).
 

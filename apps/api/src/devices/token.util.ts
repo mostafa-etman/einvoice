@@ -5,7 +5,7 @@ const UUID_RE =
 
 /** Never store plaintext pairing codes / device tokens — hash at rest. */
 export function hashSecretToken(raw: string): string {
-  return createHash('sha256').update(raw).digest('hex');
+  return createHash('sha256').update(raw.trim()).digest('hex');
 }
 
 function generateSecretHex(bytes: number): string {
@@ -45,8 +45,10 @@ export function parseTenantPrefixedToken(
   raw: string | undefined | null,
   expectedParts: number,
 ): string[] | null {
-  if (typeof raw !== 'string' || raw.length === 0) return null;
-  const parts = raw.split('.');
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  const parts = trimmed.split('.');
   if (parts.length !== expectedParts) return null;
   if (!UUID_RE.test(parts[0] ?? '')) return null;
   // 3-part tokens are `${tenantId}.${deviceId}.${secret}` — deviceId is also a UUID.

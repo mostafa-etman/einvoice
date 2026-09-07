@@ -122,6 +122,15 @@ describe('Devices pairing API', () => {
       .send({ ready: { tokenPresent: true, pendingLocal: 0 } })
       .expect(200);
     expect(heartbeat.body.ok).toBe(true);
+    expect(heartbeat.body.deviceId).toBe(paired.body.deviceId);
+    expect(heartbeat.body.tenantId).toBe(ctx.tenantId);
+
+    // Long-lived registration: the same token still works on a later call (no re-pair).
+    await request(app.getHttpServer())
+      .post('/agent/heartbeat')
+      .set('Authorization', `Bearer ${deviceToken}`)
+      .send({ ready: { tokenPresent: true, pendingLocal: 0 } })
+      .expect(200);
 
     const devicesAfterHeartbeat = await request(app.getHttpServer())
       .get('/devices')
@@ -212,6 +221,103 @@ describe('Devices pairing API', () => {
       .set('X-Tenant-Id', owner.tenantId)
       .send({})
       .expect(403);
+  });
+
+  it('re-pairing the same machineFingerprint reuses the device (long-lived registration)', async () => {
+    if (!dbAvailable) return;
+    const ctx = await ownerCtx(app, `resume${Date.now()}`);
+    const fingerprint = `pc-${Date.now()}`;
+
+    const firstCode = await request(app.getHttpServer())
+      .post('/devices/pairing-codes')
+      .set('Authorization', `Bearer ${ctx.token}`)
+      .set('X-Tenant-Id', ctx.tenantId)
+      .send({})
+      .expect(201);
+
+    const first = await request(app.getHttpServer())
+      .post('/agent/pair')
+      .send({
+        pairingCode: firstCode.body.code,
+        label: 'Accounts PC',
+        machineFingerprint: fingerprint,
+      })
+      .expect(201);
+    expect(first.body.expiresAt).toBeNull();
+    expect(first.body.resumed).toBe(false);
+
+    const secondCode = await request(app.getHttpServer())
+      .post('/devices/pairing-codes')
+      .set('Authorization', `Bearer ${ctx.token}`)
+      .set('X-Tenant-Id', ctx.tenantId)
+      .send({})
+      .expect(201);
+
+    const second = await request(app.getHttpServer())
+      .post('/agent/pair')
+      .send({
+        pairingCode: secondCode.body.code,
+        label: 'Accounts PC (reinstall)',
+        machineFingerprint: fingerprint,
+      })
+      .expect(201);
+
+    expect(second.body.deviceId).toBe(first.body.deviceId);
+    expect(second.body.resumed).toBe(true);
+    expect(second.body.expiresAt).toBeNull();
+    expect(second.body.deviceToken).not.toBe(first.body.deviceToken);
+
+    // Rotated token works; previous token does not.
+    await request(app.getHttpServer())
+      .post('/agent/heartbeat')
+      .set('Authorization', `Bearer ${second.body.deviceToken}`)
+      .send({})
+      .expect(200);
+    await request(app.getHttpServer())
+      .post('/agent/heartbeat')
+      .set('Authorization', `Bearer ${first.body.deviceToken}`)
+      .send({})
+      .expect(401);
+
+    const devices = await request(app.getHttpServer())
+      .get('/devices')
+      .set('Authorization', `Bearer ${ctx.token}`)
+      .set('X-Tenant-Id', ctx.tenantId)
+      .expect(200);
+    const paired = devices.body.items.filter((d: { status: string }) => d.status === 'PAIRED');
+    expect(paired).toHaveLength(1);
+  });
+
+  it('agent self-unpair revokes the device token', async () => {
+    if (!dbAvailable) return;
+    const ctx = await ownerCtx(app, `selfunpair${Date.now()}`);
+
+    const created = await request(app.getHttpServer())
+      .post('/devices/pairing-codes')
+      .set('Authorization', `Bearer ${ctx.token}`)
+      .set('X-Tenant-Id', ctx.tenantId)
+      .send({})
+      .expect(201);
+
+    const paired = await request(app.getHttpServer())
+      .post('/agent/pair')
+      .send({
+        pairingCode: created.body.code,
+        label: 'Self Unpair PC',
+        machineFingerprint: `self-${Date.now()}`,
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/agent/unpair')
+      .set('Authorization', `Bearer ${paired.body.deviceToken}`)
+      .expect(204);
+
+    await request(app.getHttpServer())
+      .post('/agent/heartbeat')
+      .set('Authorization', `Bearer ${paired.body.deviceToken}`)
+      .send({})
+      .expect(401);
   });
 });
 

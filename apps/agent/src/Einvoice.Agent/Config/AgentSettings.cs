@@ -34,16 +34,15 @@ public sealed class AgentSettings
     public string? SoftwareCertPemPath { get; init; }
 
     public string QueueDatabasePath { get; init; } =
-        Path.Combine(
-            System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData),
-            "Einvoice.Agent",
-            "queue.db");
+        Path.Combine(LocalAgentConfig.DefaultDirectory, "queue.db");
 
+    /// <summary>Legacy DPAPI blob; still read on startup and migrated to <see cref="PairingStorePath"/>.</summary>
     public string TokenStorePath { get; init; } =
-        Path.Combine(
-            System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData),
-            "Einvoice.Agent",
-            "device.token");
+        Path.Combine(LocalAgentConfig.DefaultDirectory, DeviceTokenStore.LegacyTokenFileName);
+
+    /// <summary>Durable pairing envelope (device token + tenant/API binding).</summary>
+    public string PairingStorePath { get; init; } =
+        Path.Combine(LocalAgentConfig.DefaultDirectory, DeviceTokenStore.PairingFileName);
 
     public string LocalConfigPath { get; init; } = LocalAgentConfig.DefaultPath;
 

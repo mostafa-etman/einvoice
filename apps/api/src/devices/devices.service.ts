@@ -75,7 +75,7 @@ export class DevicesService {
     return toSummary(updated);
   }
 
-  async unpair(tenantId: string, actorUserId: string, id: string) {
+  async unpair(tenantId: string, actorUserId: string | null, id: string) {
     await this.tenantPrisma.withTenant(tenantId, async (tx) => {
       const existing = await tx.signingDevice.findFirst({ where: { id, tenantId } });
       if (!existing) throw new NotFoundException('Device not found');
@@ -94,18 +94,19 @@ export class DevicesService {
     await this.audit.write({
       action: 'devices.device.unpair',
       outcome: 'success',
-      actorUserId,
+      actorUserId: actorUserId ?? undefined,
       tenantId,
       resourceType: 'signing_device',
       resourceId: id,
-      metadata: {},
+      metadata: { source: actorUserId ? 'admin' : 'agent' },
     });
   }
 
   /**
-   * Consumes a pairing code and registers a new device. Runs entirely inside
-   * one tenant-scoped transaction (tenantId is parsed from the code prefix)
-   * so code validation, device creation, and code consumption stay atomic.
+   * Consumes a pairing code and registers a device. The issued device token is
+   * long-lived (expiresAt / tokenExpiresAt stay null) until explicit unpair.
+   * The same machineFingerprint on an already-PAIRED row reuses that device
+   * instead of creating a second seat.
    */
   async pairAgent(input: {
     pairingCode: string;
@@ -119,7 +120,20 @@ export class DevicesService {
     if (!input.label?.trim()) throw new BadRequestException('label is required');
 
     await this.quota.checkTenantWritable(tenantId!);
-    await this.quota.assertWithinLimits(tenantId!, 'devices');
+
+    const fingerprint = input.machineFingerprint?.trim() || undefined;
+    const existing = fingerprint
+      ? await this.tenantPrisma.withTenant(tenantId!, (tx) =>
+          tx.signingDevice.findFirst({
+            where: { tenantId, machineFingerprint: fingerprint, status: 'PAIRED' },
+          }),
+        )
+      : null;
+
+    // Returning the same PC reuses the long-lived device row (no extra quota seat).
+    if (!existing) {
+      await this.quota.assertWithinLimits(tenantId!, 'devices');
+    }
 
     const result = await this.tenantPrisma.withTenant(tenantId!, async (tx) => {
       const code = await tx.pairingCode.findFirst({ where: { tenantId, codeHash } });
@@ -137,27 +151,41 @@ export class DevicesService {
         throw new BadRequestException('Pairing code expired');
       }
 
-      const deviceId = randomUUID();
+      const deviceId = existing?.id ?? randomUUID();
       const { token, hash } = buildDeviceToken(tenantId!, deviceId);
 
-      const device = await tx.signingDevice.create({
-        data: {
-          id: deviceId,
-          tenantId: tenantId!,
-          label: input.label,
-          machineFingerprint: input.machineFingerprint,
-          status: 'PAIRED',
-          tokenHash: hash,
-          pairedAt: new Date(),
-        },
-      });
+      const device = existing
+        ? await tx.signingDevice.update({
+            where: { id: existing.id },
+            data: {
+              label: input.label,
+              machineFingerprint: fingerprint,
+              status: 'PAIRED',
+              tokenHash: hash,
+              tokenExpiresAt: null,
+              revokedAt: null,
+              lastSeenAt: new Date(),
+            },
+          })
+        : await tx.signingDevice.create({
+            data: {
+              id: deviceId,
+              tenantId: tenantId!,
+              label: input.label,
+              machineFingerprint: fingerprint,
+              status: 'PAIRED',
+              tokenHash: hash,
+              tokenExpiresAt: null,
+              pairedAt: new Date(),
+            },
+          });
 
       await tx.pairingCode.update({
         where: { id: code.id },
         data: { status: 'CONSUMED', consumedAt: new Date(), consumedByDeviceId: device.id },
       });
 
-      return { device, token };
+      return { device, token, resumed: Boolean(existing) };
     });
 
     await this.audit.write({
@@ -166,7 +194,7 @@ export class DevicesService {
       tenantId,
       resourceType: 'signing_device',
       resourceId: result.device.id,
-      metadata: { label: result.device.label },
+      metadata: { label: result.device.label, resumed: result.resumed },
     });
 
     return {
@@ -174,6 +202,7 @@ export class DevicesService {
       deviceToken: result.token,
       tenantId,
       expiresAt: null,
+      resumed: result.resumed,
     };
   }
 
@@ -183,14 +212,24 @@ export class DevicesService {
         where: { id: device.id },
         data: {
           lastSeenAt: new Date(),
+          // Live paired devices stay registered until explicit unpair/revoke.
+          tokenExpiresAt: null,
           ...(ready ? { lastReadyJson: ready as Prisma.InputJsonValue } : {}),
         },
       }),
     );
-    return { ok: true };
+    return {
+      ok: true,
+      deviceId: device.id,
+      tenantId: device.tenantId,
+      status: device.status,
+    };
   }
 
-  /** Resolves a device by its bearer token; throws 401 if invalid, revoked, or unknown tenant/device. */
+  /**
+   * Resolves a device by its bearer token; throws 401 if invalid, revoked, or unknown.
+   * Device tokens are long-lived (tokenExpiresAt is unused) until admin/agent unpair.
+   */
   async resolveByToken(token: string): Promise<SigningDevice> {
     const parts = parseTenantPrefixedToken(token, 3);
     if (!parts) throw new UnauthorizedException();

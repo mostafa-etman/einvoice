@@ -44,10 +44,26 @@ public sealed class LocalAgentConfig
     /// </summary>
     public string? ApiBaseUrl { get; set; }
 
-    public static string DefaultDirectory =>
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Einvoice.Agent");
+    /// <summary>
+    /// Durable per-user directory. Never uses the single-file extract folder
+    /// (<see cref="AppContext.BaseDirectory"/>) or the process working directory.
+    /// </summary>
+    public static string DefaultDirectory
+    {
+        get
+        {
+            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (string.IsNullOrWhiteSpace(local))
+                local = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+            if (string.IsNullOrWhiteSpace(local))
+            {
+                var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                local = Path.Combine(home, "AppData", "Local");
+            }
+
+            return Path.Combine(local, "Einvoice.Agent");
+        }
+    }
 
     public static string DefaultPath => Path.Combine(DefaultDirectory, FileName);
 

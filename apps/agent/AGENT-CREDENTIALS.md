@@ -10,7 +10,7 @@ lives in the **cloud** SaaS. The eSeal token PIN never leaves the PC.
 | eSeal **PIN** | **Agent only** | Prompt at sign time; optional DPAPI remember. Never in web UI, never in API bodies. |
 | PKCS#11 **DLL path** | Agent local config | Auto-detected; manual override in agent. Not secret. |
 | Certificate **issuer / thumbprint** | Agent local config | Auto-detected from token; picker if multiple. Not secret. |
-| Device pairing token | Agent (`device.token`, DPAPI) + cloud pairing record | Bearer auth for agent channel only. |
+| Device pairing token | Agent (`pairing.json`, DPAPI) + cloud pairing record | Bearer auth for agent channel only. Long-lived until Unpair. |
 | Tenant / branch / documents | Cloud | |
 | ETA ClientId / ClientSecret | Cloud (encrypted at rest) | |
 
@@ -43,11 +43,12 @@ Saved in `%LocalAppData%\Einvoice.Agent\agent.config.json` (no PIN).
 1. Install the agent on the Windows PC that has the USB token
    (see [INSTALL.md](./INSTALL.md) for the self-contained EXE or Setup installer).
 2. Plug in the eSeal token (middleware/drivers already installed by the CA).
-3. In the web app: **Devices → Create pairing code**.
-4. In the agent tray: **Pair device…** and paste the code.
+3. In the web app: **Devices → Create pairing code** (once).
+4. In the agent tray: **Pair device…** and paste the code. Pairing is saved on this PC.
 5. Confirm the auto-detected library/certificate (or pick manually).
 6. When the first document is sent for signature, enter the PIN in the agent
-   dialog (optionally remember locally).
+   dialog (optionally remember locally). Closing or restarting the agent does
+   **not** require a new pairing code. Use tray **Unpair / re-pair…** only to reset.
 
 **Distribution:** publish output is `apps/agent/dist/win-x64/Einvoice.Agent.exe`
 (self-contained; client does not need .NET). Full publish/run/installer steps:
@@ -58,8 +59,9 @@ Saved in `%LocalAppData%\Einvoice.Agent\agent.config.json` (no PIN).
 | Path | Contents |
 |------|----------|
 | `agent.config.json` | Library, issuer, thumbprint, remember-PIN prefs (flags only) |
+| `pairing.json` | Device token (DPAPI) + tenant/API binding. Survives restart. |
+| `device.token` | Legacy blob; migrated to `pairing.json` on load |
 | `pin.dpapi` | Optional DPAPI ciphertext of PIN + expiry |
-| `device.token` | DPAPI device bearer token |
 | `queue.db` | Offline signed job queue |
 
 ## Code map

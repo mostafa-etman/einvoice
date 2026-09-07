@@ -42,6 +42,10 @@ public sealed class AgentApiClient : IDisposable
         IsUnpaired = true;
     }
 
+    /// <summary>Revoke this device on the server. Local store must be cleared by the caller.</summary>
+    public Task<JObject> UnpairAsync(CancellationToken cancellationToken = default) =>
+        PostAsync("agent/unpair", new JObject(), idempotencyKey: null, cancellationToken);
+
     public async Task<JObject> PairAsync(
         string pairingCode,
         string label,

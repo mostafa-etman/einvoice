@@ -25,4 +25,12 @@ export class AgentDevicesController {
   ) {
     return this.devices.heartbeat(device, body?.ready);
   }
+
+  /** Authenticated: the paired agent can revoke itself (local Unpair / re-pair). */
+  @Post('unpair')
+  @HttpCode(204)
+  @UseGuards(DeviceTokenGuard)
+  async unpairSelf(@CurrentDevice() device: SigningDevice) {
+    await this.devices.unpair(device.tenantId, null, device.id);
+  }
 }

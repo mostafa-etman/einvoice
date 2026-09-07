@@ -14,7 +14,7 @@ public partial class PairingDialog : Window
     {
         Title = "Pair signing device";
         Width = 460;
-        Height = 320;
+        Height = 360;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         ResizeMode = ResizeMode.NoResize;
 
@@ -36,7 +36,8 @@ public partial class PairingDialog : Window
 
         root.Children.Add(new TextBlock
         {
-            Text = "Enter the pairing code from the Devices screen:",
+            Text = "Enter the pairing code from the Devices screen.\n" +
+                   "This is a one-time setup — after pairing, restarts do not need a new code.",
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 8),
         });
