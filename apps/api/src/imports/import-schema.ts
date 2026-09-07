@@ -579,6 +579,9 @@ export function sampleImportRows(issuedIso: string): string[][] {
     taxType2: 'T4',
     taxSubType2: 'W001',
     taxRate2: '1',
+    taxType3: 'T2',
+    taxSubType3: 'Tbl01',
+    taxRate3: '10',
   };
 
   return [
@@ -633,6 +636,7 @@ export function arabicSampleImportRows(issuedIso: string): string[][] {
   line2.receiverType = 'شركة';
   line2.taxType1 = 'T1 — ضريبة القيمة المضافة';
   line2.taxType2 = 'T4 — الخصم تحت حساب الضريبة';
+  line2.taxType3 = 'T2 — ضريبة الجدول (نسبية)';
   return [
     arHeaders,
     IMPORT_ALL_FIELD_KEYS.map((k) => line1[k] ?? ''),

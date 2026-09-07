@@ -775,7 +775,7 @@
   "imports": {
     "title": "Bulk import",
     "intro": "Upload CSV or XLSX (one row per line item; same internalID = one invoice). Map columns, validate, then create. Bad invoices are reported; good ones proceed.",
-    "templateHelp": "Download the template (XLSX has Import + Lists + Notes). Arabic headers with (*) are required. Pick allowed values from the Lists sheet. Issuer name/address come from Settings — not the file. Existing English-header files still import.",
+    "templateHelp": "Download the Excel template (Invoices sheet only; lists are hidden). Arabic headers with (*) are required. Use the locked dropdowns — free typing is rejected. Tax subtype lists depend on the tax type in the same row. Up to 3 taxes per line. Issuer name/address come from Settings — not the file. Existing English-header files still import.",
     "start": "New import",
     "history": "Import history",
     "downloadTemplate": "Download template",

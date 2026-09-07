@@ -37,6 +37,10 @@ export const IMPORT_COMMON_OPTIONAL_FIELDS = [
   'taxSubType2',
   'taxRate2',
   'taxAmount2',
+  'taxType3',
+  'taxSubType3',
+  'taxRate3',
+  'taxAmount3',
 ] as const;
 
 export const IMPORT_FIELD_AR: Record<string, string> = {
@@ -50,7 +54,7 @@ export const IMPORT_FIELD_AR: Record<string, string> = {
   unitPrice: 'سعر الوحدة',
   documentType: 'نوع المستند',
   branchCode: 'كود الفرع',
-  currencyCode: 'العملة',
+  currencyCode: 'عملة البيع',
   receiverType: 'نوع المستلم',
   receiverGovernate: 'محافظة المستلم',
   receiverRegionCity: 'مدينة المستلم',
@@ -70,5 +74,9 @@ export const IMPORT_FIELD_AR: Record<string, string> = {
   taxSubType2: 'النوع الفرعي 2',
   taxRate2: 'نسبة الضريبة 2',
   taxAmount2: 'قيمة الضريبة 2',
+  taxType3: 'نوع الضريبة 3',
+  taxSubType3: 'النوع الفرعي 3',
+  taxRate3: 'نسبة الضريبة 3',
+  taxAmount3: 'قيمة الضريبة 3',
 };
 

@@ -162,7 +162,11 @@ describe('import-document-builder', () => {
       subType: 'V009',
       rate: '14',
     });
-    expect(dto.lines[1]!.taxes).toHaveLength(2);
+    expect(dto.lines[1]!.taxes).toEqual([
+      { taxType: 'T1', subType: 'V009', rate: '14' },
+      { taxType: 'T4', subType: 'W001', rate: '1' },
+      { taxType: 'T2', subType: 'Tbl01', rate: '10' },
+    ]);
   });
 
   it('detects header conflicts across lines of the same invoice', () => {

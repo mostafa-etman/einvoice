@@ -109,9 +109,14 @@ export function normalizeMappedImportValues(
       out.deliveryCountryOfOrigin,
     );
   }
-  if (out.currencyCode) out.currencyCode = out.currencyCode.trim().toUpperCase();
+  if (out.currencyCode) {
+    out.currencyCode = firstToken(out.currencyCode).toUpperCase() || out.currencyCode;
+  }
   for (const key of Object.keys(out)) {
     if (key.startsWith('taxType')) out[key] = normalizeTaxTypeValue(out[key]!);
+    if (key.startsWith('taxSubType')) {
+      out[key] = firstToken(out[key]!) || out[key]!;
+    }
   }
   return out;
 }

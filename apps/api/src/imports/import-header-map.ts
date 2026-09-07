@@ -43,6 +43,8 @@ const EXTRA_ALIASES: Record<string, string> = {
   'شارع المستلم': 'receiverStreet',
   'مبنى المستلم': 'receiverBuildingNumber',
   'وصف الصنف': 'description',
+  'العملة': 'currencyCode',
+  'عملة البيع': 'currencyCode',
   'نوع كود الصنف': 'itemType',
   'كود الصنف': 'itemCode',
   'وحدة القياس': 'unitType',

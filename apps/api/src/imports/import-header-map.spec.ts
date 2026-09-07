@@ -12,6 +12,8 @@ describe('Arabic import headers', () => {
     expect(resolveImportFieldKey('internalID')).toBe('internalID');
     expect(resolveImportFieldKey('رقم تسجيل المستلم')).toBe('receiverId');
     expect(resolveImportFieldKey('نوع الضريبة 1 (*)')).toBe('taxType1');
+    expect(resolveImportFieldKey('عملة البيع')).toBe('currencyCode');
+    expect(resolveImportFieldKey('العملة')).toBe('currencyCode');
   });
 
   it('auto-maps a full Arabic template header row including required fields', () => {
@@ -36,6 +38,7 @@ describe('Arabic import headers', () => {
         [arabicHeaderForField('internalID', true)]: 'INV-1',
         [arabicHeaderForField('receiverType', false)]: 'شركة',
         [arabicHeaderForField('taxType1', false)]: 'T1 — ضريبة القيمة المضافة',
+        [arabicHeaderForField('taxSubType1', false)]: 'V009 — سلع عامة',
         [arabicHeaderForField('documentType', false)]: 'مرتجع',
         [arabicHeaderForField('receiverCountry', false)]: 'EG — مصر',
       },
@@ -43,6 +46,7 @@ describe('Arabic import headers', () => {
         arabicHeaderForField('internalID', true),
         arabicHeaderForField('receiverType', false),
         arabicHeaderForField('taxType1', false),
+        arabicHeaderForField('taxSubType1', false),
         arabicHeaderForField('documentType', false),
         arabicHeaderForField('receiverCountry', false),
       ]),
@@ -50,6 +54,7 @@ describe('Arabic import headers', () => {
     const norm = normalizeMappedImportValues(mapped);
     expect(norm.receiverType).toBe('B');
     expect(norm.taxType1).toBe('T1');
+    expect(norm.taxSubType1).toBe('V009');
     expect(norm.documentType).toBe('C');
     expect(norm.receiverCountry).toBe('EG');
   });

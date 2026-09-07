@@ -7,7 +7,7 @@ export const IMPORT_AR_HEADERS: Record<string, string> = {
   dateTimeIssued: 'تاريخ الإصدار',
   documentType: 'نوع المستند',
   branchCode: 'كود الفرع',
-  currencyCode: 'العملة',
+  currencyCode: 'عملة البيع',
   taxpayerActivityCode: 'كود النشاط',
   serviceDeliveryDate: 'تاريخ تسليم الخدمة',
   purchaseOrderReference: 'رقم أمر الشراء',

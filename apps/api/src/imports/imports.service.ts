@@ -13,7 +13,7 @@ import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { DocumentsService } from '../documents/documents.service';
 import { SigningService } from '../signing/signing.service';
-import { ImportParseService, detectImportFormat } from './import-parse.service';
+import { ImportParseService, detectImportFormat, pickImportSheetName } from './import-parse.service';
 import {
   ImportValidateService,
   IMPORT_REQUIRED_FIELDS,
@@ -24,12 +24,11 @@ import {
 import { ImportErrorReportService } from './import-error-report.service';
 import { resolveImportTerminalStatus } from './import-partial-status';
 import {
-  IMPORT_ALL_FIELD_KEYS,
   arabicNotesRows,
   arabicSampleImportRows,
 } from './import-schema';
 import { proposeColumnMapping } from './import-header-map';
-import { importListsAoA, LIST_RANGES } from './import-lists';
+import { buildImportTemplateXlsx } from './import-template-xlsx';
 import {
   buildDocumentUpsert,
   groupRowsByInternalId,
@@ -39,35 +38,6 @@ import { QUEUE_IMPORT, type ImportJobData } from '../queues/queue-names';
 import type { ArtifactStorage } from '../storage/storage.module';
 import { loadEnv } from '../config/env';
 import * as XLSX from 'xlsx';
-
-function addTemplateValidations(ws: XLSX.WorkSheet) {
-  const colOf = (key: string) => {
-    const i = IMPORT_ALL_FIELD_KEYS.indexOf(key);
-    return i >= 0 ? XLSX.utils.encode_col(i) : null;
-  };
-  const dv: Array<Record<string, unknown>> = [];
-  const add = (key: string, formula1: string) => {
-    const c = colOf(key);
-    if (!c) return;
-    dv.push({
-      sqref: `${c}2:${c}2000`,
-      type: 'list',
-      formula1,
-      allowBlank: true,
-      showDropDown: true,
-    });
-  };
-  add('receiverType', LIST_RANGES.receiverType);
-  add('itemType', LIST_RANGES.itemType);
-  add('unitType', LIST_RANGES.unitType);
-  add('currencyCode', LIST_RANGES.currencyCode);
-  add('receiverCountry', LIST_RANGES.receiverCountry);
-  add('documentType', LIST_RANGES.documentType);
-  for (let n = 1; n <= 5; n++) add(`taxType${n}`, LIST_RANGES.taxType);
-  (
-    ws as XLSX.WorkSheet & { '!dataValidations'?: Array<Record<string, unknown>> }
-  )['!dataValidations'] = dv;
-}
 
 @Injectable()
 export class ImportsService {
@@ -112,44 +82,8 @@ export class ImportsService {
     return Buffer.from(combined, 'utf8');
   }
 
-  templateXlsx(_documentType = 'I'): Buffer {
-    const issued = new Date().toISOString();
-    const importAoA = arabicSampleImportRows(issued);
-    const listsAoA = importListsAoA();
-    const notesAoA = arabicNotesRows();
-    const wb = XLSX.utils.book_new();
-    const wsImport = XLSX.utils.aoa_to_sheet(importAoA);
-    wsImport['!cols'] = importAoA[0]!.map(() => ({ wch: 22 }));
-    addTemplateValidations(wsImport);
-    const wsLists = XLSX.utils.aoa_to_sheet(listsAoA);
-    wsLists['!cols'] = [
-      { wch: 18 },
-      { wch: 4 },
-      { wch: 16 },
-      { wch: 4 },
-      { wch: 28 },
-      { wch: 4 },
-      { wch: 10 },
-      { wch: 4 },
-      { wch: 42 },
-      { wch: 4 },
-      { wch: 36 },
-      { wch: 4 },
-      { wch: 28 },
-    ];
-    const wsNotes = XLSX.utils.aoa_to_sheet(notesAoA);
-    wsNotes['!cols'] = [
-      { wch: 28 },
-      { wch: 12 },
-      { wch: 12 },
-      { wch: 50 },
-      { wch: 24 },
-      { wch: 18 },
-    ];
-    XLSX.utils.book_append_sheet(wb, wsImport, 'Import');
-    XLSX.utils.book_append_sheet(wb, wsLists, 'Lists');
-    XLSX.utils.book_append_sheet(wb, wsNotes, 'Notes');
-    return Buffer.from(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+  templateXlsx(_documentType = 'I'): Promise<Buffer> {
+    return buildImportTemplateXlsx();
   }
 
   async listJobs(tenantId: string) {
@@ -269,9 +203,7 @@ export class ImportsService {
       }
     } else {
       const wb = XLSX.read(buffer, { type: 'buffer' });
-      const sheetName =
-        wb.SheetNames.find((n) => n.toLowerCase() === 'import') ??
-        wb.SheetNames[0];
+      const sheetName = pickImportSheetName(wb.SheetNames);
       const sheet = sheetName ? wb.Sheets[sheetName] : undefined;
       if (sheet) {
         const rows = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1 });

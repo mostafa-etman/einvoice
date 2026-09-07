@@ -32,14 +32,14 @@ export class ImportsController {
 
   @Get('templates/:documentType')
   @RequirePermissions(PERMISSIONS.DOCUMENTS_MANAGE)
-  template(
+  async template(
     @Param('documentType') documentType: string,
     @Query('format') format: string,
     @Res() res: Response,
   ) {
     const fmt = (format || 'csv').toLowerCase();
     if (fmt === 'xlsx') {
-      const buf = this.imports.templateXlsx(documentType);
+      const buf = await this.imports.templateXlsx(documentType);
       res.setHeader(
         'Content-Type',
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

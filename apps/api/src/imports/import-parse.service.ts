@@ -20,6 +20,23 @@ export type StreamParseOptions = {
 
 const XLS_MAGIC = Buffer.from([0xd0, 0xcf, 0x11, 0xe0]); // OLE compound (legacy .xls)
 
+const IMPORT_DATA_SHEET_ALIASES = ['invoices', 'الفواتير', 'import'];
+const IMPORT_META_SHEETS = new Set(['lists', 'notes', 'القوائم', 'ملاحظات']);
+
+/** Prefer the invoices sheet; skip hidden lookup/notes sheets from older templates. */
+export function pickImportSheetName(sheetNames: string[]): string | undefined {
+  if (!sheetNames.length) return undefined;
+  const lower = sheetNames.map((n) => n.toLowerCase());
+  for (const alias of IMPORT_DATA_SHEET_ALIASES) {
+    const i = lower.indexOf(alias);
+    if (i >= 0) return sheetNames[i];
+  }
+  return (
+    sheetNames.find((n) => !IMPORT_META_SHEETS.has(n.toLowerCase())) ??
+    sheetNames[0]
+  );
+}
+
 export function isLegacyXls(buf: Buffer): boolean {
   return buf.length >= 4 && buf.subarray(0, 4).equals(XLS_MAGIC);
 }
@@ -114,8 +131,7 @@ export async function parseXlsxBuffer(
   }
   const maxRows = options.maxRows ?? 5000;
   const wb = XLSX.read(buf, { type: 'buffer', cellDates: false, dense: false });
-  const sheetName =
-    wb.SheetNames.find((n) => n.toLowerCase() === 'import') ?? wb.SheetNames[0];
+  const sheetName = pickImportSheetName(wb.SheetNames);
   if (!sheetName) return { totalRows: 0 };
   const sheet = wb.Sheets[sheetName]!;
   const ref = sheet['!ref'];

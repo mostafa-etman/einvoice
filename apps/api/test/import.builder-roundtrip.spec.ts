@@ -93,14 +93,13 @@ describe('import builder produces markReady-valid invoices', () => {
     await app.close();
   });
 
-  it('template XLSX has Import + Lists + Notes sheets and sample multi-line invoice', () => {
+  it('template XLSX has a visible Invoices sheet, hidden Lists, and a sample multi-line invoice', async () => {
     const imports = app.get(ImportsService);
-    const buf = imports.templateXlsx('I');
+    const buf = await imports.templateXlsx('I');
     const wb = XLSX.read(buf, { type: 'buffer' });
-    expect(wb.SheetNames).toEqual(
-      expect.arrayContaining(['Import', 'Lists', 'Notes']),
-    );
-    const raw = XLSX.utils.sheet_to_json<string[]>(wb.Sheets.Import!, {
+    expect(wb.SheetNames).toEqual(expect.arrayContaining(['Invoices', 'Lists']));
+    expect(wb.SheetNames).not.toContain('Notes');
+    const raw = XLSX.utils.sheet_to_json<string[]>(wb.Sheets.Invoices!, {
       header: 1,
     });
     const headers = (raw[0] ?? []).map((h) => String(h ?? ''));
