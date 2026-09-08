@@ -27,6 +27,9 @@ import {
   upsertPlan,
   upsertAddon,
   applyAddon,
+  setPlanActive,
+  listTrialTaxRegistrations,
+  resetTrialTaxRegistration,
   type ImpersonationSessionView,
   type LifecycleStatus,
   type PlanAdmin,
@@ -34,7 +37,7 @@ import {
 } from '@/lib/api/platform-admin';
 import { CopyableTenantId } from '@/components/copyable-tenant-id';
 
-type Tab = 'tenants' | 'plans' | 'addons' | 'costs' | 'settings';
+type Tab = 'tenants' | 'plans' | 'addons' | 'costs' | 'settings' | 'trials';
 
 function TenantDetailPanel({
   tenantId,
@@ -342,6 +345,11 @@ export default function PlatformAdminPage() {
     queryFn: getSettings,
     enabled: tab === 'settings',
   });
+  const trialRegsQuery = useQuery({
+    queryKey: ['platform-admin-trial-tax-regs'],
+    queryFn: listTrialTaxRegistrations,
+    enabled: tab === 'trials',
+  });
 
   useEffect(() => {
     const handle = window.setTimeout(() => setQDebounced(q.trim()), 250);
@@ -388,7 +396,7 @@ export default function PlatformAdminPage() {
   return (
     <div className="space-y-4">
       <nav className="flex flex-wrap gap-2 border-b border-border pb-2">
-        {(['tenants', 'plans', 'addons', 'costs', 'settings'] as Tab[]).map((id) => (
+        {(['tenants', 'plans', 'addons', 'costs', 'settings', 'trials'] as Tab[]).map((id) => (
           <button
             key={id}
             type="button"
@@ -404,7 +412,9 @@ export default function PlatformAdminPage() {
                     ? 'tabAddons'
                     : id === 'costs'
                       ? 'tabCosts'
-                      : 'tabSettings',
+                      : id === 'trials'
+                        ? 'tabTrials'
+                        : 'tabSettings',
             )}
           </button>
         ))}
@@ -665,6 +675,14 @@ export default function PlatformAdminPage() {
               />
               {t('isTrial')}
             </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={planForm.isActive}
+                onChange={(e) => setPlanForm((f) => ({ ...f, isActive: e.target.checked }))}
+              />
+              {t('isActive')}
+            </label>
             <button type="submit" className="rounded bg-brand px-3 py-2 text-sm text-white">
               {t('savePlan')}
             </button>
@@ -674,7 +692,7 @@ export default function PlatformAdminPage() {
               <li key={p.id} className="rounded border p-3">
                 <strong>{p.code}</strong> — {p.nameEn} / {p.nameAr} · {p.includedPoints}{' '}
                 {t('points')} · {p.discountedPriceEgp}/{p.officialPriceEgp} EGP · {p.maxUsers}u /{' '}
-                {p.maxCompanies}c
+                {p.maxCompanies}c · {p.isActive ? t('planActive') : t('planInactive')}
                 <button
                   type="button"
                   className="ms-2 text-brand underline"
@@ -700,6 +718,17 @@ export default function PlatformAdminPage() {
                   }
                 >
                   edit
+                </button>
+                <button
+                  type="button"
+                  className="ms-2 text-brand underline"
+                  onClick={() => {
+                    void setPlanActive(p.code, !p.isActive).then(() =>
+                      qc.invalidateQueries({ queryKey: ['platform-admin-plans'] }),
+                    );
+                  }}
+                >
+                  {p.isActive ? t('hideFromCustomers') : t('showToCustomers')}
                 </button>
               </li>
             ))}
@@ -911,6 +940,47 @@ export default function PlatformAdminPage() {
             {t('saveSettings')}
           </button>
         </form>
+      ) : null}
+
+      {tab === 'trials' ? (
+        <div className="space-y-3">
+          <h2 className="text-lg font-medium">{t('trialTaxRegTitle')}</h2>
+          <p className="text-sm text-muted-foreground">{t('trialTaxRegHint')}</p>
+          <ul className="space-y-2 text-sm">
+            {(trialRegsQuery.data?.items ?? []).map((row) => (
+              <li
+                key={row.taxRegistrationNormalized}
+                className="flex flex-wrap items-center justify-between gap-2 rounded border p-3"
+              >
+                <span>
+                  <strong dir="ltr">{row.taxRegistrationNormalized}</strong>
+                  <span className="ms-2 text-muted-foreground" dir="ltr">
+                    {new Date(row.consumedAt).toLocaleString()}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  className="text-brand underline"
+                  onClick={() => {
+                    if (!window.confirm(t('resetTrialPrompt'))) return;
+                    const reason = window.prompt(t('resetReasonPrompt')) || undefined;
+                    void resetTrialTaxRegistration(row.taxRegistrationNormalized, reason).then(
+                      () =>
+                        qc.invalidateQueries({ queryKey: ['platform-admin-trial-tax-regs'] }),
+                    );
+                  }}
+                >
+                  {t('resetTrial')}
+                </button>
+              </li>
+            ))}
+            {!trialRegsQuery.data?.items?.length ? (
+              <li className="text-muted-foreground">
+                {trialRegsQuery.isLoading ? t('loading') : t('noTrialTaxRegs')}
+              </li>
+            ) : null}
+          </ul>
+        </div>
       ) : null}
     </div>
   );

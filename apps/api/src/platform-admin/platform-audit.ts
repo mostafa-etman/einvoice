@@ -20,6 +20,8 @@ export const PLATFORM_AUDIT_ACTIONS = {
   ADDON_APPLY: 'platform.addon.apply',
   SETTINGS_UPDATE: 'platform.settings.update',
   TENANT_LIMITS: 'platform.tenant.limits',
+  TRIAL_TAX_REG_RESET: 'platform.trial_tax_reg.reset',
+  PLAN_SET_ACTIVE: 'platform.plan.set_active',
 } as const;
 
 export type PlatformAuditAction =

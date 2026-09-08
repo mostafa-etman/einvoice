@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -18,6 +19,7 @@ import type { TenantLifecycleStatus } from '../billing/tenant-lifecycle-status';
 import { ImpersonationService } from './impersonation.service';
 import { PlatformAdminGuard } from './platform-admin.guard';
 import { TenantLifecycleService } from './tenant-lifecycle.service';
+import { TrialTaxRegistrationService } from '../billing/trial-tax-registration.service';
 
 /** Super-admin console — JwtAuthGuard + PlatformAdminGuard (isPlatformOperator), NOT tenant RBAC. */
 @Controller('platform-admin')
@@ -27,6 +29,7 @@ export class PlatformAdminController {
     private readonly tenants: TenantLifecycleService,
     private readonly impersonation: ImpersonationService,
     private readonly points: PointsService,
+    private readonly trialTax: TrialTaxRegistrationService,
   ) {}
 
   @Get('tenants')
@@ -113,6 +116,31 @@ export class PlatformAdminController {
     },
   ) {
     return this.tenants.upsertPlan(user.userId, body);
+  }
+
+  @Patch('plans/:code')
+  setPlanActive(
+    @CurrentUser() user: AuthUser,
+    @Param('code') code: string,
+    @Body() body: { isActive: boolean },
+  ) {
+    if (typeof body?.isActive !== 'boolean') {
+      throw new BadRequestException('isActive_required');
+    }
+    return this.tenants.setPlanActive(user.userId, code, body.isActive);
+  }
+
+  @Get('trial-tax-registrations')
+  listTrialTaxRegistrations() {
+    return this.trialTax.list();
+  }
+
+  @Post('trial-tax-registrations/reset')
+  resetTrialTaxRegistration(
+    @CurrentUser() user: AuthUser,
+    @Body() body: { taxRegistrationNumber: string; reason?: string },
+  ) {
+    return this.trialTax.reset(body.taxRegistrationNumber, user.userId, body.reason);
   }
 
   @Get('addons')

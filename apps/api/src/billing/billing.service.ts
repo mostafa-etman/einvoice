@@ -125,7 +125,7 @@ export class BillingService {
 
   async changePlan(tenantId: string, userId: string, planCode: 'FREE' | 'STARTER' | 'PRO') {
     const targetPlan = await this.prisma.plan.findUnique({ where: { code: planCode } });
-    if (!targetPlan) {
+    if (!targetPlan || !targetPlan.isActive) {
       throw new BadRequestException('unknown_plan');
     }
 

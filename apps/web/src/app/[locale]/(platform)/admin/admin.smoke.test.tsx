@@ -12,6 +12,13 @@ describe('platform admin page smoke', () => {
     expect(en.common.tenantId).toBeTruthy();
     expect(ar.common.tenantId).toContain('مستأجر');
     expect(en.admin.adjustPoints).toBeTruthy();
+    expect(en.admin.isActive).toBeTruthy();
+    expect(en.admin.hideFromCustomers).toBeTruthy();
+    expect(en.admin.tabTrials).toBeTruthy();
+    expect(en.admin.resetTrial).toBeTruthy();
+    expect(ar.admin.tabTrials).toBeTruthy();
+    expect(en.auth.trialAlreadyUsed).toContain('free trial');
+    expect(ar.auth.trialAlreadyUsed).toContain('واتساب');
     expect(en.pending.whatsappPrompt).toContain('{number}');
     expect(ar.admin.approve).toBeTruthy();
     expect(ar.pending.whatsappPrompt).toContain('واتساب');

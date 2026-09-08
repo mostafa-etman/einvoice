@@ -1,9 +1,10 @@
 -- Tenant-scoped RLS. GUCs: app.tenant_id, app.user_id (SET LOCAL via set_config(..., true))
 --
--- Intentionally NOT RLS-protected (global / shared / identity):
+-- Intentionally NOT tenant-isolated (global / shared / identity):
 --   users              — global login identity; tenant membership is via memberships
 --   tenants            — root registry (access mediated by memberships + app checks)
---   permissions, plans, platform_settings, document_point_costs — platform catalogs
+--   permissions, plans, platform_settings, document_point_costs, addons — platform catalogs
+--   trial_used_tax_registrations — platform trial-abuse registry (RLS: no tenant_id / platform_operator)
 --   currencies, eta_code_catalogs, eta_code_entries — shared ETA reference data
 --   refresh_sessions, billing_webhook_events — non-tenant or provider-scoped
 
@@ -395,3 +396,18 @@ DROP POLICY IF EXISTS tenant_isolation_points_ledger ON points_ledger;
 CREATE POLICY tenant_isolation_points_ledger ON points_ledger
   USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
   WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
+-- Cross-tenant uniqueness for free-trial consumption. Tenant HTTP (app.tenant_id set)
+-- cannot see or mutate rows; PrismaService and platform_operator can.
+ALTER TABLE trial_used_tax_registrations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE trial_used_tax_registrations FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS trial_used_tax_registrations_platform ON trial_used_tax_registrations;
+CREATE POLICY trial_used_tax_registrations_platform ON trial_used_tax_registrations
+  USING (
+    NULLIF(current_setting('app.tenant_id', true), '') IS NULL
+    OR NULLIF(current_setting('app.platform_operator', true), '') = '1'
+  )
+  WITH CHECK (
+    NULLIF(current_setting('app.tenant_id', true), '') IS NULL
+    OR NULLIF(current_setting('app.platform_operator', true), '') = '1'
+  );

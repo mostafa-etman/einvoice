@@ -22,6 +22,8 @@ import { AuditService } from '../audit/audit.service';
 import { SubscriptionService } from '../billing/subscription.service';
 import { PointsService } from '../billing/points.service';
 import { LimitService } from '../billing/limit.service';
+import { TrialTaxRegistrationService } from '../billing/trial-tax-registration.service';
+import { isTrialAlreadyUsedException } from '../billing/trial-errors';
 import { loadEnv } from '../config/env';
 import { tenantLifecycleStatus } from '../billing/tenant-lifecycle-status';
 import { assertNoPrivilegeEscalation } from '../rbac/role-policy';
@@ -43,6 +45,8 @@ export class TenantService implements OnModuleInit {
     private readonly points: PointsService,
     @Inject(forwardRef(() => LimitService))
     private readonly limits: LimitService,
+    @Inject(forwardRef(() => TrialTaxRegistrationService))
+    private readonly trialTax: TrialTaxRegistrationService,
   ) {}
 
   async onModuleInit() {
@@ -132,7 +136,11 @@ export class TenantService implements OnModuleInit {
   async createTenant(
     userId: string,
     name: string,
-    opts: { planCode?: string; activation?: 'pending' | 'active' } = {},
+    opts: {
+      planCode?: string;
+      activation?: 'pending' | 'active';
+      taxRegistrationNumber?: string;
+    } = {},
   ) {
     await this.ensurePermissionCatalog();
     const permissions = await this.prisma.permission.findMany();
@@ -157,6 +165,10 @@ export class TenantService implements OnModuleInit {
       if (!plan || !plan.isActive) {
         throw new BadRequestException('unknown_plan');
       }
+    }
+
+    if (startTrial) {
+      await this.trialTax.assertAvailable(opts.taxRegistrationNumber);
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -207,7 +219,14 @@ export class TenantService implements OnModuleInit {
     });
 
     if (startTrial) {
-      await this.startSelfServeTrial(result.tenant.id, userId);
+      try {
+        await this.startSelfServeTrial(result.tenant.id, userId, opts.taxRegistrationNumber);
+      } catch (err) {
+        if (isTrialAlreadyUsedException(err)) {
+          await this.subscriptions.ensureFreeSubscription(result.tenant.id);
+        }
+        throw err;
+      }
     } else {
       await this.subscriptions.ensureFreeSubscription(result.tenant.id);
       if (planCode && planCode !== 'FREE') {
@@ -310,7 +329,12 @@ export class TenantService implements OnModuleInit {
     return null;
   }
 
-  private async startSelfServeTrial(tenantId: string, userId: string) {
+  private async startSelfServeTrial(
+    tenantId: string,
+    userId: string,
+    taxRegistrationNumber?: string,
+  ) {
+    await this.trialTax.consume(taxRegistrationNumber, tenantId);
     const settings = await this.prisma.platformSettings.upsert({
       where: { id: 'default' },
       create: { id: 'default' },

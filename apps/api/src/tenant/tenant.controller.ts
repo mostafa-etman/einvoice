@@ -33,7 +33,7 @@ export class TenantController {
   @Post()
   async create(
     @CurrentUser() user: AuthUser,
-    @Body() body: { name: string; planCode?: string },
+    @Body() body: { name: string; planCode?: string; taxRegistrationNumber?: string },
     @Req() req: Request,
   ) {
     if (user.impersonation) {
@@ -41,6 +41,7 @@ export class TenantController {
     }
     const tenant = await this.tenants.createTenant(user.userId, body.name, {
       planCode: body.planCode,
+      taxRegistrationNumber: body.taxRegistrationNumber,
     });
     const raw = req.cookies?.[this.env.REFRESH_COOKIE_NAME] as string | undefined;
     const switched = await this.auth.switchTenant(user.userId, tenant.id, raw);

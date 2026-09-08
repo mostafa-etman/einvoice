@@ -12,6 +12,7 @@ import { TenantPrismaService } from '../../prisma/tenant-prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import { SecretsEncryptionService } from '../../crypto/secrets-encryption.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { TrialTaxRegistrationService } from '../../billing/trial-tax-registration.service';
 
 const MASK = '••••••••';
 
@@ -61,6 +62,7 @@ export class EtaCredentialsService {
     private readonly prisma: PrismaService,
     private readonly crypto: SecretsEncryptionService,
     private readonly audit: AuditService,
+    private readonly trialTax: TrialTaxRegistrationService,
   ) {}
 
   async get(
@@ -162,6 +164,10 @@ export class EtaCredentialsService {
       });
     }
 
+    if (input.registrationNumber !== undefined) {
+      await this.trialTax.assertCanBindOnSave(tenantId, input.registrationNumber);
+    }
+
     await this.prisma.tenant.update({
       where: { id: tenantId },
       data: { legalName, issuerType },
@@ -226,6 +232,10 @@ export class EtaCredentialsService {
         } as never,
       });
     });
+
+    if (input.registrationNumber !== undefined) {
+      await this.trialTax.bindOnTaxRegistrationSave(tenantId, input.registrationNumber);
+    }
 
     await this.audit.write({
       action: 'settings.eta_credentials.upsert',

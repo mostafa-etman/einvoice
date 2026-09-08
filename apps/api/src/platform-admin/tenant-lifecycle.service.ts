@@ -12,6 +12,7 @@ import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { TenantService } from '../tenant/tenant.service';
+import { TrialTaxRegistrationService } from '../billing/trial-tax-registration.service';
 import { PLATFORM_AUDIT_ACTIONS } from './platform-audit';
 
 const UUID_RE =
@@ -67,6 +68,7 @@ export class TenantLifecycleService {
     private readonly passwords: PasswordService,
     private readonly points: PointsService,
     private readonly limits: LimitService,
+    private readonly trialTax: TrialTaxRegistrationService,
   ) {}
 
   async listTenants(query: ListTenantsInput) {
@@ -234,6 +236,9 @@ export class TenantLifecycleService {
         reason: input.reason,
         status: plan.isTrial ? 'TRIAL' : 'ACTIVE',
       });
+      if (plan.isTrial) {
+        await this.trialTax.bindTenantCurrentTaxNumber(tenantId, { allowOverride: true });
+      }
       if (!plan.isTrial) {
         await this.prisma.tenant.update({
           where: { id: tenantId },
@@ -500,6 +505,25 @@ export class TenantLifecycleService {
       metadata: { code: plan.code },
     });
     return this.toPlanAdmin(plan);
+  }
+
+  async setPlanActive(operatorUserId: string, code: string, isActive: boolean) {
+    const normalized = code.trim().toUpperCase();
+    const plan = await this.prisma.plan.findUnique({ where: { code: normalized } });
+    if (!plan) throw new NotFoundException('unknown_plan');
+    const updated = await this.prisma.plan.update({
+      where: { code: normalized },
+      data: { isActive },
+    });
+    await this.audit.write({
+      action: PLATFORM_AUDIT_ACTIONS.PLAN_SET_ACTIVE,
+      outcome: 'success',
+      actorUserId: operatorUserId,
+      resourceType: 'plan',
+      resourceId: updated.id,
+      metadata: { code: updated.code, isActive },
+    });
+    return this.toPlanAdmin(updated);
   }
 
   async getUsage(tenantId: string) {

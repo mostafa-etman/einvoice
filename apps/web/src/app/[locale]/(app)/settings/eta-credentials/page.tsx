@@ -13,6 +13,7 @@ import {
   upsertEtaCredentials,
   type EtaEnvironment,
 } from '@/lib/api/eta-credentials';
+import { trialAlreadyUsedMessage } from '@/lib/api/trial-already-used';
 import { getEtaConnection, testEtaConnection } from '@/lib/api/eta';
 import {
   clearSandboxData,
@@ -448,6 +449,12 @@ export default function EtaCredentialsPage() {
             {t('testConnection')}
           </button>
         </div>
+        {save.isError ? (
+          <p className="text-token-sm text-danger" role="alert">
+            {trialAlreadyUsedMessage(save.error, locale) ??
+              (save.error instanceof Error ? save.error.message : t('testFailure'))}
+          </p>
+        ) : null}
       </form>
 
       {testMsg ? <p className="mt-token-md text-token-sm">{testMsg}</p> : null}

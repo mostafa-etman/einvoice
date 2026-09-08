@@ -14,6 +14,7 @@ describe('ETA credentials smoke', () => {
       expect(messages.settingsEta.taxpayerLegalNameHelp).toBeTruthy();
       expect(messages.settingsEta.companyIdentity).toBeTruthy();
       expect(messages.settingsEta.issuerIdentityIncomplete).toBeTruthy();
+      expect(messages.settingsEta.trialAlreadyUsed).toBeTruthy();
     }
   });
 

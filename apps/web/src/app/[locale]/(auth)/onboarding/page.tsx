@@ -10,6 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 import { createTenant } from '@/lib/api/tenants';
 import { fetchCatalog, type PlanView } from '@/lib/api/billing';
 import { ApiError } from '@/lib/api/client';
+import { trialAlreadyUsedMessage } from '@/lib/api/trial-already-used';
 import { PlanCards, PromoNote } from '@/components/billing/plan-cards';
 import {
   WhatsAppUpgradeDialog,
@@ -18,6 +19,7 @@ import {
 
 const schema = z.object({
   name: z.string().min(2),
+  taxRegistrationNumber: z.string().optional(),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -41,9 +43,16 @@ export default function OnboardingPage() {
   const onSubmit = handleSubmit(async (values) => {
     setError(null);
     try {
-      await createTenant(values.name);
+      await createTenant(values.name, {
+        taxRegistrationNumber: values.taxRegistrationNumber?.trim() || undefined,
+      });
       router.push(`/${locale}`);
     } catch (err) {
+      const trialMsg = trialAlreadyUsedMessage(err, locale);
+      if (trialMsg) {
+        setError(trialMsg);
+        return;
+      }
       if (err instanceof ApiError && err.status === 409) {
         setError(typeof err.message === 'string' ? err.message : t('companyLimit'));
         return;
@@ -73,7 +82,25 @@ export default function OnboardingPage() {
             {...register('name')}
           />
         </label>
-        {error ? <p className="text-token-sm text-red-700">{error}</p> : null}
+        <label className="text-token-sm">
+          {t('taxRegistrationNumber')}
+          <input
+            className="mt-token-xs w-full rounded border border-border bg-surface px-token-sm py-token-sm"
+            type="text"
+            inputMode="numeric"
+            dir="ltr"
+            autoComplete="off"
+            {...register('taxRegistrationNumber')}
+          />
+          <span className="mt-token-xs block text-token-xs text-foreground/70">
+            {t('taxRegistrationHint')}
+          </span>
+        </label>
+        {error ? (
+          <p className="text-token-sm text-red-700" role="alert">
+            {error}
+          </p>
+        ) : null}
         <button
           type="submit"
           disabled={isSubmitting}

@@ -333,6 +333,7 @@ model Tenant {
   customers            Customer[]
   pointsLedger         PointsLedger[]
   tenantDocumentPointCosts TenantDocumentPointCost[]
+  trialUsedTaxRegistrations TrialUsedTaxRegistration[]
 
   @@map("tenants")
 }
@@ -1628,6 +1629,7 @@ model Plan {
   /// Shown on customer plan cards. Legacy FREE/STARTER/PRO stay hidden.
   isPublic            Boolean  @default(false) @map("is_public")
   selfServe       Boolean  @default(true) @map("self_serve")
+  /// Customer catalog / signup cards. Inactive plans stay in DB and keep working for assigned tenants.
   isActive        Boolean  @default(true) @map("is_active")
   sortOrder       Int      @default(0) @map("sort_order")
   stripePriceId   String?  @map("stripe_price_id")
@@ -1651,6 +1653,22 @@ model PlatformSettings {
   updatedAt                DateTime @updatedAt @map("updated_at")
 
   @@map("platform_settings")
+}
+
+/// Global registry: a tax registration number may consume the free trial only once.
+/// Platform catalog (not tenant-scoped). Tenant sessions cannot read/write (RLS).
+model TrialUsedTaxRegistration {
+  id                        String   @id @default(uuid()) @db.Uuid
+  taxRegistrationNormalized String   @unique @map("tax_registration_normalized")
+  firstTenantId             String?  @map("first_tenant_id") @db.Uuid
+  consumedAt                DateTime @default(now()) @map("consumed_at")
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  firstTenant Tenant? @relation(fields: [firstTenantId], references: [id], onDelete: SetNull)
+
+  @@index([firstTenantId])
+  @@map("trial_used_tax_registrations")
 }
 
 /// Platform add-on catalog (WhatsApp purchase; applied from super-admin).

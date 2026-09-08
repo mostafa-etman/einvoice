@@ -46,7 +46,7 @@ export async function switchTenant(tenantId: string): Promise<SwitchTenantResult
 
 export async function createTenant(
   name: string,
-  planCode?: string,
+  opts?: { planCode?: string; taxRegistrationNumber?: string },
 ): Promise<{ id: string; name: string; activationStatus?: string }> {
   const tenant = await apiFetch<{
     id: string;
@@ -56,7 +56,11 @@ export async function createTenant(
     activeTenantId?: string;
   }>('/tenants', {
     method: 'POST',
-    body: { name, planCode },
+    body: {
+      name,
+      planCode: opts?.planCode,
+      taxRegistrationNumber: opts?.taxRegistrationNumber,
+    },
   });
   if (tenant.accessToken) {
     setAccessToken(tenant.accessToken);

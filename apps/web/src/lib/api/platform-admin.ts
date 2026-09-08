@@ -257,6 +257,32 @@ export function upsertPlan(input: {
   return apiFetch<PlanAdmin>('/platform-admin/plans', { method: 'POST', body: input });
 }
 
+export function setPlanActive(code: string, isActive: boolean) {
+  return apiFetch<PlanAdmin>(`/platform-admin/plans/${encodeURIComponent(code)}`, {
+    method: 'PATCH',
+    body: { isActive },
+  });
+}
+
+export type TrialTaxRegistrationView = {
+  taxRegistrationNormalized: string;
+  firstTenantId: string | null;
+  consumedAt: string;
+};
+
+export function listTrialTaxRegistrations() {
+  return apiFetch<{ items: TrialTaxRegistrationView[] }>(
+    '/platform-admin/trial-tax-registrations',
+  );
+}
+
+export function resetTrialTaxRegistration(taxRegistrationNumber: string, reason?: string) {
+  return apiFetch<{ reset: boolean; taxRegistrationNormalized: string }>(
+    '/platform-admin/trial-tax-registrations/reset',
+    { method: 'POST', body: { taxRegistrationNumber, reason } },
+  );
+}
+
 export function listAdminAddons() {
   return apiFetch<{ addons: AddonAdmin[] }>('/platform-admin/addons');
 }
