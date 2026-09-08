@@ -1,4 +1,4 @@
-import { locales, defaultLocale } from '@/i18n/config';
+import { locales, defaultLocale, localePrefix } from '@/i18n/config';
 import en from '@/messages/en.json';
 import ar from '@/messages/ar.json';
 
@@ -6,6 +6,7 @@ describe('landing i18n smoke', () => {
   it('defaults to Arabic and supports en', () => {
     expect(locales).toEqual(['en', 'ar']);
     expect(defaultLocale).toBe('ar');
+    expect(localePrefix).toBe('always');
   });
 
   it('has English and Arabic message catalogs', () => {
