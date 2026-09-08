@@ -16,6 +16,10 @@ describe('billing page smoke', () => {
     expect(en.billing.whatsappUpgradeBody).toContain('WhatsApp');
     expect(en.billing.choosePlan).toBeTruthy();
     expect(ar.billing.choosePlan).toBeTruthy();
+    expect(en.billing.startFreeTrial).toBeTruthy();
+    expect(ar.billing.startFreeTrial).toContain('التجربة');
+    expect(en.billing.subscribeWhatsApp).toContain('WhatsApp');
+    expect(ar.auth.planBranchHint).toContain('واتساب');
     expect(en.billing.sendBlockedMessage).toContain('00201000864620');
     expect(ar.billing.sendBlockedMessage).toContain('واتساب');
     expect(en.billing.promoNote).toContain('{invoicePromo}');

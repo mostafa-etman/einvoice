@@ -50,7 +50,7 @@ describe('Tenant approval gate', () => {
     const created = await request(app.getHttpServer())
       .post('/tenants')
       .set('Authorization', `Bearer ${user.token}`)
-      .send({ name: `Trial Co ${t}`, planCode: 'STARTER' })
+      .send({ name: `Trial Co ${t}`, planCode: 'TRIAL' })
       .expect(201);
 
     expect(created.body.activationStatus).toBe('ACTIVE');

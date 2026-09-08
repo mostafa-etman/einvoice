@@ -148,8 +148,23 @@ export class TenantService implements OnModuleInit {
     const ownerCount = await this.countOwnerTenants(userId);
     const isFirst = ownerCount === 0;
     const autoApprove = loadEnv().SIGNUP_AUTO_APPROVE;
+    const planCode = opts.planCode?.trim() || undefined;
+    let selectedPlan: { code: string; isTrial: boolean; isActive: boolean } | null = null;
+    if (planCode) {
+      const plan = await this.prisma.plan.findUnique({ where: { code: planCode } });
+      if (!plan || !plan.isActive) {
+        throw new BadRequestException('unknown_plan');
+      }
+      selectedPlan = plan;
+    }
+
+    const requestTrial = !selectedPlan || selectedPlan.isTrial;
     const startTrial =
-      isFirst && !autoApprove && opts.activation !== 'active' && opts.activation !== 'pending';
+      isFirst &&
+      !autoApprove &&
+      requestTrial &&
+      opts.activation !== 'active' &&
+      opts.activation !== 'pending';
 
     if (!isFirst && opts.activation !== 'active') {
       await this.limits.assertCanCreateCompany(userId);
@@ -158,14 +173,6 @@ export class TenantService implements OnModuleInit {
     const activationStatus = startTrial
       ? 'ACTIVE'
       : await this.resolveActivationStatus(userId, opts.activation);
-
-    const planCode = opts.planCode?.trim();
-    if (planCode && !startTrial) {
-      const plan = await this.prisma.plan.findUnique({ where: { code: planCode } });
-      if (!plan || !plan.isActive) {
-        throw new BadRequestException('unknown_plan');
-      }
-    }
 
     if (startTrial) {
       await this.trialTax.assertAvailable(opts.taxRegistrationNumber);
@@ -220,7 +227,12 @@ export class TenantService implements OnModuleInit {
 
     if (startTrial) {
       try {
-        await this.startSelfServeTrial(result.tenant.id, userId, opts.taxRegistrationNumber);
+        await this.startSelfServeTrial(
+          result.tenant.id,
+          userId,
+          opts.taxRegistrationNumber,
+          selectedPlan?.isTrial ? selectedPlan.code : 'TRIAL',
+        );
       } catch (err) {
         if (isTrialAlreadyUsedException(err)) {
           await this.subscriptions.ensureFreeSubscription(result.tenant.id);
@@ -229,7 +241,10 @@ export class TenantService implements OnModuleInit {
       }
     } else {
       await this.subscriptions.ensureFreeSubscription(result.tenant.id);
-      if (planCode && planCode !== 'FREE') {
+      const mayAssignSelectedPaid =
+        Boolean(selectedPlan && !selectedPlan.isTrial) &&
+        (autoApprove || opts.activation === 'active');
+      if (mayAssignSelectedPaid && planCode && planCode !== 'FREE') {
         await this.subscriptions.assignPlan(result.tenant.id, planCode, {
           actorUserId: userId,
           reason: 'signup_plan',
@@ -243,7 +258,7 @@ export class TenantService implements OnModuleInit {
           });
         }
       }
-      if (isFirst || opts.activation === 'active') {
+      if (activationStatus === 'ACTIVE' && (isFirst || opts.activation === 'active')) {
         await this.points.grantPlanPointsIfNeeded(result.tenant.id, userId);
       }
     }
@@ -333,6 +348,7 @@ export class TenantService implements OnModuleInit {
     tenantId: string,
     userId: string,
     taxRegistrationNumber?: string,
+    trialPlanCode = 'TRIAL',
   ) {
     await this.trialTax.consume(taxRegistrationNumber, tenantId);
     const settings = await this.prisma.platformSettings.upsert({
@@ -342,7 +358,7 @@ export class TenantService implements OnModuleInit {
     });
     const days = Math.max(1, settings.trialDays || 7);
     const trialEndsAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
-    await this.subscriptions.assignPlan(tenantId, 'TRIAL', {
+    await this.subscriptions.assignPlan(tenantId, trialPlanCode, {
       actorUserId: userId,
       reason: 'signup_trial',
       status: 'TRIAL',

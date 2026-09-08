@@ -6,16 +6,12 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createTenant } from '@/lib/api/tenants';
 import { fetchCatalog, type PlanView } from '@/lib/api/billing';
 import { ApiError } from '@/lib/api/client';
 import { trialAlreadyUsedMessage } from '@/lib/api/trial-already-used';
 import { PlanCards, PromoNote } from '@/components/billing/plan-cards';
-import {
-  WhatsAppUpgradeDialog,
-  type BillingInterest,
-} from '@/components/billing/whatsapp-upgrade-dialog';
 
 const schema = z.object({
   name: z.string().min(2),
@@ -29,23 +25,37 @@ export default function OnboardingPage() {
   const tb = useTranslations('billing');
   const locale = useLocale();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
-  const [interest, setInterest] = useState<BillingInterest | null>(null);
+  const [choosing, setChoosing] = useState(false);
   const catalogQuery = useQuery({ queryKey: ['signup-catalog'], queryFn: fetchCatalog });
   const {
     register,
     handleSubmit,
+    getValues,
+    trigger,
     formState: { isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
   });
 
-  const onSubmit = handleSubmit(async (values) => {
+  const busy = isSubmitting || choosing;
+
+  const startCompany = async (plan?: PlanView) => {
     setError(null);
+    const ok = await trigger('name');
+    if (!ok) {
+      setError(t('fillCompanyFirst'));
+      return;
+    }
+    const values = getValues();
     try {
+      setChoosing(true);
       await createTenant(values.name, {
+        planCode: plan?.code,
         taxRegistrationNumber: values.taxRegistrationNumber?.trim() || undefined,
       });
+      await queryClient.invalidateQueries({ queryKey: ['tenants'] });
       router.push(`/${locale}`);
     } catch (err) {
       const trialMsg = trialAlreadyUsedMessage(err, locale);
@@ -58,16 +68,15 @@ export default function OnboardingPage() {
         return;
       }
       setError(t('errorGeneric'));
+    } finally {
+      setChoosing(false);
     }
-  });
-
-  const choosePlan = (plan: PlanView) => {
-    setInterest({
-      kind: 'upgrade',
-      planCode: plan.code,
-      planLabel: locale === 'ar' && plan.nameAr ? plan.nameAr : plan.name,
-    });
   };
+
+  const onSubmit = handleSubmit(async () => {
+    const trial = catalogQuery.data?.plans.find((p) => p.isTrial);
+    await startCompany(trial);
+  });
 
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col justify-center px-token-lg py-token-xl">
@@ -103,28 +112,25 @@ export default function OnboardingPage() {
         ) : null}
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={busy}
           className="rounded bg-brand px-token-md py-token-sm text-white disabled:opacity-60"
         >
-          {t('submitTenant')}
+          {tb('startFreeTrial')}
         </button>
       </form>
 
       <section className="mt-token-xl space-y-3">
         <h2 className="text-lg font-medium">{t('choosePlan')}</h2>
+        <p className="text-sm text-foreground/70">{t('planBranchHint')}</p>
         {catalogQuery.data ? <PromoNote catalog={catalogQuery.data} /> : null}
         <PlanCards
           plans={catalogQuery.data?.plans ?? []}
-          onChoose={choosePlan}
-          chooseLabel={tb('choosePlan')}
+          onChoose={(plan) => void startCompany(plan)}
+          chooseLabel={tb('subscribeWhatsApp')}
+          startTrialLabel={tb('startFreeTrial')}
+          trialDays={catalogQuery.data?.trialDays}
         />
       </section>
-
-      <WhatsAppUpgradeDialog
-        open={interest !== null}
-        interest={interest}
-        onClose={() => setInterest(null)}
-      />
     </main>
   );
 }

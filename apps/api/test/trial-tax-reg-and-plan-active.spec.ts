@@ -87,6 +87,31 @@ describe('Trial per tax registration + plan visibility', () => {
       where: { id: created.body.id as string },
     });
     expect(firstAfter.trialEndsAt).toBeTruthy();
+
+    const paid = await registerUser(app, `paid${t}`);
+    const paidSignup = await request(app.getHttpServer())
+      .post('/tenants')
+      .set('Authorization', `Bearer ${paid.token}`)
+      .send({
+        name: `Paid after TIN ${t}`,
+        planCode: 'BASIC',
+        taxRegistrationNumber: tin,
+      })
+      .expect(201);
+    expect(paidSignup.body.activationStatus).toBe('PENDING');
+    expect(paidSignup.body.trialEndsAt).toBeFalsy();
+
+    const retryUser = await registerUser(app, `retry${t}`);
+    const retryTrial = await request(app.getHttpServer())
+      .post('/tenants')
+      .set('Authorization', `Bearer ${retryUser.token}`)
+      .send({
+        name: `Retry trial ${t}`,
+        planCode: 'TRIAL',
+        taxRegistrationNumber: tin,
+      });
+    expect(retryTrial.status).toBe(409);
+    expect(retryTrial.body.code).toBe(TRIAL_ALREADY_USED_CODE);
   });
 
   it('binds the tax number when a trial tenant registers it later, then blocks a second trial', async () => {

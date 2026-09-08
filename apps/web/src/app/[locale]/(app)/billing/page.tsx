@@ -169,9 +169,12 @@ export default function BillingPage() {
         <h2 className="text-lg font-medium">{t('plans')}</h2>
         {catalog ? <PromoNote catalog={catalog} /> : null}
         <PlanCards
-          plans={catalog?.plans ?? []}
+          plans={(catalog?.plans ?? []).filter(
+            (p) => !p.isTrial || p.code === currentPlan,
+          )}
           currentPlanCode={currentPlan}
           onChoose={openForPlan}
+          trialDays={catalog?.trialDays}
         />
       </section>
 

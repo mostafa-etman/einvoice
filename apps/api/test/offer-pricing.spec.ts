@@ -50,7 +50,7 @@ describe('Official offer pricing', () => {
     if (app) await app.close();
   });
 
-  it('exposes the 5 public plans with before/after EGP prices and add-ons', async () => {
+  it('exposes the trial card plus 5 paid plans with before/after EGP prices and add-ons', async () => {
     if (!dbAvailable) return;
     const user = await registerUser(app, `cat${Date.now()}`);
     const res = await request(app.getHttpServer())
@@ -59,7 +59,9 @@ describe('Official offer pricing', () => {
       .expect(200);
 
     const codes = (res.body.plans as Array<{ code: string }>).map((p) => p.code);
-    expect(codes).toEqual(['BASIC', 'BRONZE', 'SILVER', 'GOLD', 'PLATINUM']);
+    expect(codes).toEqual(['TRIAL', 'BASIC', 'BRONZE', 'SILVER', 'GOLD', 'PLATINUM']);
+    const trial = res.body.plans.find((p: { code: string; isTrial?: boolean }) => p.code === 'TRIAL');
+    expect(trial.isTrial).toBe(true);
     const basic = res.body.plans.find((p: { code: string }) => p.code === 'BASIC');
     expect(basic.officialPriceEgp).toBe(400);
     expect(basic.discountedPriceEgp).toBe(250);
@@ -80,7 +82,7 @@ describe('Official offer pricing', () => {
     const created = await request(app.getHttpServer())
       .post('/tenants')
       .set('Authorization', `Bearer ${user.token}`)
-      .send({ name: `Trial Co ${t}` })
+      .send({ name: `Trial Co ${t}`, planCode: 'TRIAL' })
       .expect(201);
 
     expect(created.body.activationStatus).toBe('ACTIVE');
@@ -95,6 +97,29 @@ describe('Official offer pricing', () => {
       .expect(200);
     expect(sub.body.plan.code).toBe('TRIAL');
     expect(sub.body.plan.isTrial).toBe(true);
+  });
+
+  it('paid-plan signup stays pending with no trial and does not assign the paid plan', async () => {
+    if (!dbAvailable) return;
+    const t = Date.now();
+    const user = await registerUser(app, `paid${t}`);
+    const created = await request(app.getHttpServer())
+      .post('/tenants')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ name: `Paid Co ${t}`, planCode: 'BASIC' })
+      .expect(201);
+
+    expect(created.body.activationStatus).toBe('PENDING');
+    expect(created.body.trialEndsAt).toBeFalsy();
+
+    const sub = await request(app.getHttpServer())
+      .get('/billing/subscription')
+      .set('Authorization', `Bearer ${user.token}`)
+      .set('X-Tenant-Id', created.body.id)
+      .expect(200);
+    expect(sub.body.plan.code).toBe('FREE');
+    expect(sub.body.plan.isTrial).toBe(false);
+    expect(sub.body.accessMode).toBe('PENDING');
   });
 
   it('blocks send after trial ends and blocks extra users/companies', async () => {

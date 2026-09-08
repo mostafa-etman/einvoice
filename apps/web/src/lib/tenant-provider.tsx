@@ -42,11 +42,6 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const [tenantId, setTenantIdState] = useState<string | null>(null);
   const [branchId, setBranchIdState] = useState<string | null>(null);
 
-  useEffect(() => {
-    setTenantIdState(getActiveTenantId());
-    setBranchIdState(getActiveBranchId());
-  }, [ready, user?.id]);
-
   const tenantsQuery = useQuery({
     queryKey: ['tenants', user?.id],
     queryFn: listMyTenants,
@@ -58,6 +53,11 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     queryFn: listBranches,
     enabled: ready && !!user && !!tenantId,
   });
+
+  useEffect(() => {
+    setTenantIdState(getActiveTenantId());
+    setBranchIdState(getActiveBranchId());
+  }, [ready, user?.id, tenantsQuery.dataUpdatedAt]);
 
   const setTenantId = useCallback(
     async (id: string) => {

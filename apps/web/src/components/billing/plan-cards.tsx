@@ -16,11 +16,15 @@ export function PlanCards({
   currentPlanCode,
   onChoose,
   chooseLabel,
+  startTrialLabel,
+  trialDays,
 }: {
   plans: PlanView[];
   currentPlanCode?: string | null;
   onChoose: (plan: PlanView) => void;
   chooseLabel?: string;
+  startTrialLabel?: string;
+  trialDays?: number;
 }) {
   const t = useTranslations('billing');
   const locale = useLocale();
@@ -29,6 +33,7 @@ export function PlanCards({
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {plans.map((plan) => {
         const isCurrent = plan.code === currentPlanCode;
+        const isTrial = Boolean(plan.isTrial);
         const name = locale === 'ar' && plan.nameAr ? plan.nameAr : plan.name;
         return (
           <article
@@ -39,17 +44,25 @@ export function PlanCards({
           >
             <h3 className="text-lg font-semibold">{name}</h3>
             <p className="mt-2 flex flex-wrap items-baseline gap-2">
-              {plan.officialPriceEgp > 0 ? (
-                <span className="text-sm text-muted-foreground line-through" dir="ltr">
-                  {formatEgp(plan.officialPriceEgp, locale)}
+              {isTrial ? (
+                <span className="text-2xl font-semibold text-brand">
+                  {t('trialCardPrice', { days: trialDays ?? 7 })}
                 </span>
-              ) : null}
-              <span className="text-2xl font-semibold text-brand" dir="ltr">
-                {formatEgp(plan.discountedPriceEgp || plan.officialPriceEgp, locale)}
-              </span>
-              <span className="text-xs text-muted-foreground">{t('perYear')}</span>
+              ) : (
+                <>
+                  {plan.officialPriceEgp > 0 ? (
+                    <span className="text-sm text-muted-foreground line-through" dir="ltr">
+                      {formatEgp(plan.officialPriceEgp, locale)}
+                    </span>
+                  ) : null}
+                  <span className="text-2xl font-semibold text-brand" dir="ltr">
+                    {formatEgp(plan.discountedPriceEgp || plan.officialPriceEgp, locale)}
+                  </span>
+                  <span className="text-xs text-muted-foreground">{t('perYear')}</span>
+                </>
+              )}
             </p>
-            {plan.savingsPercent > 0 ? (
+            {!isTrial && plan.savingsPercent > 0 ? (
               <p className="mt-1 text-sm font-medium text-green-700" dir="ltr">
                 {t('savePercent', { percent: plan.savingsPercent })}
               </p>
@@ -73,7 +86,9 @@ export function PlanCards({
                   className="w-full rounded bg-brand px-3 py-2 text-sm text-white"
                   onClick={() => onChoose(plan)}
                 >
-                  {chooseLabel ?? t('choosePlan')}
+                  {isTrial
+                    ? (startTrialLabel ?? t('startFreeTrial'))
+                    : (chooseLabel ?? t('choosePlan'))}
                 </button>
               )}
             </div>
