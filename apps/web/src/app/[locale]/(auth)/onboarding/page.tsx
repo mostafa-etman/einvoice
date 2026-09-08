@@ -51,12 +51,16 @@ export default function OnboardingPage() {
     const values = getValues();
     try {
       setChoosing(true);
-      await createTenant(values.name, {
+      const created = await createTenant(values.name, {
         planCode: plan?.code,
         taxRegistrationNumber: values.taxRegistrationNumber?.trim() || undefined,
       });
       await queryClient.invalidateQueries({ queryKey: ['tenants'] });
-      router.push(`/${locale}`);
+      if (created.activationStatus === 'ACTIVE') {
+        router.push(`/${locale}/settings/eta-credentials`);
+      } else {
+        router.push(`/${locale}`);
+      }
     } catch (err) {
       const trialMsg = trialAlreadyUsedMessage(err, locale);
       if (trialMsg) {

@@ -15,6 +15,8 @@ describe('platform admin page smoke', () => {
     expect(en.admin.isActive).toBeTruthy();
     expect(en.admin.hideFromCustomers).toBeTruthy();
     expect(en.admin.tabTrials).toBeTruthy();
+    expect(en.admin.etaTutorialVideoUrl).toContain('video');
+    expect(ar.admin.etaTutorialVideoUrl).toBeTruthy();
     expect(en.admin.resetTrial).toBeTruthy();
     expect(ar.admin.tabTrials).toBeTruthy();
     expect(en.auth.trialAlreadyUsed).toContain('free trial');

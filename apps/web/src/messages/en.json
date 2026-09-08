@@ -379,7 +379,10 @@
     "clearSandboxSuccess": "Sandbox data cleared",
     "sandboxDocCount": "Sandbox documents",
     "productionDocCount": "Production documents",
-    "productionProtected": "Protected production records"
+    "productionProtected": "Protected production records",
+    "dontShowAgain": "Don't show again",
+    "firstSetupHint": "Connect your account to the ETA e-invoicing portal first. You can skip this reminder and come back from Settings anytime.",
+    "tutorialCaption": "How to connect your account to the ETA e-invoicing portal"
   },
   "settingsEtaDocTypes": {
     "title": "ETA document types",
@@ -1248,6 +1251,8 @@
     "autoActivateSubs": "Auto-activate sub-companies created by an approved owner",
     "whatsappE164": "WhatsApp number (digits)",
     "whatsappDisplay": "WhatsApp display",
+    "etaTutorialVideoUrl": "ETA tutorial video URL",
+    "etaTutorialVideoUrlHint": "YouTube watch or embed link shown on Settings → ETA credentials. Leave blank to hide the player.",
     "saveSettings": "Save settings",
     "impersonate": "Impersonate owner",
     "impersonateReasonPrompt": "Reason for impersonating this tenant:",

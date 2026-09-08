@@ -379,7 +379,10 @@
     "clearSandboxSuccess": "تم مسح بيانات الاختبار",
     "sandboxDocCount": "مستندات الاختبار",
     "productionDocCount": "مستندات الإنتاج",
-    "productionProtected": "سجلات إنتاج محمية"
+    "productionProtected": "سجلات إنتاج محمية",
+    "dontShowAgain": "عدم الظهور مرة أخرى",
+    "firstSetupHint": "اربط حسابك بمنظومة الفاتورة الإلكترونية أولاً. تقدر تخفي التذكير وترجع من الإعدادات في أي وقت.",
+    "tutorialCaption": "شرح: إزاي تربط حسابك بمنظومة الفاتورة الإلكترونية"
   },
   "settingsEtaDocTypes": {
     "title": "أنواع مستندات الهيئة",
@@ -1249,6 +1252,8 @@
     "autoActivateSubs": "تفعيل الشركات الفرعية تلقائياً عند إنشائها بواسطة مالك معتمد",
     "whatsappE164": "رقم واتساب (أرقام)",
     "whatsappDisplay": "عرض واتساب",
+    "etaTutorialVideoUrl": "رابط فيديو شرح الربط بالمنظومة",
+    "etaTutorialVideoUrlHint": "رابط يوتيوب (مشاهدة أو تضمين) يظهر في إعدادات بيانات الهيئة. اتركه فارغاً لإخفاء المشغّل.",
     "saveSettings": "حفظ الإعدادات",
     "impersonate": "انتحال شخصية المالك",
     "impersonateReasonPrompt": "سبب انتحال شخصية هذا المستأجر:",

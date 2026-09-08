@@ -889,6 +889,9 @@ export default function PlatformAdminPage() {
               trialPoints: Number(
                 (formEl.elements.namedItem('trialPoints') as HTMLInputElement).value,
               ),
+              etaTutorialVideoUrl: (
+                formEl.elements.namedItem('etaTutorialVideoUrl') as HTMLInputElement
+              ).value,
             }).then(() => qc.invalidateQueries({ queryKey: ['platform-admin-settings'] }));
           }}
         >
@@ -935,6 +938,18 @@ export default function PlatformAdminPage() {
               className="rounded border px-2 py-1"
               defaultValue={settingsQuery.data.trialPoints}
             />
+          </label>
+          <label className="flex flex-col text-sm">
+            {t('etaTutorialVideoUrl')}
+            <input
+              name="etaTutorialVideoUrl"
+              type="url"
+              dir="ltr"
+              placeholder="https://www.youtube.com/watch?v=…"
+              className="rounded border px-2 py-1"
+              defaultValue={settingsQuery.data.etaTutorialVideoUrl ?? ''}
+            />
+            <span className="mt-1 text-xs text-muted-foreground">{t('etaTutorialVideoUrlHint')}</span>
           </label>
           <button type="submit" className="rounded bg-brand px-3 py-2 text-sm text-white">
             {t('saveSettings')}

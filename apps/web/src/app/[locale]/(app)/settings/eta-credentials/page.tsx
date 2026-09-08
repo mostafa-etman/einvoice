@@ -8,7 +8,9 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
+  dismissEtaSetupPrompt,
   getEtaCredentials,
+  getEtaSetupStatus,
   rotateEtaSecret,
   upsertEtaCredentials,
   type EtaEnvironment,
@@ -21,6 +23,7 @@ import {
   goLive,
   switchEtaEnvironment,
 } from '@/lib/api/eta-environment';
+import { toTutorialEmbedUrl } from '@/lib/tutorial-embed';
 import { useTenant } from '@/lib/tenant-provider';
 
 const schema = z.object({
@@ -70,6 +73,12 @@ export default function EtaCredentialsPage() {
     enabled: !!tenantId,
   });
 
+  const setupQuery = useQuery({
+    queryKey: ['eta-setup', tenantId],
+    queryFn: getEtaSetupStatus,
+    enabled: !!tenantId,
+  });
+
   const {
     register,
     handleSubmit,
@@ -94,6 +103,7 @@ export default function EtaCredentialsPage() {
     await qc.invalidateQueries({ queryKey: ['eta-credentials', tenantId] });
     await qc.invalidateQueries({ queryKey: ['eta-connection', tenantId] });
     await qc.invalidateQueries({ queryKey: ['eta-environment', tenantId] });
+    await qc.invalidateQueries({ queryKey: ['eta-setup', tenantId] });
   };
 
   const save = useMutation({
@@ -179,12 +189,53 @@ export default function EtaCredentialsPage() {
     },
   });
 
+  const dismissPrompt = useMutation({
+    mutationFn: dismissEtaSetupPrompt,
+    onSuccess: async (data) => {
+      qc.setQueryData(['eta-setup', tenantId], data);
+    },
+  });
+
   const status = connection.data;
   const badge =
     active === 'PRODUCTION' ? t('badgeProduction') : t('badgeSandbox');
+  const embedUrl = toTutorialEmbedUrl(setupQuery.data?.tutorialVideoUrl ?? null);
+  const showFirstSetup = Boolean(setupQuery.data?.promptEtaSetup);
 
   return (
     <section>
+      {showFirstSetup ? (
+        <div className="mb-token-lg flex flex-col gap-token-sm rounded border border-brand/30 bg-brand-muted p-token-md sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-token-sm">{t('firstSetupHint')}</p>
+          <button
+            type="button"
+            className="shrink-0 rounded border border-border bg-surface px-token-md py-token-sm text-token-sm"
+            onClick={() => dismissPrompt.mutate()}
+            disabled={dismissPrompt.isPending}
+          >
+            {t('dontShowAgain')}
+          </button>
+        </div>
+      ) : null}
+
+      <div className="flex flex-col gap-token-xl lg:flex-row lg:items-start">
+        {embedUrl ? (
+          <aside className="w-full max-w-xl shrink-0 lg:max-w-md">
+            <p className="mb-token-sm text-token-sm font-medium">{t('tutorialCaption')}</p>
+            <div className="relative aspect-video overflow-hidden rounded border border-border bg-surface">
+              <iframe
+                src={embedUrl}
+                title={t('tutorialCaption')}
+                className="absolute inset-0 h-full w-full"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+                referrerPolicy="strict-origin-when-cross-origin"
+              />
+            </div>
+          </aside>
+        ) : null}
+
+        <div className="min-w-0 flex-1">
       <div className="flex flex-wrap items-center gap-token-md">
         <h1 className="font-display text-token-xl">{t('title')}</h1>
         <span
@@ -553,6 +604,8 @@ export default function EtaCredentialsPage() {
           {actionMsg}
         </p>
       ) : null}
+        </div>
+      </div>
     </section>
   );
 }

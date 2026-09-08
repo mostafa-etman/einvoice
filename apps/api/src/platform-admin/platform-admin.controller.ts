@@ -80,6 +80,7 @@ export class PlatformAdminController {
       supportWhatsappDisplay?: string;
       trialDays?: number;
       trialPoints?: number;
+      etaTutorialVideoUrl?: string | null;
     },
   ) {
     return this.tenants.updateSettings(user.userId, body);

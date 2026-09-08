@@ -14,6 +14,7 @@ import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { TenantService } from '../tenant/tenant.service';
 import { TrialTaxRegistrationService } from '../billing/trial-tax-registration.service';
 import { PLATFORM_AUDIT_ACTIONS } from './platform-audit';
+import { parseTutorialVideoUrl } from '../settings/eta-credentials/tutorial-video-url';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -379,6 +380,7 @@ export class TenantLifecycleService {
       supportWhatsappDisplay?: string;
       trialDays?: number;
       trialPoints?: number;
+      etaTutorialVideoUrl?: string | null;
     },
   ) {
     const data: {
@@ -387,6 +389,7 @@ export class TenantLifecycleService {
       supportWhatsappDisplay?: string;
       trialDays?: number;
       trialPoints?: number;
+      etaTutorialVideoUrl?: string | null;
     } = {};
     if (typeof patch.autoActivateSubCompanies === 'boolean') {
       data.autoActivateSubCompanies = patch.autoActivateSubCompanies;
@@ -402,6 +405,9 @@ export class TenantLifecycleService {
     }
     if (typeof patch.trialPoints === 'number' && Number.isFinite(patch.trialPoints)) {
       data.trialPoints = Math.max(0, Math.floor(patch.trialPoints));
+    }
+    if (patch.etaTutorialVideoUrl !== undefined) {
+      data.etaTutorialVideoUrl = parseTutorialVideoUrl(patch.etaTutorialVideoUrl);
     }
     const settings = await this.prisma.platformSettings.upsert({
       where: { id: 'default' },

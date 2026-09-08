@@ -74,4 +74,20 @@ export class EtaCredentialsController {
       { branchId: body.branchId, environment: body.environment },
     );
   }
+
+  @Get('setup')
+  @RequirePermissions(PERMISSIONS.SETTINGS_ETA_VIEW)
+  setupStatus(@Headers('x-tenant-id') tenantHeader: string | undefined) {
+    return this.eta.getSetupStatus(requireTenant(tenantHeader));
+  }
+
+  @Post('dismiss-setup-prompt')
+  @HttpCode(200)
+  @RequirePermissions(PERMISSIONS.SETTINGS_ETA_VIEW)
+  dismissSetupPrompt(
+    @Headers('x-tenant-id') tenantHeader: string | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.eta.dismissSetupPrompt(requireTenant(tenantHeader), user.userId);
+  }
 }

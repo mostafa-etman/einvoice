@@ -6,6 +6,7 @@ describe('ETA credentials smoke', () => {
     expect(en.settingsEta.secretMasked).toBeTruthy();
     expect(en.settingsEta.rotate).toBeTruthy();
     expect(ar.settingsEta.testConnection).toBeTruthy();
+    expect(ar.settingsEta.dontShowAgain).toContain('عدم الظهور');
   });
 
   it('has taxpayer legal name labels in both locales', () => {
@@ -25,6 +26,8 @@ describe('ETA credentials smoke', () => {
       expect(messages.settingsEta.goLiveTitle).toBeTruthy();
       expect(messages.settingsEta.clearSandboxTitle).toBeTruthy();
       expect(messages.settingsEta.clearSandboxIrreversible).toBeTruthy();
+      expect(messages.settingsEta.dontShowAgain).toBeTruthy();
+      expect(messages.settingsEta.tutorialCaption).toBeTruthy();
       expect(messages.shell.etaEnvSandbox).toBeTruthy();
       expect(messages.shell.etaEnvProduction).toBeTruthy();
     }

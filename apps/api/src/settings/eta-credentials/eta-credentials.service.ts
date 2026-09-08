@@ -376,6 +376,51 @@ export class EtaCredentialsService {
     return t;
   }
 
+  async getSetupStatus(tenantId: string): Promise<{
+    etaConfigured: boolean;
+    promptDismissed: boolean;
+    promptEtaSetup: boolean;
+    tutorialVideoUrl: string | null;
+  }> {
+    const [tenant, credCount, settings] = await Promise.all([
+      this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { etaSetupPromptDismissedAt: true },
+      }),
+      this.tenantPrisma.withTenant(tenantId, (tx) =>
+        tx.tenantEtaCredential.count({
+          where: { tenantId, clientId: { not: '' } },
+        }),
+      ),
+      this.prisma.platformSettings.findUnique({ where: { id: 'default' } }),
+    ]);
+    const etaConfigured = credCount > 0;
+    const promptDismissed = Boolean(tenant?.etaSetupPromptDismissedAt);
+    const tutorialVideoUrl = settings?.etaTutorialVideoUrl?.trim() || null;
+    return {
+      etaConfigured,
+      promptDismissed,
+      promptEtaSetup: !etaConfigured && !promptDismissed,
+      tutorialVideoUrl,
+    };
+  }
+
+  async dismissSetupPrompt(tenantId: string, actorUserId: string) {
+    await this.prisma.tenant.update({
+      where: { id: tenantId },
+      data: { etaSetupPromptDismissedAt: new Date() },
+    });
+    await this.audit.write({
+      action: 'settings.eta_setup.dismiss_prompt',
+      outcome: 'success',
+      actorUserId,
+      tenantId,
+      resourceType: 'tenant',
+      resourceId: tenantId,
+    });
+    return this.getSetupStatus(tenantId);
+  }
+
   private assertIntermediary(input: {
     isIntermediary?: boolean;
     onBehalfOfRegistrationNumber?: string;

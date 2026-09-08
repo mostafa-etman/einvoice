@@ -124,6 +124,7 @@ export type PlatformSettings = {
   supportWhatsappDisplay: string;
   trialDays: number;
   trialPoints: number;
+  etaTutorialVideoUrl: string | null;
 };
 
 export type ImpersonationSessionView = {

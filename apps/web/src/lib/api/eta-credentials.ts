@@ -70,5 +70,26 @@ export function rotateEtaSecret(
   });
 }
 
+export type EtaSetupStatus = {
+  etaConfigured: boolean;
+  promptDismissed: boolean;
+  promptEtaSetup: boolean;
+  tutorialVideoUrl: string | null;
+};
+
+export function getEtaSetupStatus() {
+  return apiFetch<EtaSetupStatus>('/settings/eta-credentials/setup', {
+    tenantScoped: true,
+  });
+}
+
+export function dismissEtaSetupPrompt() {
+  return apiFetch<EtaSetupStatus>('/settings/eta-credentials/dismiss-setup-prompt', {
+    method: 'POST',
+    tenantScoped: true,
+    body: {},
+  });
+}
+
 /** @deprecated Prefer `testEtaConnection` from `@/lib/api/eta` */
 export { testEtaConnection } from './eta';

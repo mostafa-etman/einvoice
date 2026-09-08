@@ -39,9 +39,13 @@ export default function LoginPage() {
     setError(null);
     try {
       await login(values);
-      const { needsOnboarding } = await establishTenantContext();
+      const { needsOnboarding, promptEtaSetup } = await establishTenantContext();
       if (needsOnboarding) {
         router.replace(`/${locale}/onboarding`);
+        return;
+      }
+      if (promptEtaSetup) {
+        router.replace(`/${locale}/settings/eta-credentials`);
         return;
       }
       router.replace(`/${locale}`);

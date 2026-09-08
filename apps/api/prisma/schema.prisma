@@ -321,6 +321,8 @@ model Tenant {
   trialEndsAt          DateTime? @map("trial_ends_at")
   extraUsers           Int       @default(0) @map("extra_users")
   extraCompanies       Int       @default(0) @map("extra_companies")
+  /// When set, login no longer redirects to ETA credentials for this tenant.
+  etaSetupPromptDismissedAt DateTime? @map("eta_setup_prompt_dismissed_at")
   subscription         Subscription?
   quotaOverrides       QuotaOverride[]
   paymentCustomers     PaymentCustomer[]
@@ -1649,6 +1651,8 @@ model PlatformSettings {
   supportWhatsappDisplay   String   @default("00201000864620") @map("support_whatsapp_display")
   trialDays                Int      @default(7) @map("trial_days")
   trialPoints              Int      @default(30) @map("trial_points")
+  /// YouTube/watch or embed URL shown on Settings → ETA credentials. Empty = hidden.
+  etaTutorialVideoUrl      String?  @map("eta_tutorial_video_url")
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")
 
