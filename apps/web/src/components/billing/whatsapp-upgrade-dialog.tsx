@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useLocale, useTranslations } from 'next-intl';
 import { fetchActivationHelp } from '@/lib/api/tenants';
 import { useAuth } from '@/lib/auth-provider';
 import { useTenant } from '@/lib/tenant-provider';
 import { CopyableTenantId } from '@/components/copyable-tenant-id';
+import { Button } from '@/components/ui/button';
+import { Modal } from '@/components/ui/modal';
 import {
   FALLBACK_WHATSAPP_DISPLAY,
   FALLBACK_WHATSAPP_URL,
@@ -59,65 +60,41 @@ export function WhatsAppUpgradeDialog({
   });
   const href = whatsappUrlWithText(baseUrl, prefill);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
-
-  if (!open) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-token-md"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="whatsapp-upgrade-title"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-md rounded border border-border bg-surface p-token-lg shadow-xl"
-        dir={locale === 'ar' ? 'rtl' : 'ltr'}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 id="whatsapp-upgrade-title" className="font-display text-token-lg text-brand">
-          {t('whatsappUpgradeTitle')}
-        </h2>
-        <p className="mt-token-md text-token-md text-foreground/90">
-          {t('whatsappUpgradeBody', { number: display })}
-        </p>
-        {interest && kind !== 'points' ? (
-          <p className="mt-token-sm text-token-sm text-muted-foreground">
-            {t('whatsappInterestedPlan', { plan: interest.planLabel })}
-          </p>
-        ) : null}
-        <CopyableTenantId id={tenantId} className="mt-token-md" />
-        <pre
-          className="mt-token-md max-h-48 overflow-auto whitespace-pre-wrap rounded border border-border bg-background p-token-sm text-token-sm"
-          dir="auto"
-        >
-          {prefill}
-        </pre>
-        <a
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-token-lg inline-flex w-full items-center justify-center rounded bg-brand px-token-md py-token-sm text-white"
-          dir="ltr"
-        >
-          {t('whatsappCta')} · {display}
-        </a>
-        <button
-          type="button"
-          className="mt-token-sm w-full rounded border border-border px-token-md py-token-sm text-token-sm hover:bg-brand-muted"
-          onClick={onClose}
-        >
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={t('whatsappUpgradeTitle')}
+      description={t('whatsappUpgradeBody', { number: display })}
+      footer={
+        <Button type="button" variant="secondary" block onClick={onClose}>
           {t('close')}
-        </button>
-      </div>
-    </div>
+        </Button>
+      }
+    >
+      {interest && kind !== 'points' ? (
+        <p className="text-token-sm text-foreground-muted">
+          {t('whatsappInterestedPlan', { plan: interest.planLabel })}
+        </p>
+      ) : null}
+      <CopyableTenantId id={tenantId} className="mt-token-md" />
+      <pre
+        className="mt-token-md max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-background p-token-sm text-token-sm"
+        dir="auto"
+      >
+        {prefill}
+      </pre>
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mt-token-lg inline-flex w-full items-center justify-center rounded-button border border-transparent bg-brand px-button-x py-button-y text-button font-medium text-on-dark shadow-xs hover:bg-brand-strong hover:shadow-brand"
+      >
+        {t('whatsappCta')} ·{' '}
+        <span className="font-en" dir="ltr">
+          {display}
+        </span>
+      </a>
+    </Modal>
   );
 }

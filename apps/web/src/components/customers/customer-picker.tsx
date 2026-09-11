@@ -154,7 +154,9 @@ export function CustomerPicker({ receiver, onPick, disabled }: Props) {
           <span className="text-token-xs text-foreground/70">{saveMsg}</span>
         ) : null}
         {saveErr ? (
-          <span className="text-token-xs text-red-700">{saveErr}</span>
+          <span className="text-token-xs text-danger" role="alert">
+            {saveErr}
+          </span>
         ) : null}
       </div>
     </div>
