@@ -1,22 +1,44 @@
 'use client';
 
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   createPairingCode,
   listDevices,
   unpairDevice,
+  type DeviceSummary,
   type PairingCodeCreated,
 } from '@/lib/api/devices';
 import { ApiError } from '@/lib/api/client';
 import { useTenant } from '@/lib/tenant-provider';
+import { PageHeader } from '@/components/ui/page-header';
+import { Breadcrumbs } from '@/components/ui/breadcrumbs';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Badge, type BadgeVariant } from '@/components/ui/badge';
+import { FilterBar } from '@/components/ui/filter-bar';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Table, type TableColumn } from '@/components/ui/table';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { CopyButton } from '@/components/ui/copy-button';
+
+function deviceStatusVariant(status: string): BadgeVariant {
+  const upper = status.toUpperCase();
+  if (upper === 'PAIRED') return 'success';
+  if (upper === 'REVOKED') return 'danger';
+  return 'neutral';
+}
 
 export default function DevicesPage() {
   const t = useTranslations('devices');
+  const tNav = useTranslations('nav');
+  const locale = useLocale();
   const { tenantId } = useTenant();
   const qc = useQueryClient();
   const [freshCode, setFreshCode] = useState<PairingCodeCreated | null>(null);
+  const [search, setSearch] = useState('');
+  const [unpairId, setUnpairId] = useState<string | null>(null);
 
   const query = useQuery({
     queryKey: ['devices', tenantId],
@@ -45,71 +67,170 @@ export default function DevicesPage() {
     (query.error instanceof ApiError && query.error.status === 403) ||
     (createCode.error instanceof ApiError && createCode.error.status === 403);
 
-  return (
-    <section>
-      <h1 className="font-display text-token-xl">{t('title')}</h1>
-      <p className="mt-token-sm text-token-md text-foreground/70">{t('intro')}</p>
-      {forbidden ? (
-        <p className="mt-token-md text-token-sm text-red-700">{t('forbidden')}</p>
-      ) : null}
+  const devices = query.data ?? [];
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return devices;
+    return devices.filter((d) => d.label.toLowerCase().includes(q) || d.status.toLowerCase().includes(q));
+  }, [devices, search]);
 
-      <div className="mt-token-lg">
-        <button
-          type="button"
-          disabled={createCode.isPending}
-          className="rounded bg-brand px-token-md py-token-sm text-token-sm text-white disabled:opacity-60"
-          onClick={() => createCode.mutate()}
-        >
-          {t('createPairingCode')}
-        </button>
-      </div>
+  const columns: TableColumn<DeviceSummary>[] = [
+    {
+      id: 'label',
+      header: t('label'),
+      cell: (d) => <span className="font-medium text-foreground">{d.label}</span>,
+    },
+    {
+      id: 'status',
+      header: t('status'),
+      cell: (d) => (
+        <Badge variant={deviceStatusVariant(d.status)}>
+          <span dir="ltr">{d.status}</span>
+        </Badge>
+      ),
+    },
+    {
+      id: 'lastSeen',
+      header: t('lastSeen'),
+      cell: (d) => (
+        <span className="font-en text-token-xs text-foreground-muted" dir="ltr">
+          {d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString() : t('never')}
+        </span>
+      ),
+    },
+    {
+      id: 'pairedAt',
+      header: t('pairedAt'),
+      cell: (d) => (
+        <span className="font-en text-token-xs text-foreground-muted" dir="ltr">
+          {new Date(d.pairedAt).toLocaleString()}
+        </span>
+      ),
+    },
+    {
+      id: 'actions',
+      header: t('unpair'),
+      align: 'end',
+      cell: (d) =>
+        d.status !== 'REVOKED' ? (
+          <Button
+            type="button"
+            variant="danger"
+            size="sm"
+            disabled={unpair.isPending}
+            onClick={() => setUnpairId(d.id)}
+          >
+            {t('unpair')}
+          </Button>
+        ) : null,
+    },
+  ];
+
+  return (
+    <div className="space-y-token-lg">
+      <PageHeader
+        breadcrumbs={
+          <Breadcrumbs
+            items={[
+              { label: tNav('home'), href: `/${locale}` },
+              { label: t('title') },
+            ]}
+          />
+        }
+        title={t('title')}
+        subtitle={t('intro')}
+        actions={
+          <Button
+            type="button"
+            disabled={createCode.isPending}
+            loading={createCode.isPending}
+            onClick={() => createCode.mutate()}
+          >
+            {t('createPairingCode')}
+          </Button>
+        }
+      />
+
+      {forbidden ? (
+        <p className="text-token-sm text-danger" role="alert">
+          {t('forbidden')}
+        </p>
+      ) : null}
+      {query.isError && !forbidden ? (
+        <Card className="border-danger" role="alert">
+          <p className="text-token-sm text-danger">
+            {query.error instanceof Error ? query.error.message : t('errorGeneric')}
+          </p>
+          <Button
+            className="mt-token-sm"
+            variant="secondary"
+            size="sm"
+            onClick={() => void query.refetch()}
+          >
+            {t('retryLoad')}
+          </Button>
+        </Card>
+      ) : null}
 
       {freshCode ? (
-        <div className="mt-token-md rounded border border-border bg-surface p-token-md">
-          <p className="text-token-sm text-foreground/70">{t('pairingCodeOnce')}</p>
-          <p className="mt-token-sm font-mono text-token-lg break-all">{freshCode.code}</p>
-          <p className="mt-token-xs text-token-sm text-foreground/60">
-            {t('expiresAt')}: {new Date(freshCode.expiresAt).toLocaleString()}
+        <Card>
+          <p className="m-0 text-token-sm text-foreground-muted">{t('pairingCodeOnce')}</p>
+          <p className="mt-token-sm font-en text-token-lg break-all" dir="ltr">
+            {freshCode.code}
           </p>
-        </div>
+          <div className="mt-token-sm flex flex-wrap items-center gap-token-sm">
+            <CopyButton value={freshCode.code}>{t('pairingCode')}</CopyButton>
+            <p className="m-0 text-token-sm text-foreground-muted">
+              {t('expiresAt')}:{' '}
+              <span className="font-en" dir="ltr">
+                {new Date(freshCode.expiresAt).toLocaleString()}
+              </span>
+            </p>
+          </div>
+        </Card>
       ) : null}
 
-      <ul className="mt-token-xl space-y-token-sm">
-        {(query.data ?? []).map((d) => (
-          <li
-            key={d.id}
-            className="flex flex-wrap items-center justify-between gap-token-md border-b border-border py-token-sm text-token-sm"
-          >
-            <div>
-              <span className="font-medium">{d.label}</span>
-              <span className="text-foreground/60">
-                {' '}
-                · {t('status')}: {d.status}
-              </span>
-              <span className="block text-foreground/60">
-                {t('lastSeen')}:{' '}
-                {d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString() : t('never')}
-              </span>
-              <span className="block text-foreground/60">
-                {t('pairedAt')}: {new Date(d.pairedAt).toLocaleString()}
-              </span>
-            </div>
-            {d.status !== 'REVOKED' ? (
-              <button
-                type="button"
-                disabled={unpair.isPending}
-                className="rounded border border-border px-token-sm py-token-xs hover:bg-brand-muted disabled:opacity-60"
-                onClick={() => unpair.mutate(d.id)}
-              >
-                {t('unpair')}
-              </button>
-            ) : null}
-          </li>
-        ))}
-        {!query.data?.length && !query.isLoading ? (
-          <li className="text-token-sm text-foreground/60">{t('empty')}</li>
-        ) : null}
-      </ul>
-    </section>
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder={t('searchPlaceholder')}
+        onReset={search ? () => setSearch('') : undefined}
+      />
+
+      <div aria-busy={query.isLoading || undefined}>
+        <Table
+          caption={t('listCaption')}
+          columns={columns}
+          rows={filtered}
+          getRowId={(d) => d.id}
+          loading={query.isLoading}
+          empty={
+            <EmptyState
+              title={search.trim() ? t('emptyFiltered') : t('empty')}
+              action={
+                search.trim() || forbidden
+                  ? undefined
+                  : { label: t('createPairingCode'), onClick: () => createCode.mutate() }
+              }
+            />
+          }
+        />
+      </div>
+
+      <ConfirmDialog
+        open={unpairId !== null}
+        onClose={() => setUnpairId(null)}
+        onConfirm={() => {
+          if (!unpairId) return;
+          unpair.mutate(unpairId);
+          setUnpairId(null);
+        }}
+        title={t('unpairTitle')}
+        description={t('unpairConfirm')}
+        confirmLabel={t('unpair')}
+        danger
+        loading={unpair.isPending}
+      />
+    </div>
   );
 }

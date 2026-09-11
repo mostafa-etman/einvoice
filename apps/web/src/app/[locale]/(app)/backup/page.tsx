@@ -1,17 +1,48 @@
 'use client';
 
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 import {
   createBackupJob,
   listBackupJobs,
   restoreBackup,
   wipeOperational,
+  type BackupJob,
 } from '@/lib/api/backup';
+import { PageHeader } from '@/components/ui/page-header';
+import { Breadcrumbs } from '@/components/ui/breadcrumbs';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Badge, type BadgeVariant } from '@/components/ui/badge';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Table, type TableColumn } from '@/components/ui/table';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+
+function backupStatusVariant(status: string): BadgeVariant {
+  const upper = status.toUpperCase();
+  if (upper === 'COMPLETED') return 'success';
+  if (upper === 'FAILED') return 'danger';
+  if (upper === 'RUNNING' || upper === 'PENDING') return 'warning';
+  return 'neutral';
+}
+
+function formatByteSize(n: number | null): string {
+  if (n == null) return '—';
+  if (n < 1024) return `${n} B`;
+  const kb = n / 1024;
+  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`;
+  const mb = kb / 1024;
+  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
+}
 
 export default function BackupPage() {
   const t = useTranslations('backup');
+  const tNav = useTranslations('nav');
+  const locale = useLocale();
   const qc = useQueryClient();
+  const [wipeOpen, setWipeOpen] = useState(false);
+  const [restoreId, setRestoreId] = useState<string | null>(null);
 
   const jobs = useQuery({
     queryKey: ['backup-jobs'],
@@ -33,85 +64,180 @@ export default function BackupPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['backup-jobs'] }),
   });
 
+  const columns: TableColumn<BackupJob>[] = [
+    {
+      id: 'status',
+      header: t('colStatus'),
+      cell: (job) => (
+        <div className="space-y-token-2xs">
+          <Badge variant={backupStatusVariant(job.status)}>
+            <span dir="ltr">{job.status}</span>
+          </Badge>
+          {job.errorMessage ? (
+            <p className="m-0 text-token-xs text-danger" role="alert">
+              {job.errorMessage}
+            </p>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      id: 'source',
+      header: t('colSource'),
+      cell: (job) => (
+        <span className="font-en" dir="ltr">
+          {job.triggerSource}
+        </span>
+      ),
+    },
+    {
+      id: 'size',
+      header: t('colSize'),
+      cell: (job) => (
+        <span className="font-en tabular-nums" dir="ltr">
+          {formatByteSize(job.byteSize)}
+        </span>
+      ),
+    },
+    {
+      id: 'checksum',
+      header: t('colChecksum'),
+      cell: (job) => (
+        <span className="font-en text-token-xs" dir="ltr">
+          {job.checksumSha256?.slice(0, 12) ?? '—'}
+        </span>
+      ),
+    },
+    {
+      id: 'created',
+      header: t('colCreated'),
+      cell: (job) => (
+        <span className="font-en text-token-xs" dir="ltr">
+          {new Date(job.createdAt).toLocaleString()}
+        </span>
+      ),
+    },
+    {
+      id: 'actions',
+      header: t('colActions'),
+      align: 'end',
+      cell: (job) =>
+        job.status === 'COMPLETED' ? (
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            onClick={() => setRestoreId(job.id)}
+          >
+            {t('restore')}
+          </Button>
+        ) : null,
+    },
+  ];
+
   return (
-    <div className="space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold">{t('title')}</h1>
-        <p className="text-muted-foreground mt-1 text-sm">{t('subtitle')}</p>
-      </div>
+    <div className="space-y-token-lg">
+      <PageHeader
+        breadcrumbs={
+          <Breadcrumbs
+            items={[
+              { label: tNav('home'), href: `/${locale}` },
+              { label: t('title') },
+            ]}
+          />
+        }
+        title={t('title')}
+        subtitle={t('subtitle')}
+        actions={
+          <>
+            <Button
+              type="button"
+              variant="danger"
+              disabled={wipeMut.isPending}
+              onClick={() => setWipeOpen(true)}
+            >
+              {t('wipe')}
+            </Button>
+            <Button
+              type="button"
+              disabled={createMut.isPending}
+              loading={createMut.isPending}
+              onClick={() => createMut.mutate()}
+            >
+              {t('create')}
+            </Button>
+          </>
+        }
+      />
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          className="bg-primary text-primary-foreground rounded px-3 py-2 text-sm"
-          disabled={createMut.isPending}
-          onClick={() => createMut.mutate()}
-        >
-          {t('create')}
-        </button>
-        <button
-          type="button"
-          className="rounded border px-3 py-2 text-sm"
-          disabled={wipeMut.isPending}
-          onClick={() => {
-            if (confirm(t('wipeConfirm'))) wipeMut.mutate();
-          }}
-        >
-          {t('wipe')}
-        </button>
-      </div>
+      {createMut.isError ? (
+        <p className="text-token-sm text-danger" role="alert">
+          {String(createMut.error)}
+        </p>
+      ) : null}
+      {wipeMut.isError ? (
+        <p className="text-token-sm text-danger" role="alert">
+          {wipeMut.error instanceof Error ? wipeMut.error.message : t('errorGeneric')}
+        </p>
+      ) : null}
+      {restoreMut.isError ? (
+        <p className="text-token-sm text-danger" role="alert">
+          {restoreMut.error instanceof Error ? restoreMut.error.message : t('errorGeneric')}
+        </p>
+      ) : null}
+      {jobs.isError ? (
+        <Card className="border-danger" role="alert">
+          <p className="text-token-sm text-danger">
+            {jobs.error instanceof Error ? jobs.error.message : t('errorGeneric')}
+          </p>
+          <Button
+            className="mt-token-sm"
+            variant="secondary"
+            size="sm"
+            onClick={() => void jobs.refetch()}
+          >
+            {t('retryLoad')}
+          </Button>
+        </Card>
+      ) : null}
 
-      {createMut.isError && (
-        <p className="text-destructive text-sm">{String(createMut.error)}</p>
-      )}
+      <Table
+        caption={t('listCaption')}
+        columns={columns}
+        rows={jobs.data?.items ?? []}
+        getRowId={(job) => job.id}
+        loading={jobs.isLoading}
+        empty={<EmptyState title={t('empty')} action={{ label: t('create'), onClick: () => createMut.mutate() }} />}
+      />
 
-      <div className="overflow-x-auto rounded border">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-muted/40 border-b text-left">
-              <th className="p-2">{t('colStatus')}</th>
-              <th className="p-2">{t('colSource')}</th>
-              <th className="p-2">{t('colChecksum')}</th>
-              <th className="p-2">{t('colCreated')}</th>
-              <th className="p-2">{t('colActions')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(jobs.data?.items ?? []).map((job) => (
-              <tr key={job.id} className="border-b">
-                <td className="p-2">{job.status}</td>
-                <td className="p-2">{job.triggerSource}</td>
-                <td className="p-2 font-mono text-xs">
-                  {job.checksumSha256?.slice(0, 12) ?? '—'}
-                </td>
-                <td className="p-2">{new Date(job.createdAt).toLocaleString()}</td>
-                <td className="p-2">
-                  {job.status === 'COMPLETED' && (
-                    <button
-                      type="button"
-                      className="text-primary underline"
-                      onClick={() => {
-                        if (confirm(t('restoreConfirm'))) {
-                          restoreMut.mutate(job.id);
-                        }
-                      }}
-                    >
-                      {t('restore')}
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {!jobs.data?.items?.length && (
-              <tr>
-                <td className="text-muted-foreground p-4" colSpan={5}>
-                  {t('empty')}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <ConfirmDialog
+        open={wipeOpen}
+        onClose={() => setWipeOpen(false)}
+        onConfirm={() => {
+          setWipeOpen(false);
+          wipeMut.mutate();
+        }}
+        title={t('wipeTitle')}
+        description={t('wipeConfirm')}
+        confirmLabel={t('wipe')}
+        danger
+        loading={wipeMut.isPending}
+      />
+
+      <ConfirmDialog
+        open={restoreId !== null}
+        onClose={() => setRestoreId(null)}
+        onConfirm={() => {
+          if (!restoreId) return;
+          restoreMut.mutate(restoreId);
+          setRestoreId(null);
+        }}
+        title={t('restoreTitle')}
+        description={t('restoreConfirm')}
+        confirmLabel={t('restore')}
+        danger
+        loading={restoreMut.isPending}
+      />
     </div>
   );
 }

@@ -1016,8 +1016,16 @@
     "unpair": "Unpair",
     "rename": "Rename",
     "empty": "No devices paired yet",
+    "emptyFiltered": "No devices match this search.",
     "forbidden": "You do not have permission to manage devices.",
-    "never": "Never"
+    "never": "Never",
+    "retryLoad": "Retry",
+    "errorGeneric": "Something went wrong. Try again.",
+    "listCaption": "Paired signing devices",
+    "searchPlaceholder": "Search by label",
+    "unpairTitle": "Unpair device",
+    "unpairConfirm": "Unpair this signing device? It will no longer be able to sign documents.",
+    "pairingCode": "Pairing code"
   },
   "sync": {
     "title": "Offline sync",
@@ -1034,6 +1042,14 @@
     "clearQueue": "Clear synced items",
     "discardWarn": "You have unsynced drafts. Discard them?",
     "discardConfirm": "Discard unsynced drafts",
+    "discardTitle": "Discard unsynced drafts",
+    "listCaption": "Offline draft queue",
+    "queueKey": "Queue key",
+    "updated": "Updated",
+    "error": "Error",
+    "statusLabel": "Status",
+    "colActions": "Actions",
+    "errorGeneric": "Something went wrong. Try again.",
     "status": {
       "pending": "Pending sync",
       "syncing": "Syncing…",
@@ -1048,14 +1064,20 @@
     "create": "Create backup",
     "wipe": "Wipe operational data",
     "wipeConfirm": "Wipe documents, files, ETA credentials, and item codes? Org shell remains.",
+    "wipeTitle": "Wipe operational data",
     "restore": "Restore",
     "restoreConfirm": "Type confirmation will restore this backup into the current empty organization. Continue?",
+    "restoreTitle": "Restore backup",
     "colStatus": "Status",
     "colSource": "Source",
     "colChecksum": "Checksum",
     "colCreated": "Created",
+    "colSize": "Size",
     "colActions": "Actions",
-    "empty": "No backup jobs yet"
+    "empty": "No backup jobs yet",
+    "retryLoad": "Retry",
+    "errorGeneric": "Something went wrong. Try again.",
+    "listCaption": "Backup jobs"
   },
   "analytics": {
     "title": "Usage analytics",
@@ -1246,7 +1268,10 @@
     "keepServer": "Keep server",
     "merge": "Use merged draft",
     "paths": "Conflicting fields",
-    "resolved": "Conflict resolved"
+    "resolved": "Conflict resolved",
+    "missingId": "Missing conflict id — re-sync to open conflict",
+    "resolveFailed": "resolve failed",
+    "queueKey": "Queue key"
   },
   "billing": {
     "title": "Billing",
