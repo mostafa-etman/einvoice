@@ -98,11 +98,13 @@ export default function ItemCodesPage() {
     {
       id: 'type',
       header: t('type'),
+      ltr: true,
       cell: (i) => i.type,
     },
     {
       id: 'code',
       header: t('code'),
+      ltr: true,
       cell: (i) => i.code,
     },
     {
@@ -166,7 +168,7 @@ export default function ItemCodesPage() {
             <option value="EGS">EGS</option>
             <option value="GS1">GS1</option>
           </Select>
-          <Input label={t('code')} {...register('code')} />
+          <Input label={t('code')} dir="ltr" {...register('code')} />
           <Input label={t('description')} {...register('description')} />
           <Button type="submit" disabled={isSubmitting}>
             {t('create')}

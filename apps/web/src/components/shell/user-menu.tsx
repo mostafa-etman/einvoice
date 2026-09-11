@@ -78,9 +78,13 @@ export function UserMenu({
         {!compact ? (
           <span className="min-w-0 flex-1">
             <span className="block truncate text-nav font-medium text-on-dark">{displayName}</span>
-            <span className="block truncate text-token-xs text-on-dark-muted">
-              {roleName ?? user.email}
-            </span>
+            {roleName ? (
+              <span className="block truncate text-token-xs text-on-dark-muted">{roleName}</span>
+            ) : (
+              <span className="block truncate font-en text-token-xs text-on-dark-muted" dir="ltr">
+                {user.email}
+              </span>
+            )}
           </span>
         ) : null}
       </button>
@@ -96,7 +100,9 @@ export function UserMenu({
         >
           <div className="border-b border-border px-token-md py-token-sm">
             <p className="truncate text-token-sm font-medium text-foreground">{displayName}</p>
-            <p className="truncate text-token-xs text-foreground-muted">{user.email}</p>
+            <p className="truncate font-en text-token-xs text-foreground-muted" dir="ltr">
+              {user.email}
+            </p>
           </div>
           {user.isPlatformOperator ? (
             <Link

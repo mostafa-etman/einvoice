@@ -17,6 +17,7 @@ import {
 } from '@/lib/api/purchases';
 import { formatMoneyDisplay, formatQuantityDisplay } from '@/lib/format-number';
 import { useMutationToast } from '@/components/ui/use-mutation-toast';
+import { QueryErrorCard } from '@/components/ui/query-error-card';
 import { PageHeader } from '@/components/ui/page-header';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { Button } from '@/components/ui/button';
@@ -130,12 +131,12 @@ export default function PurchaseDetailPage() {
           title={t('title')}
         />
         {error ? (
-          <Card className="border-danger" role="alert" data-testid="purchase-detail-error">
-            <p className="m-0 text-token-sm font-medium text-danger">{error}</p>
-            <Button className="mt-token-sm" size="sm" variant="secondary" onClick={() => reload()}>
-              {t('retryLoad')}
-            </Button>
-          </Card>
+          <QueryErrorCard
+            testId="purchase-detail-error"
+            message={error}
+            retryLabel={t('retryLoad')}
+            onRetry={() => reload()}
+          />
         ) : (
           <div data-testid="purchase-detail-loading" className="space-y-token-sm" aria-busy="true">
             <Skeleton variant="rect" className="h-token-xl" />
@@ -357,6 +358,7 @@ export default function PurchaseDetailPage() {
         ) : (
           <TableWrap>
             <table className="w-full min-w-[56rem] border-collapse text-token-xs">
+              <caption className="sr-only">{t('lines')}</caption>
               <thead>
                 <tr>
                   <Th>#</Th>

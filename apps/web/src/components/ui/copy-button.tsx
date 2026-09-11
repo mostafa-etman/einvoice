@@ -2,6 +2,7 @@
 
 import { useCallback, useState, type ButtonHTMLAttributes } from 'react';
 import { useTranslations } from 'next-intl';
+import { cn } from '@/lib/cn';
 import { Button } from './button';
 
 async function writeClipboard(value: string) {
@@ -79,18 +80,14 @@ export function CopyableTenantId({
   if (!id) return null;
 
   return (
-    <div className={`flex flex-wrap items-center gap-2 text-sm ${className ?? ''}`.trim()}>
+    <div className={cn('flex flex-wrap items-center gap-token-sm text-token-sm', className)}>
       {showLabel ? <span>{t('tenantId')}:</span> : null}
-      <code className="break-all font-mono text-xs" dir="ltr">
+      <code className="break-all font-en font-mono text-token-xs" dir="ltr">
         {id}
       </code>
-      <button
-        type="button"
-        className="rounded border border-border px-2 py-0.5 text-xs hover:bg-brand-muted"
-        onClick={() => void onCopy()}
-      >
+      <Button type="button" variant="secondary" size="sm" onClick={() => void onCopy()}>
         {copied ? t('copied') : t('copy')}
-      </button>
+      </Button>
     </div>
   );
 }

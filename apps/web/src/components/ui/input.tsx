@@ -4,6 +4,19 @@ import { forwardRef, useId, type InputHTMLAttributes, type ReactNode } from 'rea
 import { cn } from '@/lib/cn';
 import { Field } from './field';
 
+const TECHNICAL_INPUT_TYPES = new Set([
+  'email',
+  'url',
+  'tel',
+  'number',
+  'password',
+  'date',
+  'datetime-local',
+  'time',
+  'month',
+  'week',
+]);
+
 export type InputProps = InputHTMLAttributes<HTMLInputElement> & {
   label?: ReactNode;
   hint?: ReactNode;
@@ -13,12 +26,13 @@ export type InputProps = InputHTMLAttributes<HTMLInputElement> & {
 };
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
-  { label, hint, error, iconStart, iconEnd, required, id, className, ...props },
+  { label, hint, error, iconStart, iconEnd, required, id, className, dir, type, ...props },
   ref,
 ) {
   const autoId = useId();
   const inputId = id ?? autoId;
   const errorId = error ? `${inputId}-error` : undefined;
+  const resolvedDir = dir ?? (type && TECHNICAL_INPUT_TYPES.has(type) ? 'ltr' : undefined);
 
   const control = (
     <div className={cn('relative', (iconStart || iconEnd) && 'block')}>
@@ -30,6 +44,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
       <input
         ref={ref}
         id={inputId}
+        type={type}
+        dir={resolvedDir}
         required={required}
         aria-invalid={error ? true : undefined}
         aria-describedby={errorId}

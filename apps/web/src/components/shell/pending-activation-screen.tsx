@@ -59,7 +59,9 @@ export function PendingActivationScreen({
               {t('openAdmin')}
             </a>
           ) : null}
-          <span className="text-token-sm text-foreground-muted">{user?.email}</span>
+          <span className="font-en text-token-sm text-foreground-muted" dir="ltr">
+            {user?.email}
+          </span>
           <Button
             variant="secondary"
             size="sm"

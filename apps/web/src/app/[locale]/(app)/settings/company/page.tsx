@@ -139,7 +139,9 @@ export default function CompanySettingsPage() {
               </div>
               <div>
                 <dt className="text-foreground-muted">{t('issuerType')}</dt>
-                <dd>{profile?.issuerType ?? '—'}</dd>
+                <dd className="font-en" dir="ltr">
+                  {profile?.issuerType ?? '—'}
+                </dd>
               </div>
               {addr ? (
                 <div>

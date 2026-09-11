@@ -122,6 +122,7 @@ export default function InvoiceNumberingPage() {
           <Input
             label={t('prefix')}
             hint={t('prefixHelp')}
+            dir="ltr"
             value={form.prefix}
             onChange={(e) => setForm({ ...form, prefix: e.target.value })}
           />
@@ -178,7 +179,9 @@ export default function InvoiceNumberingPage() {
           </Select>
           <p className="text-token-sm">
             {t('preview')}:{' '}
-            <span className="font-en text-brand">{preview || '—'}</span>
+            <span className="font-en text-brand" dir="ltr">
+              {preview || '—'}
+            </span>
           </p>
           <Button type="button" disabled={busy} onClick={() => void save()}>
             {t('save')}

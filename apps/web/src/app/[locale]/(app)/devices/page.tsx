@@ -21,6 +21,7 @@ import { FilterBar } from '@/components/ui/filter-bar';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Table, type TableColumn } from '@/components/ui/table';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { QueryErrorCard } from '@/components/ui/query-error-card';
 import { CopyButton } from '@/components/ui/copy-button';
 import { useMutationToast } from '@/components/ui/use-mutation-toast';
 
@@ -168,19 +169,11 @@ export default function DevicesPage() {
         </p>
       ) : null}
       {query.isError && !forbidden ? (
-        <Card className="border-danger" role="alert">
-          <p className="text-token-sm text-danger">
-            {query.error instanceof Error ? query.error.message : t('errorGeneric')}
-          </p>
-          <Button
-            className="mt-token-sm"
-            variant="secondary"
-            size="sm"
-            onClick={() => void query.refetch()}
-          >
-            {t('retryLoad')}
-          </Button>
-        </Card>
+        <QueryErrorCard
+          message={query.error instanceof Error ? query.error.message : t('errorGeneric')}
+          retryLabel={t('retryLoad')}
+          onRetry={() => void query.refetch()}
+        />
       ) : null}
 
       {freshCode ? (

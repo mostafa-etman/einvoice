@@ -13,11 +13,11 @@ import {
 import { PageHeader } from '@/components/ui/page-header';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { Badge, type BadgeVariant } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Table, type TableColumn } from '@/components/ui/table';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { QueryErrorCard } from '@/components/ui/query-error-card';
 import { useMutationToast } from '@/components/ui/use-mutation-toast';
 
 function backupStatusVariant(status: string): BadgeVariant {
@@ -198,19 +198,11 @@ export default function BackupPage() {
         </p>
       ) : null}
       {jobs.isError ? (
-        <Card className="border-danger" role="alert">
-          <p className="text-token-sm text-danger">
-            {jobs.error instanceof Error ? jobs.error.message : t('errorGeneric')}
-          </p>
-          <Button
-            className="mt-token-sm"
-            variant="secondary"
-            size="sm"
-            onClick={() => void jobs.refetch()}
-          >
-            {t('retryLoad')}
-          </Button>
-        </Card>
+        <QueryErrorCard
+          message={jobs.error instanceof Error ? jobs.error.message : t('errorGeneric')}
+          retryLabel={t('retryLoad')}
+          onRetry={() => void jobs.refetch()}
+        />
       ) : null}
 
       <Table

@@ -20,6 +20,7 @@ describe('CopyableTenantId', () => {
     Object.assign(navigator, { clipboard: { writeText } });
     renderUi(<CopyableTenantId id="tenant-1" />);
     expect(screen.getByText(/Tenant ID/)).toBeInTheDocument();
+    expect(screen.getByText('tenant-1')).toHaveAttribute('dir', 'ltr');
     fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
     expect(writeText).toHaveBeenCalledWith('tenant-1');
     expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument();

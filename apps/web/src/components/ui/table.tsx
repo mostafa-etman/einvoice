@@ -17,8 +17,13 @@ export type TableColumn<T> = {
   align?: TableAlign;
   sortable?: boolean;
   className?: string;
+  /** Keep codes, IDs, and other technical values LTR in Arabic layouts. */
+  ltr?: boolean;
   cell: (row: T) => ReactNode;
 };
+
+export const tableStickyFirstClass =
+  '[&_th:first-child]:sticky [&_th:first-child]:start-0 [&_th:first-child]:z-[2] [&_th:first-child]:bg-surface-alt [&_td:first-child]:sticky [&_td:first-child]:start-0 [&_td:first-child]:z-[1] [&_td:first-child]:bg-surface [&_tr:hover>td:first-child]:bg-surface-alt';
 
 export type TableSort = {
   columnId: string;
@@ -38,6 +43,7 @@ export type TableProps<T> = {
   onSortChange?: (sort: TableSort) => void;
   className?: string;
   onRowClick?: (row: T) => void;
+  stickyFirstColumn?: boolean;
 };
 
 export function Table<T>({
@@ -53,11 +59,18 @@ export function Table<T>({
   onSortChange,
   className,
   onRowClick,
+  stickyFirstColumn = true,
 }: TableProps<T>) {
   const showEmpty = !loading && rows.length === 0;
 
   return (
-    <div className={cn('overflow-x-auto rounded-lg border border-border bg-surface shadow-sm', className)}>
+    <div
+      className={cn(
+        'overflow-x-auto rounded-lg border border-border bg-surface shadow-sm',
+        stickyFirstColumn && tableStickyFirstClass,
+        className,
+      )}
+    >
       <table className={cn('w-full border-collapse', dense ? 'text-token-xs' : 'text-token-sm')}>
         <caption className="sr-only">{caption}</caption>
         <thead className="sticky top-0 bg-surface-alt">
@@ -132,10 +145,12 @@ export function Table<T>({
                   {columns.map((col) => (
                     <td
                       key={col.id}
+                      dir={col.ltr ? 'ltr' : undefined}
                       className={cn(
                         'px-token-md py-token-sm text-foreground',
                         alignClass[col.align ?? 'start'],
                         col.align === 'end' && 'font-en tabular-nums',
+                        col.ltr && 'font-en',
                         col.className,
                       )}
                     >
@@ -159,9 +174,20 @@ function SortMark({ direction }: { direction?: 'asc' | 'desc' }) {
   );
 }
 
-export function TableWrap({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
+export function TableWrap({
+  className,
+  stickyFirstColumn = true,
+  ...props
+}: HTMLAttributes<HTMLDivElement> & { stickyFirstColumn?: boolean }) {
   return (
-    <div className={cn('overflow-x-auto rounded-lg border border-border bg-surface', className)} {...props} />
+    <div
+      className={cn(
+        'overflow-x-auto rounded-lg border border-border bg-surface',
+        stickyFirstColumn && tableStickyFirstClass,
+        className,
+      )}
+      {...props}
+    />
   );
 }
 

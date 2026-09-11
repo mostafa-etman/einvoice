@@ -113,8 +113,8 @@ export default function BranchesSettingsPage() {
         >
           <div className="grid gap-token-md sm:grid-cols-2 lg:grid-cols-3">
             <Input label={t('name')} {...register('name')} />
-            <Input label={t('etaBranchCode')} {...register('etaBranchCode')} />
-            <Input label={t('activityCode')} {...register('activityCode')} />
+            <Input label={t('etaBranchCode')} dir="ltr" {...register('etaBranchCode')} />
+            <Input label={t('activityCode')} dir="ltr" {...register('activityCode')} />
           </div>
           <Checkbox label={t('default')} {...register('isDefault')} />
 

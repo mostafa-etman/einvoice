@@ -41,7 +41,9 @@ export function PurchasePartyCard({
         </div>
         <div className="sm:col-span-2">
           <dt className="text-foreground-muted">{t('partyId')}</dt>
-          <dd className="break-all font-en text-token-xs">{id}</dd>
+          <dd className="break-all font-en text-token-xs" dir="ltr">
+            {id}
+          </dd>
         </div>
         {address ? (
           <div className="sm:col-span-2">

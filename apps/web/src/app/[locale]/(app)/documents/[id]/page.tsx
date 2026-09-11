@@ -77,6 +77,8 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Modal } from '@/components/ui/modal';
 import { CopyButton } from '@/components/ui/copy-button';
 import { QueryErrorCard } from '@/components/ui/query-error-card';
+import { tableStickyFirstClass } from '@/components/ui/table';
+import { cn } from '@/lib/cn';
 import { useMutationToast } from '@/components/ui/use-mutation-toast';
 import { DocumentStatusBadge } from '../_components/document-status-badge';
 import { CancelReasonDialog } from '../_components/cancel-reason-dialog';
@@ -1748,8 +1750,9 @@ export default function DocumentEditorPage() {
             </div>
           ) : null}
           {lines.length ? (
-            <div className="overflow-x-auto">
+            <div className={cn('overflow-x-auto', tableStickyFirstClass)}>
               <table className="w-full min-w-[64rem] border-collapse text-token-xs">
+                <caption className="sr-only">{t('lines')}</caption>
                 <thead>
                   <tr className="border-b border-border text-foreground/60">
                     <th scope="col" className="px-token-xs py-token-xs text-start font-medium">

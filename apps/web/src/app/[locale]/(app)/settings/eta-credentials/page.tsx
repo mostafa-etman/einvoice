@@ -456,7 +456,10 @@ export default function EtaCredentialsPage() {
 
             {query.data?.hasClientSecret ? (
               <p className="text-token-sm">
-                {t('secretMasked')}: {query.data.clientSecretMasked}
+                {t('secretMasked')}:{' '}
+                <span className="font-en" dir="ltr">
+                  {query.data.clientSecretMasked}
+                </span>
                 {query.data.lastValidatedAt
                   ? ` · ${t('lastTest')}: ${query.data.lastValidatedAt}`
                   : null}
@@ -486,6 +489,7 @@ export default function EtaCredentialsPage() {
                   />
                   <Input
                     label={`${t('registrationNumber')} *`}
+                    dir="ltr"
                     error={
                       errors.registrationNumber ? t('fieldRequired') : undefined
                     }
@@ -499,17 +503,18 @@ export default function EtaCredentialsPage() {
                 </div>
               </fieldset>
 
-              <Input label={t('clientId')} {...register('clientId')} />
+              <Input label={t('clientId')} dir="ltr" {...register('clientId')} />
               <Input
                 type="password"
                 autoComplete="new-password"
                 label={t('clientSecret')}
                 {...register('clientSecret')}
               />
-              <Input label={t('activityCode')} {...register('activityCode')} />
+              <Input label={t('activityCode')} dir="ltr" {...register('activityCode')} />
               <Checkbox label={t('intermediary')} {...register('isIntermediary')} />
               <Input
                 label={t('onBehalfOf')}
+                dir="ltr"
                 {...register('onBehalfOfRegistrationNumber')}
               />
               <div className="flex flex-wrap gap-token-md">

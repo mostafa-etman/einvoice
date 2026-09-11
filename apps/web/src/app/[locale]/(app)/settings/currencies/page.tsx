@@ -108,6 +108,7 @@ export default function CurrenciesSettingsPage() {
     {
       id: 'code',
       header: t('catalog'),
+      ltr: true,
       cell: (c) => `${c.code} — ${c.nameEn}`,
     },
     {
@@ -126,6 +127,7 @@ export default function CurrenciesSettingsPage() {
     {
       id: 'code',
       header: t('title'),
+      ltr: true,
       cell: (c) => (
         <span className="inline-flex items-center gap-token-xs">
           {c.currencyCode}
@@ -155,6 +157,7 @@ export default function CurrenciesSettingsPage() {
     {
       id: 'pair',
       header: t('rates'),
+      ltr: true,
       cell: (r) => `${r.baseCurrencyCode}/${r.quoteCurrencyCode} = ${r.rate}`,
     },
   ];
@@ -228,9 +231,9 @@ export default function CurrenciesSettingsPage() {
             className="grid gap-token-md sm:grid-cols-2 lg:grid-cols-5 lg:items-end"
             onSubmit={handleSubmit((v) => addRate.mutateAsync(v))}
           >
-            <Input label={t('base')} {...register('baseCurrencyCode')} />
-            <Input label={t('quote')} {...register('quoteCurrencyCode')} />
-            <Input label={t('rate')} {...register('rate')} />
+            <Input label={t('base')} dir="ltr" {...register('baseCurrencyCode')} />
+            <Input label={t('quote')} dir="ltr" {...register('quoteCurrencyCode')} />
+            <Input label={t('rate')} dir="ltr" {...register('rate')} />
             <Input
               type="datetime-local"
               label={t('effectiveFrom')}

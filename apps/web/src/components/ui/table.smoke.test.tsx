@@ -17,6 +17,23 @@ describe('Table', () => {
     expect(screen.getByRole('table', { name: 'Documents' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute('scope', 'col');
     expect(screen.getByText('Al-Noor')).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: 'Documents' }).parentElement?.className).toContain(
+      '[&_th:first-child]:sticky',
+    );
+  });
+
+  it('keeps technical cells LTR', () => {
+    renderUi(
+      <Table
+        caption="Codes"
+        columns={[
+          { id: 'code', header: 'Code', ltr: true, cell: (r: { code: string }) => r.code },
+        ]}
+        rows={[{ code: 'EGS-1' }]}
+        getRowId={(r) => r.code}
+      />,
+    );
+    expect(screen.getByText('EGS-1').closest('td')).toHaveAttribute('dir', 'ltr');
   });
 
   it('renders skeleton rows while loading', () => {

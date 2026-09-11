@@ -131,7 +131,7 @@ export default function EtaDocumentTypesPage() {
           ) : (
             <ul className="mt-token-sm flex flex-col gap-token-xs overflow-x-auto text-token-sm">
               {(versions.data?.items ?? []).map((v, i) => (
-                <li key={i} className="font-en">
+                <li key={i} className="font-en" dir="ltr">
                   {JSON.stringify(v)}
                 </li>
               ))}

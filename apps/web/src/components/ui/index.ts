@@ -13,6 +13,7 @@ export {
   TableWrap,
   Td,
   Th,
+  tableStickyFirstClass,
   type TableAlign,
   type TableColumn,
   type TableProps,
