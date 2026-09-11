@@ -23,6 +23,7 @@ import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
+import { getPermissionLabels } from '@/i18n/permission-labels';
 import { PermissionMatrix } from './_components/permission-matrix';
 import { useMutationToast } from '@/components/ui/use-mutation-toast';
 
@@ -33,7 +34,7 @@ export default function RolesPage() {
   const { tenantId } = useTenant();
   const qc = useQueryClient();
   const toast = useMutationToast();
-  const permLabels = t.raw('perm') as Record<string, string>;
+  const permLabels = getPermissionLabels(locale);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');

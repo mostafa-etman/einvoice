@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import en from '@/messages/en.json';
+import { getPermissionLabels } from '@/i18n/permission-labels';
 import { ApiError } from '@/lib/api/client';
 import { listMembers, updateMemberRole, type Member } from '@/lib/api/members';
 import {
@@ -129,7 +130,7 @@ describe('roles page', () => {
     expect(screen.getByRole('button', { name: /Sales/ })).toBeInTheDocument();
     expect(await screen.findByText('customers.view')).toBeInTheDocument();
     expect(screen.getByText('customers.manage')).toBeInTheDocument();
-    expect(en.roles.perm['customers.view']).toBeTruthy();
+    expect(getPermissionLabels('en')['customers.view']).toBeTruthy();
     await waitFor(() => {
       const keys = qc.getQueryCache().findAll().map((q) => q.queryKey);
       expect(keys).toEqual(
