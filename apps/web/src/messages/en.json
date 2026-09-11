@@ -5,7 +5,33 @@
   "common": {
     "tenantId": "Tenant ID",
     "copy": "Copy",
-    "copied": "Copied"
+    "copied": "Copied",
+    "states": {
+      "loading": "Loading",
+      "empty": "No data",
+      "error": "Something went wrong"
+    },
+    "actions": {
+      "save": "Save",
+      "cancel": "Cancel",
+      "retry": "Retry",
+      "delete": "Delete",
+      "confirm": "Confirm",
+      "close": "Close"
+    }
+  },
+  "ui": {
+    "pageSize": "Per page",
+    "previous": "Previous",
+    "next": "Next",
+    "jumpToPage": "Go to page",
+    "paginationSummary": "Page {page} of {total}",
+    "search": "Search",
+    "filterReset": "Reset",
+    "confirmTitle": "Please confirm",
+    "typedConfirmHint": "Type {value} to confirm",
+    "breadcrumb": "Breadcrumb",
+    "progress": "Progress"
   },
   "nav": {
     "home": "Home",

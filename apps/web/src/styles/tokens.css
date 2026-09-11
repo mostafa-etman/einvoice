@@ -1,23 +1,182 @@
 :root {
-  --color-background: #f3f6f4;
-  --color-foreground: #14231a;
-  --color-brand: #0f6b4c;
-  --color-brand-muted: #d7ebe2;
-  --color-surface: #ffffff;
-  --color-border: #c5d5cc;
+  /* Brand — XIRA logo (XIRA-DESIGN-DEMO.html) */
+  --color-brand: #2f6fed;
+  --color-brand-strong: #1d4ed8;
+  --color-brand-deep: #1e3a8a;
+  --color-brand-teal: #14b8a6;
+  --color-brand-teal-strong: #0d9488;
+  --color-brand-cyan: #38bdf8;
+  --color-brand-muted: rgba(47, 111, 237, 0.1);
+  --color-brand-teal-muted: rgba(20, 184, 166, 0.1);
 
+  /* Hero surfaces (navy) */
+  --color-navy: #0a1628;
+  --color-navy-2: #0f2545;
+  --color-navy-3: #14315b;
+
+  /* Content surfaces */
+  --color-background: #f5f7fb;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f8fafc;
+  --color-surface-hover: #eef2f8;
+
+  /* Text */
+  --color-foreground: #0f172a;
+  --color-foreground-muted: #64748b;
+  --color-foreground-subtle: #94a3b8;
+  --color-on-dark: #ffffff;
+  --color-on-dark-muted: #94a5c7;
+
+  /* Borders */
+  --color-border: #e2e8f0;
+  --color-border-strong: #cbd5e1;
+  --color-border-dark: rgba(255, 255, 255, 0.08);
+
+  /* Semantic */
+  --color-success: #10b981;
+  --color-success-muted: #d1fae5;
+  --color-warning: #f59e0b;
+  --color-warning-muted: #fef3c7;
+  --color-danger: #ef4444;
+  --color-danger-muted: #fee2e2;
+  --color-danger-strong: #dc2626;
+  --color-info: #3b82f6;
+  --color-info-muted: #dbeafe;
+
+  /* ETA status */
+  --color-status-draft: #64748b;
+  --color-status-draft-muted: #f1f5f9;
+  --color-status-signed: #3b82f6;
+  --color-status-signed-muted: #dbeafe;
+  --color-status-submitted: #f59e0b;
+  --color-status-submitted-muted: #fef3c7;
+  --color-status-valid: #10b981;
+  --color-status-valid-muted: #d1fae5;
+  --color-status-invalid: #ef4444;
+  --color-status-invalid-muted: #fee2e2;
+  --color-status-cancelled: #64748b;
+  --color-status-cancelled-muted: #e2e8f0;
+  --color-status-rejected: #b91c1c;
+  --color-status-rejected-muted: #fecaca;
+
+  /* Spacing */
+  --space-2xs: 0.125rem;
   --space-xs: 0.25rem;
   --space-sm: 0.5rem;
   --space-md: 1rem;
   --space-lg: 1.5rem;
   --space-xl: 2.5rem;
+  --space-2xl: 4rem;
 
-  --font-sans: "IBM Plex Sans", "Segoe UI", sans-serif;
-  --font-display: "IBM Plex Serif", Georgia, serif;
+  /* Control metrics copied from XIRA-DESIGN-DEMO.html */
+  --space-button-y: 0.625rem;
+  --space-button-x: 1.125rem;
+  --space-button-y-sm: 0.375rem;
+  --space-button-x-sm: 0.75rem;
+  --space-button-y-lg: 0.75rem;
+  --space-button-x-lg: 1.5rem;
+  --space-input-y: 0.6875rem;
+  --space-input-x: 0.875rem;
+  --space-badge-y: 0.1875rem;
+  --space-badge-x: 0.625rem;
+  --space-stat-accent: 0.25rem;
+  --size-badge-dot: 0.375rem;
+  --size-logo-tile: 3rem;
+  --size-logo-tile-sm: 2.5rem;
+  --size-empty-icon: 5rem;
+  --size-search-min: 12rem;
+
+  /* Radii — demo buttons/inputs use 8px; cards use 14px */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+  --radius-button: 8px;
+  --radius-control: 8px;
+  --radius-logo: 12px;
+
+  /* Elevation */
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08), 0 2px 4px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 20px 40px rgba(15, 23, 42, 0.12), 0 8px 16px rgba(15, 23, 42, 0.06);
+  --shadow-brand: 0 8px 24px rgba(47, 111, 237, 0.25);
+  --shadow-brand-mark: 0 8px 24px rgba(47, 111, 237, 0.4);
+
+  /* Focus — demo .btn uses 0.3; .input uses 0.15 */
+  --ring: 0 0 0 3px rgba(47, 111, 237, 0.3);
+  --ring-input: 0 0 0 3px rgba(47, 111, 237, 0.15);
+
+  /* Type — next/font binds --font-sans / --font-en on <html> */
+  --font-sans: "IBM Plex Sans Arabic", "Inter", "Segoe UI", sans-serif;
+  --font-en: "Inter", "IBM Plex Sans Arabic", sans-serif;
+  --font-display: var(--font-sans);
+  --font-size-xs: 0.75rem;
   --font-size-sm: 0.875rem;
   --font-size-md: 1rem;
   --font-size-lg: 1.25rem;
   --font-size-xl: 2rem;
+  --font-size-page: 1.5rem;
+  --font-size-stat: 1.625rem;
+  --font-size-button: 0.875rem;
+  --font-size-button-sm: 0.8125rem;
+  --font-size-button-lg: 0.9375rem;
+  --font-size-badge: 0.75rem;
+  --font-size-logo-mark: 1.625rem;
+  --font-size-logo-name: 1.5rem;
+  --font-size-logo-name-sm: 1.125rem;
+  --font-size-tagline: 0.6875rem;
+  --font-size-tagline-sm: 0.5625rem;
+  --tracking-brand: 0.05em;
+  --tracking-tagline: 0.2em;
+
+  /* Signature gradients */
+  --gradient-brand: linear-gradient(135deg, #14b8a6 0%, #2f6fed 50%, #1e3a8a 100%);
+  --gradient-brand-soft: linear-gradient(
+    135deg,
+    rgba(20, 184, 166, 0.08) 0%,
+    rgba(47, 111, 237, 0.08) 100%
+  );
+  --gradient-hero: linear-gradient(160deg, #0a1628 0%, #0f2545 40%, #14315b 100%);
+  --gradient-hero-text: linear-gradient(90deg, #14b8a6, #38bdf8);
+  --gradient-hero-glow: radial-gradient(circle at 20% 20%, rgba(20, 184, 166, 0.15), transparent 50%),
+    radial-gradient(circle at 80% 80%, rgba(47, 111, 237, 0.2), transparent 50%);
+  --gradient-skeleton: linear-gradient(
+    90deg,
+    var(--color-surface-alt),
+    var(--color-surface-hover),
+    var(--color-surface-alt)
+  );
+}
+
+:root[data-theme='dark'] {
+  --color-background: #0a1628;
+  --color-surface: #0f2545;
+  --color-surface-alt: #14315b;
+  --color-surface-hover: #1a3d66;
+  --color-foreground: #e6ede9;
+  --color-foreground-muted: #94a5c7;
+  --color-foreground-subtle: #64748b;
+  --color-border: #26382e;
+  --color-border-strong: #3d5244;
+  --color-brand-muted: rgba(47, 111, 237, 0.22);
+  --color-brand-teal-muted: rgba(20, 184, 166, 0.18);
+  --color-success-muted: rgba(16, 185, 129, 0.2);
+  --color-warning-muted: rgba(245, 158, 11, 0.2);
+  --color-danger-muted: rgba(239, 68, 68, 0.2);
+  --color-info-muted: rgba(59, 130, 246, 0.2);
+  --color-status-draft-muted: rgba(100, 116, 139, 0.22);
+  --color-status-signed-muted: rgba(59, 130, 246, 0.22);
+  --color-status-submitted-muted: rgba(245, 158, 11, 0.22);
+  --color-status-valid-muted: rgba(16, 185, 129, 0.22);
+  --color-status-invalid-muted: rgba(239, 68, 68, 0.22);
+  --color-status-cancelled-muted: rgba(100, 116, 139, 0.22);
+  --color-status-rejected-muted: rgba(185, 28, 28, 0.28);
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45), 0 2px 4px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 20px 40px rgba(0, 0, 0, 0.5), 0 8px 16px rgba(0, 0, 0, 0.35);
 }
 
 @tailwind base;

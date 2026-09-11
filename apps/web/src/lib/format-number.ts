@@ -10,3 +10,32 @@ export {
   formatMoneyDisplay,
   formatQuantityDisplay,
 } from '@einvoice/eta-core';
+
+function toFiniteNumber(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * DISPLAY ONLY. Western digits + ASCII `%`.
+ * `value` is a ratio (`0.124` → `12.4%`).
+ */
+export function formatPercent(value: unknown, fractionDigits = 1): string {
+  const n = toFiniteNumber(value);
+  if (n == null) return '—';
+  return `${(n * 100).toFixed(fractionDigits)}%`;
+}
+
+/**
+ * DISPLAY ONLY. Western digits, compact notation (`1284` → `1.3K`).
+ * Latin digits even for `ar` so figures stay paste-safe and match money display.
+ */
+export function formatCompact(value: unknown): string {
+  const n = toFiniteNumber(value);
+  if (n == null) return '—';
+  return new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(n);
+}

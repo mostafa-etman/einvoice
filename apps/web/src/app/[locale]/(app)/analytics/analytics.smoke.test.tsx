@@ -1,6 +1,18 @@
 import { render, screen } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 
+jest.mock('@/lib/tenant-provider', () => ({
+  useTenant: () => ({
+    tenantId: 'tenant-1',
+    branchId: null,
+    memberships: [],
+    branches: [],
+    setTenantId: jest.fn(),
+    setBranchId: jest.fn(),
+    roleName: 'Owner',
+  }),
+}));
+
 jest.mock('recharts', () => {
   const Passthrough = ({ children }: { children?: React.ReactNode }) => (
     <div data-testid="chart">{children}</div>
