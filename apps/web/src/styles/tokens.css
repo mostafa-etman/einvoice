@@ -26,6 +26,12 @@
   --color-foreground-subtle: #94a3b8;
   --color-on-dark: #ffffff;
   --color-on-dark-muted: #94a5c7;
+  --color-nav-fg: rgba(255, 255, 255, 0.75);
+  --color-nav-hover: rgba(255, 255, 255, 0.05);
+  --color-nav-user: rgba(255, 255, 255, 0.04);
+  --color-nav-user-hover: rgba(255, 255, 255, 0.08);
+  --color-nav-search: rgba(255, 255, 255, 0.05);
+  --color-nav-kbd: rgba(255, 255, 255, 0.08);
 
   /* Borders */
   --color-border: #e2e8f0;
@@ -85,6 +91,16 @@
   --size-logo-tile-sm: 2.5rem;
   --size-empty-icon: 5rem;
   --size-search-min: 12rem;
+  --size-sidebar: 260px;
+  --size-sidebar-collapsed: 4.5rem;
+  --size-avatar: 2.25rem;
+  --size-nav-icon: 1.125rem;
+  --space-nav-y: 0.5rem;
+  --space-nav-x: 0.75rem;
+  --space-nav-gap: 0.125rem;
+  --space-nav-icon-gap: 0.625rem;
+  --space-topbar-y: 0.75rem;
+  --space-topbar-x: 1.5rem;
 
   /* Radii — demo buttons/inputs use 8px; cards use 14px */
   --radius-sm: 6px;
@@ -103,6 +119,7 @@
   --shadow-lg: 0 20px 40px rgba(15, 23, 42, 0.12), 0 8px 16px rgba(15, 23, 42, 0.06);
   --shadow-brand: 0 8px 24px rgba(47, 111, 237, 0.25);
   --shadow-brand-mark: 0 8px 24px rgba(47, 111, 237, 0.4);
+  --shadow-nav-active: 0 4px 12px rgba(47, 111, 237, 0.3);
 
   /* Focus — demo .btn uses 0.3; .input uses 0.15 */
   --ring: 0 0 0 3px rgba(47, 111, 237, 0.3);
@@ -128,8 +145,11 @@
   --font-size-logo-name-sm: 1.125rem;
   --font-size-tagline: 0.6875rem;
   --font-size-tagline-sm: 0.5625rem;
+  --font-size-nav: 0.8125rem;
+  --font-size-nav-group: 0.625rem;
   --tracking-brand: 0.05em;
   --tracking-tagline: 0.2em;
+  --tracking-nav-group: 0.12em;
 
   /* Signature gradients */
   --gradient-brand: linear-gradient(135deg, #14b8a6 0%, #2f6fed 50%, #1e3a8a 100%);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/cn';
@@ -27,6 +27,7 @@ export type ModalProps = {
   footer?: ReactNode;
   size?: ModalSize;
   className?: string;
+  initialFocusRef?: RefObject<HTMLElement | null>;
 };
 
 export function Modal({
@@ -38,6 +39,7 @@ export function Modal({
   footer,
   size = 'md',
   className,
+  initialFocusRef,
 }: ModalProps) {
   const t = useTranslations('common.actions');
   const titleId = useId();
@@ -50,7 +52,7 @@ export function Modal({
     const previouslyFocused = document.activeElement as HTMLElement | null;
     const focusables = () =>
       panel ? Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)) : [];
-    const first = focusables()[0] ?? panel;
+    const first = initialFocusRef?.current ?? focusables()[0] ?? panel;
     first?.focus();
 
     const prevOverflow = document.body.style.overflow;
@@ -86,7 +88,7 @@ export function Modal({
       document.body.style.overflow = prevOverflow;
       previouslyFocused?.focus();
     };
-  }, [open, onClose]);
+  }, [open, onClose, initialFocusRef]);
 
   if (!open || typeof document === 'undefined') return null;
 

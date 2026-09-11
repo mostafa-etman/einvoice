@@ -52,7 +52,12 @@
     "logout": "Sign out",
     "login": "Sign in",
     "register": "Create account",
-    "platformAdmin": "Platform admin"
+    "platformAdmin": "Platform admin",
+    "sections": {
+      "sales": "Sales",
+      "operations": "Operations",
+      "insights": "Insights & admin"
+    }
   },
   "auth": {
     "email": "Email",
@@ -87,7 +92,17 @@
     "etaEnvSandbox": "SANDBOX",
     "etaEnvProduction": "PRODUCTION",
     "collapseSidebar": "Collapse sidebar",
-    "expandSidebar": "Expand sidebar"
+    "expandSidebar": "Expand sidebar",
+    "navigation": "Navigation",
+    "openMenu": "Open menu",
+    "quickSearch": "Quick search",
+    "commandPalette": "Jump to page",
+    "commandPaletteHint": "Search destinations. Full-text search is coming later.",
+    "themeToggle": "Toggle color theme",
+    "notifications": "Notifications",
+    "notificationsSoon": "Notifications are not connected yet",
+    "userMenu": "Account menu",
+    "dismissBanner": "Dismiss"
   },
   "users": {
     "title": "Users",

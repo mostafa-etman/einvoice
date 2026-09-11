@@ -8,6 +8,11 @@ import { useAuth } from '@/lib/auth-provider';
 import { useTenant } from '@/lib/tenant-provider';
 import { TenantSwitcher } from '@/components/switchers/tenant-switcher';
 import { CopyableTenantId } from '@/components/copyable-tenant-id';
+import { Button } from '@/components/ui/button';
+import { Card, CardBody } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
+import { LocaleSwitcher } from '@/components/shell/locale-switcher';
+import { ThemeToggle } from '@/components/shell/theme-toggle';
 import {
   FALLBACK_WHATSAPP_DISPLAY,
   FALLBACK_WHATSAPP_URL,
@@ -44,46 +49,56 @@ export function PendingActivationScreen({
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
-      <header className="flex flex-wrap items-center gap-token-md border-b border-border bg-surface px-token-lg py-token-md">
+      <header className="flex flex-wrap items-center gap-token-md border-b border-border bg-surface px-topbar-x py-topbar-y">
         <TenantSwitcher />
-        <div className="ms-auto flex items-center gap-token-md">
+        <div className="ms-auto flex items-center gap-token-sm">
+          <ThemeToggle />
+          <LocaleSwitcher />
           {user?.isPlatformOperator ? (
             <a className="text-token-sm text-brand underline" href={`/${locale}/admin`}>
               {t('openAdmin')}
             </a>
           ) : null}
-          <span className="text-token-sm text-foreground/70">{user?.email}</span>
-          <button
-            type="button"
-            className="rounded border border-border px-token-sm py-token-xs text-token-sm hover:bg-brand-muted"
+          <span className="text-token-sm text-foreground-muted">{user?.email}</span>
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={async () => {
               await logout();
               router.push(`/${locale}/login`);
             }}
           >
             {t('logout')}
-          </button>
+          </Button>
         </div>
       </header>
-      <main className="mx-auto flex max-w-lg flex-1 flex-col justify-center px-token-lg py-token-xl text-center">
-        <h1 className="font-display text-token-xl text-brand">{t(`${status}.title`)}</h1>
-        <p className="mt-token-md text-token-md text-foreground/80">{t(`${status}.body`)}</p>
-        {status === 'PENDING' || status === 'REJECTED' ? (
-          <p className="mt-token-lg text-token-md" dir={locale === 'ar' ? 'rtl' : 'ltr'}>
-            {t('whatsappPrompt', { number: display })}
-          </p>
-        ) : null}
-        <div className="mt-token-lg flex justify-center">
-          <CopyableTenantId id={tenantId} />
-        </div>
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-token-lg inline-flex items-center justify-center rounded bg-brand px-token-md py-token-sm text-white"
-        >
-          {t('whatsappCta')}
-        </a>
+      <main className="mx-auto flex max-w-lg flex-1 flex-col justify-center px-token-lg py-token-xl">
+        <Card>
+          <CardBody>
+            <EmptyState
+              title={t(`${status}.title`)}
+              description={t(`${status}.body`)}
+            />
+            {status === 'PENDING' || status === 'REJECTED' ? (
+              <p className="mt-token-lg text-center text-token-sm text-foreground-muted" dir={locale === 'ar' ? 'rtl' : 'ltr'}>
+                {t('whatsappPrompt', { number: display })}
+              </p>
+            ) : null}
+            <div className="mt-token-lg flex justify-center">
+              <CopyableTenantId id={tenantId} />
+            </div>
+            <div className="mt-token-lg flex justify-center">
+              <a
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center rounded-button bg-brand px-button-x py-button-y text-button font-medium text-on-dark shadow-xs hover:bg-brand-strong hover:shadow-brand"
+              >
+                {t('whatsappCta')}
+              </a>
+            </div>
+          </CardBody>
+        </Card>
       </main>
     </div>
   );

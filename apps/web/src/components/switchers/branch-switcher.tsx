@@ -19,7 +19,7 @@ export function BranchSwitcher() {
     <label className="text-token-sm" data-testid="branch-switcher">
       {t('branch')}
       <select
-        className="ms-token-sm rounded border border-border bg-background px-token-sm py-token-xs"
+        className="ms-token-sm rounded-control border border-border bg-surface px-token-sm py-token-xs text-token-sm hover:border-brand"
         value={branchId ?? ''}
         onChange={(e) => setBranchId(e.target.value)}
       >

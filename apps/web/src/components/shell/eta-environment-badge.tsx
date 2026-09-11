@@ -4,6 +4,7 @@ import { useTranslations } from 'next-intl';
 import { useQuery } from '@tanstack/react-query';
 import { getEtaEnvironment } from '@/lib/api/eta-environment';
 import { useTenant } from '@/lib/tenant-provider';
+import { cn } from '@/lib/cn';
 
 /** Always-visible ETA host badge so users know sandbox vs production. */
 export function EtaEnvironmentBadge() {
@@ -22,14 +23,16 @@ export function EtaEnvironmentBadge() {
 
   return (
     <span
-      className={`rounded px-token-sm py-token-xs text-token-xs font-semibold tracking-wide ${
+      className={cn(
+        'inline-flex items-center gap-token-sm rounded-pill px-token-sm py-token-xs text-token-xs font-semibold tracking-wide',
         active === 'PRODUCTION'
-          ? 'bg-danger/15 text-danger'
-          : 'bg-brand-muted text-brand'
-      }`}
+          ? 'bg-danger-muted text-danger'
+          : 'bg-warning-muted text-warning',
+      )}
       data-testid="shell-eta-env-badge"
       title={env.data?.apiBaseUrl}
     >
+      <span className="size-[var(--size-badge-dot)] rounded-pill bg-current" aria-hidden />
       {label}
     </span>
   );

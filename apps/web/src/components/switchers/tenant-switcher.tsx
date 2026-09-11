@@ -23,7 +23,7 @@ export function TenantSwitcher() {
       <label className="text-token-sm">
         {t('tenant')}
         <select
-          className="ms-token-sm max-w-[16rem] rounded border border-border bg-background px-token-sm py-token-xs"
+          className="ms-token-sm max-w-[16rem] rounded-control border border-border bg-surface px-token-sm py-token-xs text-token-sm hover:border-brand"
           value={tenantId ?? ''}
           aria-label={t('switchCompany')}
           onChange={(e) => {

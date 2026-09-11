@@ -52,7 +52,12 @@
     "logout": "تسجيل الخروج",
     "login": "تسجيل الدخول",
     "register": "إنشاء حساب",
-    "platformAdmin": "إدارة المنصة"
+    "platformAdmin": "إدارة المنصة",
+    "sections": {
+      "sales": "المبيعات",
+      "operations": "العمليات",
+      "insights": "التحليل والإدارة"
+    }
   },
   "auth": {
     "email": "البريد الإلكتروني",
@@ -87,7 +92,17 @@
     "etaEnvSandbox": "اختبار",
     "etaEnvProduction": "إنتاج",
     "collapseSidebar": "طي الشريط الجانبي",
-    "expandSidebar": "توسيع الشريط الجانبي"
+    "expandSidebar": "توسيع الشريط الجانبي",
+    "navigation": "التنقل",
+    "openMenu": "فتح القائمة",
+    "quickSearch": "بحث سريع…",
+    "commandPalette": "الانتقال إلى صفحة",
+    "commandPaletteHint": "ابحث في الوجهات. البحث الشامل سيأتي لاحقًا.",
+    "themeToggle": "تبديل المظهر",
+    "notifications": "الإشعارات",
+    "notificationsSoon": "الإشعارات غير متصلة بعد",
+    "userMenu": "قائمة الحساب",
+    "dismissBanner": "إخفاء"
   },
   "users": {
     "title": "المستخدمون",
