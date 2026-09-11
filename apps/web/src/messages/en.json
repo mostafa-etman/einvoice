@@ -1459,7 +1459,21 @@
     "breakGlass": "Break glass (enable writes)",
     "endImpersonation": "End session",
     "back": "Back to tenants",
-    "error": "Something went wrong"
+    "error": "Something went wrong",
+    "retryLoad": "Retry",
+    "listCaption": "Platform tenants",
+    "edit": "Edit",
+    "documentQuota": "Document quota",
+    "fieldCode": "Code",
+    "fieldNameEn": "Name (English)",
+    "fieldNameAr": "Name (Arabic)",
+    "addonKind": "Kind",
+    "quantity": "Quantity",
+    "consumed": "consumed",
+    "confirmApprove": "Approve this tenant?",
+    "docs": "docs",
+    "branches": "branches",
+    "devices": "devices"
   },
   "pending": {
     "logout": "Sign out",

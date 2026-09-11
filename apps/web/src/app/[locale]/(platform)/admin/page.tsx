@@ -6,272 +6,46 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '@/lib/api/client';
 import {
   activateTenant,
-  adjustPoints,
   approveTenant,
-  assignPlan,
-  breakGlass,
-  endImpersonation,
   getDocumentCosts,
   getSettings,
-  getTenant,
-  getTenantUsage,
-  listAdminPlans,
   listAdminAddons,
+  listAdminPlans,
   listTenants,
+  listTrialTaxRegistrations,
   provisionTenant,
   rejectTenant,
+  resetTrialTaxRegistration,
   setDocumentCosts,
-  startImpersonation,
+  setPlanActive,
   suspendTenant,
   updateSettings,
-  upsertPlan,
   upsertAddon,
-  applyAddon,
-  setPlanActive,
-  listTrialTaxRegistrations,
-  resetTrialTaxRegistration,
-  type ImpersonationSessionView,
+  upsertPlan,
   type LifecycleStatus,
-  type PlanAdmin,
-  type TenantDetail,
+  type TenantSummary,
 } from '@/lib/api/platform-admin';
-import { CopyableTenantId } from '@/components/copyable-tenant-id';
+import { PageHeader } from '@/components/ui/page-header';
+import { Button } from '@/components/ui/button';
+import { Card, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
+import { FilterBar } from '@/components/ui/filter-bar';
+import { Tabs } from '@/components/ui/tabs';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Skeleton } from '@/components/ui/skeleton';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { TenantTable } from './_components/tenant-table';
+import { TenantDetailDrawer } from './_components/tenant-detail-drawer';
+import { ReasonDialog } from './_components/reason-dialog';
 
 type Tab = 'tenants' | 'plans' | 'addons' | 'costs' | 'settings' | 'trials';
 
-function TenantDetailPanel({
-  tenantId,
-  plans,
-  onClose,
-}: {
-  tenantId: string;
-  plans: PlanAdmin[];
-  onClose: () => void;
-}) {
-  const t = useTranslations('admin');
-  const qc = useQueryClient();
-  const [session, setSession] = useState<ImpersonationSessionView | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const detailQuery = useQuery({
-    queryKey: ['platform-admin-tenant', tenantId],
-    queryFn: () => getTenant(tenantId),
-  });
-  const usageQuery = useQuery({
-    queryKey: ['platform-admin-tenant-usage', tenantId],
-    queryFn: () => getTenantUsage(tenantId),
-  });
-
-  const invalidate = () => {
-    void qc.invalidateQueries({ queryKey: ['platform-admin-tenant', tenantId] });
-    void qc.invalidateQueries({ queryKey: ['platform-admin-tenant-usage', tenantId] });
-    void qc.invalidateQueries({ queryKey: ['platform-admin-tenants'] });
-  };
-
-  const impersonateMut = useMutation({
-    mutationFn: () => {
-      const reason = window.prompt(t('impersonateReasonPrompt')) || '';
-      if (!reason) throw new Error('reason_required');
-      const detail = detailQuery.data as TenantDetail;
-      if (!detail.ownerId) throw new Error('no_owner');
-      return startImpersonation({ tenantId, targetUserId: detail.ownerId, reason });
-    },
-    onSuccess: (s) => {
-      setError(null);
-      setSession(s);
-      console.info('Impersonation access token (dev only):', s.accessToken);
-    },
-    onError: (e) => setError(e instanceof Error ? e.message : t('error')),
-  });
-
-  const planMut = useMutation({
-    mutationFn: (input: { planCode?: string; reason: string }) => assignPlan(tenantId, input),
-    onSuccess: invalidate,
-    onError: (e) => setError(e instanceof Error ? e.message : t('error')),
-  });
-
-  const detail = detailQuery.data;
-  const usage = usageQuery.data;
-
-  return (
-    <div className="space-y-4 rounded border border-border bg-background p-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">{t('detailsTitle')}</h2>
-        <button type="button" className="text-sm text-brand underline" onClick={onClose}>
-          {t('back')}
-        </button>
-      </div>
-      {error ? (
-        <p className="text-sm text-red-600" role="alert">
-          {error}
-        </p>
-      ) : null}
-      {!detail ? (
-        <p className="text-sm text-muted-foreground">{t('loading')}</p>
-      ) : (
-        <>
-          <dl className="grid gap-2 text-sm sm:grid-cols-2">
-            <div className="sm:col-span-2">
-              <dt className="text-muted-foreground">{t('colId')}</dt>
-              <dd>
-                <CopyableTenantId id={detail.id} showLabel={false} />
-              </dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">{t('colName')}</dt>
-              <dd className="font-medium">{detail.name}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">{t('owner')}</dt>
-              <dd className="font-medium">{detail.ownerEmail ?? '—'}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">{t('colPlan')}</dt>
-              <dd className="font-medium">{detail.planCode ?? '—'}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">{t('colStatus')}</dt>
-              <dd className="font-medium">{detail.lifecycleStatus}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">{t('colSignup')}</dt>
-              <dd className="font-medium" dir="ltr">
-                {new Date(detail.createdAt).toLocaleString()}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">{t('points')}</dt>
-              <dd className="font-medium tabular-nums" dir="ltr">
-                {detail.pointsBalance}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">{t('trialEndsAt')}</dt>
-              <dd className="font-medium" dir="ltr">
-                {detail.trialEndsAt ? new Date(detail.trialEndsAt).toLocaleString() : '—'}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">{t('extraUsers')}</dt>
-              <dd className="font-medium tabular-nums" dir="ltr">
-                {detail.extraUsers ?? 0}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">{t('extraCompanies')}</dt>
-              <dd className="font-medium tabular-nums" dir="ltr">
-                {detail.extraCompanies ?? 0}
-              </dd>
-            </div>
-          </dl>
-          <p className="text-sm">
-            {detail.entitlements.documentQuota} docs · {detail.entitlements.branchQuota} branches ·{' '}
-            {detail.entitlements.deviceQuota} devices
-          </p>
-          {usage ? (
-            <div>
-              <h3 className="text-sm font-medium text-muted-foreground">{t('usage')}</h3>
-              <p className="text-sm">
-                {usage.quotas.documents.used}/{usage.quotas.documents.limit} docs ·{' '}
-                {usage.quotas.branches.used}/{usage.quotas.branches.limit} branches ·{' '}
-                {usage.quotas.devices.used}/{usage.quotas.devices.limit} devices
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {t('points')}: {usage.pointsBalance} · consumed {usage.pointsLedger.consumedOnPage}
-                {usage.limits
-                  ? ` · ${usage.limits.users.used}/${usage.limits.users.limit} users · ${usage.limits.companies.used}/${usage.limits.companies.limit} companies`
-                  : ''}
-              </p>
-            </div>
-          ) : null}
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-2 text-sm">
-              {t('planCode')}
-              <select
-                className="rounded border px-2 py-1"
-                value={detail.planCode ?? ''}
-                onChange={(e) => {
-                  const reason = window.prompt(t('reason')) || '';
-                  if (!reason) return;
-                  planMut.mutate({ planCode: e.target.value, reason });
-                }}
-              >
-                {plans.map((p) => (
-                  <option key={p.code} value={p.code}>
-                    {p.code}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              className="rounded border px-3 py-2 text-sm"
-              onClick={() => {
-                const raw = window.prompt(t('pointsDeltaPrompt')) || '';
-                const delta = Number(raw);
-                if (!Number.isFinite(delta) || delta === 0) return;
-                const note = window.prompt(t('pointsNotePrompt')) || undefined;
-                void adjustPoints(tenantId, delta, note).then(invalidate);
-              }}
-            >
-              {t('adjustPoints')}
-            </button>
-            <button
-              type="button"
-              className="rounded border px-3 py-2 text-sm"
-              onClick={() => {
-                const addonCode = window.prompt(t('applyAddon')) || '';
-                if (!addonCode) return;
-                const reason = window.prompt(t('reason')) || 'addon';
-                void applyAddon(tenantId, addonCode.trim().toUpperCase(), reason).then(invalidate);
-              }}
-            >
-              {t('applyAddon')}
-            </button>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
-            {!session ? (
-              <button
-                type="button"
-                className="rounded bg-brand px-3 py-2 text-sm text-white"
-                disabled={impersonateMut.isPending || !detail.ownerId}
-                onClick={() => impersonateMut.mutate()}
-              >
-                {t('impersonate')}
-              </button>
-            ) : (
-              <>
-                <span className="text-sm text-muted-foreground">
-                  {t('impersonationActive', { mode: session.mode })}
-                </span>
-                {session.mode === 'READ_ONLY' ? (
-                  <button
-                    type="button"
-                    className="rounded border px-3 py-2 text-sm"
-                    onClick={() => {
-                      const reason = window.prompt(t('impersonateReasonPrompt')) || '';
-                      if (!reason) return;
-                      void breakGlass(session.id, reason).then(setSession);
-                    }}
-                  >
-                    {t('breakGlass')}
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className="rounded border px-3 py-2 text-sm"
-                  onClick={() => void endImpersonation(session.id).then(() => setSession(null))}
-                >
-                  {t('endImpersonation')}
-                </button>
-              </>
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
+type LifecycleDialog =
+  | { kind: 'approve'; tenant: TenantSummary }
+  | { kind: 'reject'; tenant: TenantSummary }
+  | { kind: 'suspend'; tenant: TenantSummary };
 
 export default function PlatformAdminPage() {
   const t = useTranslations('admin');
@@ -282,7 +56,8 @@ export default function PlatformAdminPage() {
   const [lifecycle, setLifecycle] = useState<LifecycleStatus | ''>('');
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
   const [showProvision, setShowProvision] = useState(false);
-  const [accessDenied, setAccessDenied] = useState(false);
+  const [lifecycleDialog, setLifecycleDialog] = useState<LifecycleDialog | null>(null);
+  const [resetTax, setResetTax] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: '',
     ownerEmail: '',
@@ -356,12 +131,6 @@ export default function PlatformAdminPage() {
     return () => window.clearTimeout(handle);
   }, [q]);
 
-  useEffect(() => {
-    if (tenantsQuery.error instanceof ApiError && tenantsQuery.error.status === 403) {
-      setAccessDenied(true);
-    }
-  }, [tenantsQuery.error]);
-
   const provisionMut = useMutation({
     mutationFn: () => provisionTenant(form),
     onSuccess: () => {
@@ -372,631 +141,691 @@ export default function PlatformAdminPage() {
   });
 
   const refreshTenants = () => void qc.invalidateQueries({ queryKey: ['platform-admin-tenants'] });
+  const plans = plansQuery.data?.plans ?? [];
+  const tenantsBusy = tenantsQuery.isLoading;
+  const accessDenied =
+    tenantsQuery.error instanceof ApiError && tenantsQuery.error.status === 403;
 
-  if (accessDenied) {
+  if (tenantsQuery.isPending) {
     return (
-      <div className="rounded border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-        {t('accessDenied')}
+      <div className="space-y-token-lg" aria-busy="true">
+        <PageHeader title={t('title')} subtitle={t('subtitle')} />
+        <Skeleton variant="rect" className="h-token-lg" />
+        <Skeleton variant="rect" className="h-token-lg" />
       </div>
     );
   }
 
-  const plans = plansQuery.data?.plans ?? [];
-
-  if (selectedTenantId) {
+  if (accessDenied) {
     return (
-      <TenantDetailPanel
-        tenantId={selectedTenantId}
-        plans={plans}
-        onClose={() => setSelectedTenantId(null)}
-      />
+      <div className="space-y-token-lg">
+        <PageHeader title={t('title')} subtitle={t('subtitle')} />
+        <Card className="border-danger" role="alert">
+          <p className="m-0 text-token-sm text-danger">{t('accessDenied')}</p>
+        </Card>
+      </div>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <nav className="flex flex-wrap gap-2 border-b border-border pb-2">
-        {(['tenants', 'plans', 'addons', 'costs', 'settings', 'trials'] as Tab[]).map((id) => (
-          <button
-            key={id}
-            type="button"
-            className={`rounded px-3 py-1.5 text-sm ${tab === id ? 'bg-brand text-white' : 'border'}`}
-            onClick={() => setTab(id)}
-          >
-            {t(
-              id === 'tenants'
-                ? 'tabTenants'
-                : id === 'plans'
-                  ? 'tabPlans'
-                  : id === 'addons'
-                    ? 'tabAddons'
-                    : id === 'costs'
-                      ? 'tabCosts'
-                      : id === 'trials'
-                        ? 'tabTrials'
-                        : 'tabSettings',
-            )}
-          </button>
-        ))}
-      </nav>
+    <div className="space-y-token-lg" aria-busy={tenantsBusy || undefined}>
+      <PageHeader title={t('title')} subtitle={t('subtitle')} />
 
-      {tab === 'tenants' ? (
-        <>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <label className="flex flex-col text-sm">
-              <span>{t('search')}</span>
-              <input
-                className="rounded border px-2 py-1"
-                placeholder={t('searchPlaceholder')}
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-              />
-            </label>
-            <label className="flex flex-col text-sm">
-              <span>{t('filterLifecycle')}</span>
-              <select
-                className="rounded border px-2 py-1"
-                value={lifecycle}
-                onChange={(e) => setLifecycle(e.target.value as LifecycleStatus | '')}
-              >
-                <option value="">{t('allStatuses')}</option>
-                <option value="PENDING">PENDING</option>
-                <option value="ACTIVE">ACTIVE</option>
-                <option value="SUSPENDED">SUSPENDED</option>
-                <option value="REJECTED">REJECTED</option>
-              </select>
-            </label>
-            <button
-              type="button"
-              className="rounded bg-brand px-3 py-2 text-sm text-white"
-              onClick={() => setShowProvision((v) => !v)}
-            >
-              {t('provision')}
-            </button>
-          </div>
+      <Tabs
+        value={tab}
+        onChange={(id) => setTab(id as Tab)}
+        items={[
+          {
+            id: 'tenants',
+            label: t('tabTenants'),
+            panel: (
+              <div className="space-y-token-md">
+                <FilterBar>
+                  <Input
+                    label={t('search')}
+                    placeholder={t('searchPlaceholder')}
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                  />
+                  <Select
+                    label={t('filterLifecycle')}
+                    value={lifecycle}
+                    onChange={(e) => setLifecycle(e.target.value as LifecycleStatus | '')}
+                  >
+                    <option value="">{t('allStatuses')}</option>
+                    <option value="PENDING">PENDING</option>
+                    <option value="ACTIVE">ACTIVE</option>
+                    <option value="SUSPENDED">SUSPENDED</option>
+                    <option value="REJECTED">REJECTED</option>
+                  </Select>
+                  <Button type="button" onClick={() => setShowProvision((v) => !v)}>
+                    {t('provision')}
+                  </Button>
+                </FilterBar>
 
-          {showProvision ? (
-            <form
-              className="grid gap-3 rounded border border-border bg-background p-4 sm:grid-cols-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                provisionMut.mutate();
-              }}
-            >
-              <h2 className="col-span-full text-lg font-medium">{t('provisionTitle')}</h2>
-              <label className="flex flex-col text-sm">
-                {t('tenantName')}
-                <input
-                  required
-                  className="rounded border px-2 py-1"
-                  value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                />
-              </label>
-              <label className="flex flex-col text-sm">
-                {t('ownerEmail')}
-                <input
-                  required
-                  type="email"
-                  className="rounded border px-2 py-1"
-                  value={form.ownerEmail}
-                  onChange={(e) => setForm((f) => ({ ...f, ownerEmail: e.target.value }))}
-                />
-              </label>
-              <label className="flex flex-col text-sm">
-                {t('planCode')}
-                <select
-                  className="rounded border px-2 py-1"
-                  value={form.planCode}
-                  onChange={(e) => setForm((f) => ({ ...f, planCode: e.target.value }))}
-                >
-                  {plans.map((p) => (
-                    <option key={p.code} value={p.code}>
-                      {p.code}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="col-span-full flex gap-2">
-                <button type="submit" className="rounded bg-brand px-3 py-2 text-sm text-white">
-                  {t('create')}
-                </button>
-                <button type="button" className="rounded border px-3 py-2 text-sm" onClick={() => setShowProvision(false)}>
-                  {t('cancel')}
-                </button>
-              </div>
-            </form>
-          ) : null}
-
-          <div className="overflow-x-auto rounded border border-border">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/40 text-left">
-                  <th className="p-2">{t('colName')}</th>
-                  <th className="p-2">{t('colId')}</th>
-                  <th className="p-2">{t('colContact')}</th>
-                  <th className="p-2">{t('colPlan')}</th>
-                  <th className="p-2">{t('colStatus')}</th>
-                  <th className="p-2">{t('colPoints')}</th>
-                  <th className="p-2">{t('colSignup')}</th>
-                  <th className="p-2">{t('colActions')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(tenantsQuery.data?.items ?? []).map((tenant) => (
-                  <tr key={tenant.id} className="border-b">
-                    <td className="p-2">{tenant.name}</td>
-                    <td className="p-2">
-                      <CopyableTenantId id={tenant.id} showLabel={false} />
-                    </td>
-                    <td className="p-2">{tenant.ownerEmail ?? '—'}</td>
-                    <td className="p-2">{tenant.planCode ?? '—'}</td>
-                    <td className="p-2">{tenant.lifecycleStatus}</td>
-                    <td className="p-2 tabular-nums" dir="ltr">
-                      {tenant.pointsBalance}
-                    </td>
-                    <td className="p-2" dir="ltr">
-                      {new Date(tenant.createdAt).toLocaleDateString()}
-                    </td>
-                    <td className="flex flex-wrap gap-2 p-2">
-                      <button type="button" className="text-brand underline" onClick={() => setSelectedTenantId(tenant.id)}>
-                        {t('viewDetails')}
-                      </button>
-                      {tenant.lifecycleStatus === 'PENDING' ? (
-                        <>
-                          <button
-                            type="button"
-                            className="text-brand underline"
-                            onClick={() => void approveTenant(tenant.id, 'ui').then(refreshTenants)}
-                          >
-                            {t('approve')}
-                          </button>
-                          <button
-                            type="button"
-                            className="text-red-700 underline"
-                            onClick={() => {
-                              const reason = window.prompt(t('rejectReasonPrompt')) || '';
-                              if (!reason) return;
-                              void rejectTenant(tenant.id, reason).then(refreshTenants);
-                            }}
-                          >
-                            {t('reject')}
-                          </button>
-                        </>
-                      ) : tenant.lifecycleStatus === 'SUSPENDED' ? (
-                        <button
-                          type="button"
-                          className="text-brand underline"
-                          onClick={() => void activateTenant(tenant.id).then(refreshTenants)}
-                        >
-                          {t('activate')}
-                        </button>
-                      ) : tenant.lifecycleStatus === 'ACTIVE' ? (
-                        <button
-                          type="button"
-                          className="text-red-700 underline"
-                          onClick={() => {
-                            const reason = window.prompt(t('suspendReasonPrompt')) || '';
-                            if (!reason) return;
-                            void suspendTenant(tenant.id, reason).then(refreshTenants);
-                          }}
-                        >
-                          {t('suspend')}
-                        </button>
-                      ) : null}
-                    </td>
-                  </tr>
-                ))}
-                {!tenantsQuery.data?.items?.length ? (
-                  <tr>
-                    <td className="p-4 text-muted-foreground" colSpan={8}>
-                      {tenantsQuery.isLoading ? t('loading') : t('empty')}
-                    </td>
-                  </tr>
+                {showProvision ? (
+                  <Card>
+                    <form
+                      className="grid gap-token-md sm:grid-cols-2"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        provisionMut.mutate();
+                      }}
+                    >
+                      <h2 className="col-span-full m-0 text-token-lg font-semibold">{t('provisionTitle')}</h2>
+                      <Input
+                        required
+                        label={t('tenantName')}
+                        value={form.name}
+                        onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                      />
+                      <Input
+                        required
+                        type="email"
+                        label={t('ownerEmail')}
+                        value={form.ownerEmail}
+                        onChange={(e) => setForm((f) => ({ ...f, ownerEmail: e.target.value }))}
+                        className="font-en"
+                      />
+                      <Select
+                        label={t('planCode')}
+                        value={form.planCode}
+                        onChange={(e) => setForm((f) => ({ ...f, planCode: e.target.value }))}
+                      >
+                        {plans.map((p) => (
+                          <option key={p.code} value={p.code}>
+                            {p.code}
+                          </option>
+                        ))}
+                      </Select>
+                      <div className="col-span-full flex flex-wrap gap-token-sm">
+                        <Button type="submit" loading={provisionMut.isPending}>
+                          {t('create')}
+                        </Button>
+                        <Button type="button" variant="secondary" onClick={() => setShowProvision(false)}>
+                          {t('cancel')}
+                        </Button>
+                      </div>
+                    </form>
+                  </Card>
                 ) : null}
-              </tbody>
-            </table>
-          </div>
-        </>
-      ) : null}
 
-      {tab === 'plans' ? (
-        <div className="space-y-4">
-          <form
-            className="grid gap-3 rounded border p-4 sm:grid-cols-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void upsertPlan(planForm).then(() => {
-                void qc.invalidateQueries({ queryKey: ['platform-admin-plans'] });
-              });
-            }}
-          >
-            <h2 className="col-span-full text-lg font-medium">{t('newPlan')}</h2>
-            {(['code', 'nameEn', 'nameAr'] as const).map((field) => (
-              <label key={field} className="flex flex-col text-sm">
-                {field}
-                <input
-                  required
-                  className="rounded border px-2 py-1"
-                  value={planForm[field]}
-                  onChange={(e) => setPlanForm((f) => ({ ...f, [field]: e.target.value }))}
-                />
-              </label>
-            ))}
-            <label className="flex flex-col text-sm">
-              docs
-              <input
-                type="number"
-                className="rounded border px-2 py-1"
-                value={planForm.documentQuota}
-                onChange={(e) => setPlanForm((f) => ({ ...f, documentQuota: Number(e.target.value) }))}
-              />
-            </label>
-            <label className="flex flex-col text-sm">
-              {t('includedPoints')}
-              <input
-                type="number"
-                className="rounded border px-2 py-1"
-                value={planForm.includedPoints}
-                onChange={(e) => setPlanForm((f) => ({ ...f, includedPoints: Number(e.target.value) }))}
-              />
-            </label>
-            {(
-              [
-                ['officialPriceEgp', t('officialPrice')],
-                ['discountedPriceEgp', t('discountedPrice')],
-                ['maxUsers', t('maxUsers')],
-                ['maxCompanies', t('maxCompanies')],
-              ] as const
-            ).map(([field, label]) => (
-              <label key={field} className="flex flex-col text-sm">
-                {label}
-                <input
-                  type="number"
-                  className="rounded border px-2 py-1"
-                  value={planForm[field]}
-                  onChange={(e) => setPlanForm((f) => ({ ...f, [field]: Number(e.target.value) }))}
-                />
-              </label>
-            ))}
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={planForm.isPublic}
-                onChange={(e) => setPlanForm((f) => ({ ...f, isPublic: e.target.checked }))}
-              />
-              {t('isPublic')}
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={planForm.isTrial}
-                onChange={(e) => setPlanForm((f) => ({ ...f, isTrial: e.target.checked }))}
-              />
-              {t('isTrial')}
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={planForm.isActive}
-                onChange={(e) => setPlanForm((f) => ({ ...f, isActive: e.target.checked }))}
-              />
-              {t('isActive')}
-            </label>
-            <button type="submit" className="rounded bg-brand px-3 py-2 text-sm text-white">
-              {t('savePlan')}
-            </button>
-          </form>
-          <ul className="space-y-2 text-sm">
-            {plans.map((p) => (
-              <li key={p.id} className="rounded border p-3">
-                <strong>{p.code}</strong> — {p.nameEn} / {p.nameAr} · {p.includedPoints}{' '}
-                {t('points')} · {p.discountedPriceEgp}/{p.officialPriceEgp} EGP · {p.maxUsers}u /{' '}
-                {p.maxCompanies}c · {p.isActive ? t('planActive') : t('planInactive')}
-                <button
-                  type="button"
-                  className="ms-2 text-brand underline"
-                  onClick={() =>
-                    setPlanForm({
-                      code: p.code,
-                      nameEn: p.nameEn,
-                      nameAr: p.nameAr,
-                      documentQuota: p.documentQuota,
-                      branchQuota: p.branchQuota,
-                      deviceQuota: p.deviceQuota,
-                      includedPoints: p.includedPoints,
-                      officialPriceEgp: p.officialPriceEgp,
-                      discountedPriceEgp: p.discountedPriceEgp,
-                      maxUsers: p.maxUsers,
-                      maxCompanies: p.maxCompanies,
-                      isTrial: p.isTrial,
-                      isPublic: p.isPublic,
-                      selfServe: p.selfServe,
-                      isActive: p.isActive,
-                      sortOrder: p.sortOrder,
-                    })
-                  }
-                >
-                  edit
-                </button>
-                <button
-                  type="button"
-                  className="ms-2 text-brand underline"
-                  onClick={() => {
-                    void setPlanActive(p.code, !p.isActive).then(() =>
-                      qc.invalidateQueries({ queryKey: ['platform-admin-plans'] }),
+                {tenantsQuery.isError && !(tenantsQuery.error instanceof ApiError && tenantsQuery.error.status === 403) ? (
+                  <Card className="border-danger" role="alert">
+                    <p className="m-0 text-token-sm text-danger">
+                      {tenantsQuery.error instanceof Error ? tenantsQuery.error.message : t('error')}
+                    </p>
+                    <Button
+                      className="mt-token-sm"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => void tenantsQuery.refetch()}
+                    >
+                      {t('retryLoad')}
+                    </Button>
+                  </Card>
+                ) : (
+                  <TenantTable
+                    tenants={tenantsQuery.data?.items ?? []}
+                    loading={tenantsQuery.isLoading}
+                    onView={(tenant) => setSelectedTenantId(tenant.id)}
+                    onApprove={(tenant) => setLifecycleDialog({ kind: 'approve', tenant })}
+                    onReject={(tenant) => setLifecycleDialog({ kind: 'reject', tenant })}
+                    onActivate={(tenant) => void activateTenant(tenant.id).then(refreshTenants)}
+                    onSuspend={(tenant) => setLifecycleDialog({ kind: 'suspend', tenant })}
+                  />
+                )}
+              </div>
+            ),
+          },
+          {
+            id: 'plans',
+            label: t('tabPlans'),
+            panel: (
+              <div className="space-y-token-md">
+                <Card>
+                  <form
+                    className="grid gap-token-md sm:grid-cols-2"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void upsertPlan(planForm).then(() => {
+                        void qc.invalidateQueries({ queryKey: ['platform-admin-plans'] });
+                      });
+                    }}
+                  >
+                    <h2 className="col-span-full m-0 text-token-lg font-semibold">{t('newPlan')}</h2>
+                    <Input
+                      required
+                      label={t('fieldCode')}
+                      value={planForm.code}
+                      onChange={(e) => setPlanForm((f) => ({ ...f, code: e.target.value }))}
+                      className="font-en"
+                    />
+                    <Input
+                      required
+                      label={t('fieldNameEn')}
+                      value={planForm.nameEn}
+                      onChange={(e) => setPlanForm((f) => ({ ...f, nameEn: e.target.value }))}
+                    />
+                    <Input
+                      required
+                      label={t('fieldNameAr')}
+                      value={planForm.nameAr}
+                      onChange={(e) => setPlanForm((f) => ({ ...f, nameAr: e.target.value }))}
+                    />
+                    <Input
+                      type="number"
+                      label={t('documentQuota')}
+                      value={planForm.documentQuota}
+                      onChange={(e) => setPlanForm((f) => ({ ...f, documentQuota: Number(e.target.value) }))}
+                    />
+                    <Input
+                      type="number"
+                      label={t('includedPoints')}
+                      value={planForm.includedPoints}
+                      onChange={(e) => setPlanForm((f) => ({ ...f, includedPoints: Number(e.target.value) }))}
+                    />
+                    <Input
+                      type="number"
+                      label={t('officialPrice')}
+                      value={planForm.officialPriceEgp}
+                      onChange={(e) => setPlanForm((f) => ({ ...f, officialPriceEgp: Number(e.target.value) }))}
+                    />
+                    <Input
+                      type="number"
+                      label={t('discountedPrice')}
+                      value={planForm.discountedPriceEgp}
+                      onChange={(e) => setPlanForm((f) => ({ ...f, discountedPriceEgp: Number(e.target.value) }))}
+                    />
+                    <Input
+                      type="number"
+                      label={t('maxUsers')}
+                      value={planForm.maxUsers}
+                      onChange={(e) => setPlanForm((f) => ({ ...f, maxUsers: Number(e.target.value) }))}
+                    />
+                    <Input
+                      type="number"
+                      label={t('maxCompanies')}
+                      value={planForm.maxCompanies}
+                      onChange={(e) => setPlanForm((f) => ({ ...f, maxCompanies: Number(e.target.value) }))}
+                    />
+                    <Checkbox
+                      checked={planForm.isPublic}
+                      onChange={(e) => setPlanForm((f) => ({ ...f, isPublic: e.target.checked }))}
+                    >
+                      {t('isPublic')}
+                    </Checkbox>
+                    <Checkbox
+                      checked={planForm.isTrial}
+                      onChange={(e) => setPlanForm((f) => ({ ...f, isTrial: e.target.checked }))}
+                    >
+                      {t('isTrial')}
+                    </Checkbox>
+                    <Checkbox
+                      checked={planForm.isActive}
+                      onChange={(e) => setPlanForm((f) => ({ ...f, isActive: e.target.checked }))}
+                    >
+                      {t('isActive')}
+                    </Checkbox>
+                    <Button type="submit">{t('savePlan')}</Button>
+                  </form>
+                </Card>
+                {plansQuery.isLoading ? <Skeleton variant="rect" className="h-token-lg" /> : null}
+                <ul className="m-0 grid list-none gap-token-sm p-0">
+                  {plans.map((p) => (
+                    <li key={p.id}>
+                      <Card>
+                        <div className="flex flex-wrap items-start justify-between gap-token-sm">
+                          <div>
+                            <CardTitle>
+                              <span className="font-en" dir="ltr">
+                                {p.code}
+                              </span>
+                              {' — '}
+                              {p.nameEn} / {p.nameAr}
+                            </CardTitle>
+                            <p className="m-0 mt-token-xs text-token-sm text-foreground-muted">
+                              <span className="font-en tabular-nums" dir="ltr">
+                                {p.includedPoints}
+                              </span>{' '}
+                              {t('points')} ·{' '}
+                              <span className="font-en tabular-nums" dir="ltr">
+                                {p.discountedPriceEgp}/{p.officialPriceEgp} EGP
+                              </span>{' '}
+                              · {p.maxUsers}u / {p.maxCompanies}c ·{' '}
+                              {p.isActive ? t('planActive') : t('planInactive')}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-token-xs">
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              onClick={() =>
+                                setPlanForm({
+                                  code: p.code,
+                                  nameEn: p.nameEn,
+                                  nameAr: p.nameAr,
+                                  documentQuota: p.documentQuota,
+                                  branchQuota: p.branchQuota,
+                                  deviceQuota: p.deviceQuota,
+                                  includedPoints: p.includedPoints,
+                                  officialPriceEgp: p.officialPriceEgp,
+                                  discountedPriceEgp: p.discountedPriceEgp,
+                                  maxUsers: p.maxUsers,
+                                  maxCompanies: p.maxCompanies,
+                                  isTrial: p.isTrial,
+                                  isPublic: p.isPublic,
+                                  selfServe: p.selfServe,
+                                  isActive: p.isActive,
+                                  sortOrder: p.sortOrder,
+                                })
+                              }
+                            >
+                              {t('edit')}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => {
+                                void setPlanActive(p.code, !p.isActive).then(() =>
+                                  qc.invalidateQueries({ queryKey: ['platform-admin-plans'] }),
+                                );
+                              }}
+                            >
+                              {p.isActive ? t('hideFromCustomers') : t('showToCustomers')}
+                            </Button>
+                          </div>
+                        </div>
+                      </Card>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ),
+          },
+          {
+            id: 'addons',
+            label: t('tabAddons'),
+            panel: (
+              <div className="space-y-token-md">
+                <Card>
+                  <form
+                    className="grid gap-token-md sm:grid-cols-2"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void upsertAddon(addonForm).then(() => {
+                        void qc.invalidateQueries({ queryKey: ['platform-admin-addons'] });
+                      });
+                    }}
+                  >
+                    <h2 className="col-span-full m-0 text-token-lg font-semibold">{t('tabAddons')}</h2>
+                    <Input
+                      required
+                      label={t('fieldCode')}
+                      value={addonForm.code}
+                      onChange={(e) => setAddonForm((f) => ({ ...f, code: e.target.value }))}
+                      className="font-en"
+                    />
+                    <Input
+                      required
+                      label={t('fieldNameEn')}
+                      value={addonForm.nameEn}
+                      onChange={(e) => setAddonForm((f) => ({ ...f, nameEn: e.target.value }))}
+                    />
+                    <Input
+                      required
+                      label={t('fieldNameAr')}
+                      value={addonForm.nameAr}
+                      onChange={(e) => setAddonForm((f) => ({ ...f, nameAr: e.target.value }))}
+                    />
+                    <Select
+                      label={t('addonKind')}
+                      value={addonForm.kind}
+                      onChange={(e) =>
+                        setAddonForm((f) => ({ ...f, kind: e.target.value as typeof f.kind }))
+                      }
+                    >
+                      <option value="POINTS">POINTS</option>
+                      <option value="USER">USER</option>
+                      <option value="COMPANY">COMPANY</option>
+                    </Select>
+                    <Input
+                      type="number"
+                      label={t('quantity')}
+                      value={addonForm.quantity}
+                      onChange={(e) => setAddonForm((f) => ({ ...f, quantity: Number(e.target.value) }))}
+                    />
+                    <Input
+                      type="number"
+                      label={t('officialPrice')}
+                      value={addonForm.officialPriceEgp}
+                      onChange={(e) =>
+                        setAddonForm((f) => ({ ...f, officialPriceEgp: Number(e.target.value) }))
+                      }
+                    />
+                    <Input
+                      type="number"
+                      label={t('discountedPrice')}
+                      value={addonForm.discountedPriceEgp}
+                      onChange={(e) =>
+                        setAddonForm((f) => ({ ...f, discountedPriceEgp: Number(e.target.value) }))
+                      }
+                    />
+                    <Button type="submit">{t('savePlan')}</Button>
+                  </form>
+                </Card>
+                {addonsQuery.isLoading ? <Skeleton variant="rect" className="h-token-lg" /> : null}
+                <ul className="m-0 grid list-none gap-token-sm p-0">
+                  {(addonsQuery.data?.addons ?? []).map((a) => (
+                    <li key={a.code}>
+                      <Card>
+                        <div className="flex flex-wrap items-start justify-between gap-token-sm">
+                          <div>
+                            <CardTitle>
+                              <span className="font-en" dir="ltr">
+                                {a.code}
+                              </span>
+                              {' — '}
+                              {a.name} / {a.nameAr}
+                            </CardTitle>
+                            <p className="m-0 mt-token-xs font-en text-token-sm text-foreground-muted" dir="ltr">
+                              {a.kind} × {a.quantity} · {a.discountedPriceEgp}/{a.officialPriceEgp} EGP
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={() =>
+                              setAddonForm({
+                                code: a.code,
+                                kind: a.kind,
+                                nameEn: a.name,
+                                nameAr: a.nameAr,
+                                quantity: a.quantity,
+                                officialPriceEgp: a.officialPriceEgp,
+                                discountedPriceEgp: a.discountedPriceEgp,
+                                isActive: a.isActive,
+                                sortOrder: a.sortOrder,
+                              })
+                            }
+                          >
+                            {t('edit')}
+                          </Button>
+                        </div>
+                      </Card>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ),
+          },
+          {
+            id: 'costs',
+            label: t('tabCosts'),
+            panel: costsQuery.isLoading ? (
+              <Skeleton variant="rect" className="h-token-lg" />
+            ) : (
+              <Card>
+                <form
+                  className="space-y-token-md"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const items = (costsQuery.data ?? []).map((row) => ({
+                      documentKind: row.documentKind,
+                      points: Number(
+                        (e.currentTarget.elements.namedItem(`cost-${row.documentKind}`) as HTMLInputElement)
+                          ?.value ?? row.points,
+                      ),
+                      standardPoints: Number(
+                        (
+                          e.currentTarget.elements.namedItem(`std-${row.documentKind}`) as HTMLInputElement
+                        )?.value ??
+                          row.standardPoints ??
+                          row.points,
+                      ),
+                    }));
+                    void setDocumentCosts(items).then(() =>
+                      qc.invalidateQueries({ queryKey: ['platform-admin-costs'] }),
                     );
                   }}
                 >
-                  {p.isActive ? t('hideFromCustomers') : t('showToCustomers')}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-
-      {tab === 'addons' ? (
-        <div className="space-y-4">
-          <form
-            className="grid gap-3 rounded border p-4 sm:grid-cols-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void upsertAddon(addonForm).then(() => {
-                void qc.invalidateQueries({ queryKey: ['platform-admin-addons'] });
-              });
-            }}
-          >
-            <h2 className="col-span-full text-lg font-medium">{t('tabAddons')}</h2>
-            {(['code', 'nameEn', 'nameAr'] as const).map((field) => (
-              <label key={field} className="flex flex-col text-sm">
-                {field}
-                <input
-                  required
-                  className="rounded border px-2 py-1"
-                  value={addonForm[field]}
-                  onChange={(e) => setAddonForm((f) => ({ ...f, [field]: e.target.value }))}
-                />
-              </label>
-            ))}
-            <label className="flex flex-col text-sm">
-              kind
-              <select
-                className="rounded border px-2 py-1"
-                value={addonForm.kind}
-                onChange={(e) =>
-                  setAddonForm((f) => ({ ...f, kind: e.target.value as typeof f.kind }))
-                }
-              >
-                <option value="POINTS">POINTS</option>
-                <option value="USER">USER</option>
-                <option value="COMPANY">COMPANY</option>
-              </select>
-            </label>
-            {(['quantity', 'officialPriceEgp', 'discountedPriceEgp'] as const).map((field) => (
-              <label key={field} className="flex flex-col text-sm">
-                {field}
-                <input
-                  type="number"
-                  className="rounded border px-2 py-1"
-                  value={addonForm[field]}
-                  onChange={(e) => setAddonForm((f) => ({ ...f, [field]: Number(e.target.value) }))}
-                />
-              </label>
-            ))}
-            <button type="submit" className="rounded bg-brand px-3 py-2 text-sm text-white">
-              {t('savePlan')}
-            </button>
-          </form>
-          <ul className="space-y-2 text-sm">
-            {(addonsQuery.data?.addons ?? []).map((a) => (
-              <li key={a.code} className="rounded border p-3">
-                <strong>{a.code}</strong> — {a.name} / {a.nameAr} · {a.kind} × {a.quantity} ·{' '}
-                {a.discountedPriceEgp}/{a.officialPriceEgp} EGP
-                <button
-                  type="button"
-                  className="ms-2 text-brand underline"
-                  onClick={() =>
-                    setAddonForm({
-                      code: a.code,
-                      kind: a.kind,
-                      nameEn: a.name,
-                      nameAr: a.nameAr,
-                      quantity: a.quantity,
-                      officialPriceEgp: a.officialPriceEgp,
-                      discountedPriceEgp: a.discountedPriceEgp,
-                      isActive: a.isActive,
-                      sortOrder: a.sortOrder,
-                    })
-                  }
-                >
-                  edit
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-
-      {tab === 'costs' ? (
-        <form
-          className="space-y-3 rounded border p-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const items = (costsQuery.data ?? []).map((row) => ({
-              documentKind: row.documentKind,
-              points: Number(
-                (e.currentTarget.elements.namedItem(`cost-${row.documentKind}`) as HTMLInputElement)
-                  ?.value ?? row.points,
-              ),
-              standardPoints: Number(
-                (
-                  e.currentTarget.elements.namedItem(
-                    `std-${row.documentKind}`,
-                  ) as HTMLInputElement
-                )?.value ?? row.standardPoints ?? row.points,
-              ),
-            }));
-            void setDocumentCosts(items).then(() =>
-              qc.invalidateQueries({ queryKey: ['platform-admin-costs'] }),
-            );
-          }}
-        >
-          {(costsQuery.data ?? []).map((row) => (
-            <label key={row.documentKind} className="flex flex-wrap items-center justify-between gap-4 text-sm">
-              <span>
-                {t('costKind')}: {row.documentKind}
-              </span>
-              <span className="flex items-center gap-2">
-                <input
-                  name={`cost-${row.documentKind}`}
-                  type="number"
-                  min={0}
-                  defaultValue={row.points}
-                  className="w-24 rounded border px-2 py-1"
-                  aria-label={t('costPoints')}
-                />
-                <input
-                  name={`std-${row.documentKind}`}
-                  type="number"
-                  min={0}
-                  defaultValue={row.standardPoints ?? row.points}
-                  className="w-24 rounded border px-2 py-1"
-                  aria-label={t('costStandard')}
-                />
-              </span>
-            </label>
-          ))}
-          <button type="submit" className="rounded bg-brand px-3 py-2 text-sm text-white">
-            {t('saveCosts')}
-          </button>
-        </form>
-      ) : null}
-
-      {tab === 'settings' && settingsQuery.data ? (
-        <form
-          className="space-y-3 rounded border p-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const formEl = e.currentTarget;
-            void updateSettings({
-              autoActivateSubCompanies: (formEl.elements.namedItem('autoSubs') as HTMLInputElement)
-                .checked,
-              supportWhatsappE164: (formEl.elements.namedItem('waE164') as HTMLInputElement).value,
-              supportWhatsappDisplay: (formEl.elements.namedItem('waDisplay') as HTMLInputElement)
-                .value,
-              trialDays: Number((formEl.elements.namedItem('trialDays') as HTMLInputElement).value),
-              trialPoints: Number(
-                (formEl.elements.namedItem('trialPoints') as HTMLInputElement).value,
-              ),
-              etaTutorialVideoUrl: (
-                formEl.elements.namedItem('etaTutorialVideoUrl') as HTMLInputElement
-              ).value,
-            }).then(() => qc.invalidateQueries({ queryKey: ['platform-admin-settings'] }));
-          }}
-        >
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              name="autoSubs"
-              type="checkbox"
-              defaultChecked={settingsQuery.data.autoActivateSubCompanies}
-            />
-            {t('autoActivateSubs')}
-          </label>
-          <label className="flex flex-col text-sm">
-            {t('whatsappE164')}
-            <input
-              name="waE164"
-              className="rounded border px-2 py-1"
-              defaultValue={settingsQuery.data.supportWhatsappE164}
-            />
-          </label>
-          <label className="flex flex-col text-sm">
-            {t('whatsappDisplay')}
-            <input
-              name="waDisplay"
-              className="rounded border px-2 py-1"
-              defaultValue={settingsQuery.data.supportWhatsappDisplay}
-            />
-          </label>
-          <label className="flex flex-col text-sm">
-            {t('trialDays')}
-            <input
-              name="trialDays"
-              type="number"
-              min={1}
-              className="rounded border px-2 py-1"
-              defaultValue={settingsQuery.data.trialDays}
-            />
-          </label>
-          <label className="flex flex-col text-sm">
-            {t('trialPoints')}
-            <input
-              name="trialPoints"
-              type="number"
-              min={0}
-              className="rounded border px-2 py-1"
-              defaultValue={settingsQuery.data.trialPoints}
-            />
-          </label>
-          <label className="flex flex-col text-sm">
-            {t('etaTutorialVideoUrl')}
-            <input
-              name="etaTutorialVideoUrl"
-              type="url"
-              dir="ltr"
-              placeholder="https://www.youtube.com/watch?v=…"
-              className="rounded border px-2 py-1"
-              defaultValue={settingsQuery.data.etaTutorialVideoUrl ?? ''}
-            />
-            <span className="mt-1 text-xs text-muted-foreground">{t('etaTutorialVideoUrlHint')}</span>
-          </label>
-          <button type="submit" className="rounded bg-brand px-3 py-2 text-sm text-white">
-            {t('saveSettings')}
-          </button>
-        </form>
-      ) : null}
-
-      {tab === 'trials' ? (
-        <div className="space-y-3">
-          <h2 className="text-lg font-medium">{t('trialTaxRegTitle')}</h2>
-          <p className="text-sm text-muted-foreground">{t('trialTaxRegHint')}</p>
-          <ul className="space-y-2 text-sm">
-            {(trialRegsQuery.data?.items ?? []).map((row) => (
-              <li
-                key={row.taxRegistrationNormalized}
-                className="flex flex-wrap items-center justify-between gap-2 rounded border p-3"
-              >
-                <span>
-                  <strong dir="ltr">{row.taxRegistrationNormalized}</strong>
-                  <span className="ms-2 text-muted-foreground" dir="ltr">
-                    {new Date(row.consumedAt).toLocaleString()}
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  className="text-brand underline"
-                  onClick={() => {
-                    if (!window.confirm(t('resetTrialPrompt'))) return;
-                    const reason = window.prompt(t('resetReasonPrompt')) || undefined;
-                    void resetTrialTaxRegistration(row.taxRegistrationNormalized, reason).then(
-                      () =>
-                        qc.invalidateQueries({ queryKey: ['platform-admin-trial-tax-regs'] }),
-                    );
+                  {(costsQuery.data ?? []).map((row) => (
+                    <div
+                      key={row.documentKind}
+                      className="flex flex-wrap items-end justify-between gap-token-md"
+                    >
+                      <p className="m-0 text-token-sm">
+                        {t('costKind')}:{' '}
+                        <span className="font-en" dir="ltr">
+                          {row.documentKind}
+                        </span>
+                      </p>
+                      <div className="flex flex-wrap gap-token-sm">
+                        <Input
+                          name={`cost-${row.documentKind}`}
+                          type="number"
+                          min={0}
+                          defaultValue={row.points}
+                          label={t('costPoints')}
+                          className="w-24"
+                        />
+                        <Input
+                          name={`std-${row.documentKind}`}
+                          type="number"
+                          min={0}
+                          defaultValue={row.standardPoints ?? row.points}
+                          label={t('costStandard')}
+                          className="w-24"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  <Button type="submit">{t('saveCosts')}</Button>
+                </form>
+              </Card>
+            ),
+          },
+          {
+            id: 'settings',
+            label: t('tabSettings'),
+            panel: settingsQuery.isLoading ? (
+              <Skeleton variant="rect" className="h-token-lg" />
+            ) : settingsQuery.data ? (
+              <Card>
+                <form
+                  className="space-y-token-md"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const formEl = e.currentTarget;
+                    void updateSettings({
+                      autoActivateSubCompanies: (formEl.elements.namedItem('autoSubs') as HTMLInputElement)
+                        .checked,
+                      supportWhatsappE164: (formEl.elements.namedItem('waE164') as HTMLInputElement).value,
+                      supportWhatsappDisplay: (formEl.elements.namedItem('waDisplay') as HTMLInputElement)
+                        .value,
+                      trialDays: Number((formEl.elements.namedItem('trialDays') as HTMLInputElement).value),
+                      trialPoints: Number(
+                        (formEl.elements.namedItem('trialPoints') as HTMLInputElement).value,
+                      ),
+                      etaTutorialVideoUrl: (
+                        formEl.elements.namedItem('etaTutorialVideoUrl') as HTMLInputElement
+                      ).value,
+                    }).then(() => qc.invalidateQueries({ queryKey: ['platform-admin-settings'] }));
                   }}
                 >
-                  {t('resetTrial')}
-                </button>
-              </li>
-            ))}
-            {!trialRegsQuery.data?.items?.length ? (
-              <li className="text-muted-foreground">
-                {trialRegsQuery.isLoading ? t('loading') : t('noTrialTaxRegs')}
-              </li>
-            ) : null}
-          </ul>
-        </div>
+                  <Checkbox name="autoSubs" defaultChecked={settingsQuery.data.autoActivateSubCompanies}>
+                    {t('autoActivateSubs')}
+                  </Checkbox>
+                  <Input
+                    name="waE164"
+                    label={t('whatsappE164')}
+                    defaultValue={settingsQuery.data.supportWhatsappE164}
+                    className="font-en"
+                  />
+                  <Input
+                    name="waDisplay"
+                    label={t('whatsappDisplay')}
+                    defaultValue={settingsQuery.data.supportWhatsappDisplay}
+                    className="font-en"
+                  />
+                  <Input
+                    name="trialDays"
+                    type="number"
+                    min={1}
+                    label={t('trialDays')}
+                    defaultValue={settingsQuery.data.trialDays}
+                  />
+                  <Input
+                    name="trialPoints"
+                    type="number"
+                    min={0}
+                    label={t('trialPoints')}
+                    defaultValue={settingsQuery.data.trialPoints}
+                  />
+                  <Input
+                    name="etaTutorialVideoUrl"
+                    type="url"
+                    dir="ltr"
+                    label={t('etaTutorialVideoUrl')}
+                    hint={t('etaTutorialVideoUrlHint')}
+                    placeholder="https://www.youtube.com/watch?v=…"
+                    defaultValue={settingsQuery.data.etaTutorialVideoUrl ?? ''}
+                    className="font-en"
+                  />
+                  <Button type="submit">{t('saveSettings')}</Button>
+                </form>
+              </Card>
+            ) : settingsQuery.isError ? (
+              <Card className="border-danger" role="alert">
+                <p className="m-0 text-token-sm text-danger">{t('error')}</p>
+                <Button
+                  className="mt-token-sm"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void settingsQuery.refetch()}
+                >
+                  {t('retryLoad')}
+                </Button>
+              </Card>
+            ) : null,
+          },
+          {
+            id: 'trials',
+            label: t('tabTrials'),
+            panel: (
+              <div className="space-y-token-md">
+                <div>
+                  <h2 className="m-0 text-token-lg font-semibold">{t('trialTaxRegTitle')}</h2>
+                  <p className="m-0 mt-token-xs text-token-sm text-foreground-muted">{t('trialTaxRegHint')}</p>
+                </div>
+                {trialRegsQuery.isLoading ? <Skeleton variant="rect" className="h-token-lg" /> : null}
+                {(trialRegsQuery.data?.items ?? []).length ? (
+                  <ul className="m-0 grid list-none gap-token-sm p-0">
+                    {(trialRegsQuery.data?.items ?? []).map((row) => (
+                      <li key={row.taxRegistrationNormalized}>
+                        <Card>
+                          <div className="flex flex-wrap items-center justify-between gap-token-sm">
+                            <div>
+                              <p className="m-0 font-en font-medium" dir="ltr">
+                                {row.taxRegistrationNormalized}
+                              </p>
+                              <p className="m-0 font-en text-token-xs text-foreground-muted" dir="ltr">
+                                {new Date(row.consumedAt).toLocaleString()}
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => setResetTax(row.taxRegistrationNormalized)}
+                            >
+                              {t('resetTrial')}
+                            </Button>
+                          </div>
+                        </Card>
+                      </li>
+                    ))}
+                  </ul>
+                ) : !trialRegsQuery.isLoading ? (
+                  <EmptyState title={t('noTrialTaxRegs')} />
+                ) : null}
+              </div>
+            ),
+          },
+        ]}
+      />
+
+      {selectedTenantId ? (
+        <TenantDetailDrawer
+          tenantId={selectedTenantId}
+          plans={plans}
+          onClose={() => setSelectedTenantId(null)}
+        />
       ) : null}
+
+      <ConfirmDialog
+        open={lifecycleDialog?.kind === 'approve'}
+        onClose={() => setLifecycleDialog(null)}
+        title={t('approve')}
+        description={t('confirmApprove')}
+        confirmLabel={t('approve')}
+        onConfirm={() => {
+          if (lifecycleDialog?.kind !== 'approve') return;
+          const id = lifecycleDialog.tenant.id;
+          setLifecycleDialog(null);
+          void approveTenant(id, 'ui').then(refreshTenants);
+        }}
+      />
+      <ReasonDialog
+        open={lifecycleDialog?.kind === 'reject'}
+        title={t('reject')}
+        description={t('rejectReasonPrompt')}
+        label={t('reason')}
+        confirmLabel={t('reject')}
+        danger
+        onClose={() => setLifecycleDialog(null)}
+        onSubmit={(reason) => {
+          if (lifecycleDialog?.kind !== 'reject') return;
+          const id = lifecycleDialog.tenant.id;
+          setLifecycleDialog(null);
+          void rejectTenant(id, reason).then(refreshTenants);
+        }}
+      />
+      <ReasonDialog
+        open={lifecycleDialog?.kind === 'suspend'}
+        title={t('suspend')}
+        description={t('suspendReasonPrompt')}
+        label={t('reason')}
+        confirmLabel={t('suspend')}
+        danger
+        onClose={() => setLifecycleDialog(null)}
+        onSubmit={(reason) => {
+          if (lifecycleDialog?.kind !== 'suspend') return;
+          const id = lifecycleDialog.tenant.id;
+          setLifecycleDialog(null);
+          void suspendTenant(id, reason).then(refreshTenants);
+        }}
+      />
+      <ReasonDialog
+        open={resetTax !== null}
+        title={t('resetTrial')}
+        description={t('resetTrialPrompt')}
+        label={t('resetReasonPrompt')}
+        confirmLabel={t('resetTrial')}
+        required={false}
+        onClose={() => setResetTax(null)}
+        onSubmit={(reason) => {
+          if (!resetTax) return;
+          const tax = resetTax;
+          setResetTax(null);
+          void resetTrialTaxRegistration(tax, reason || undefined).then(() =>
+            qc.invalidateQueries({ queryKey: ['platform-admin-trial-tax-regs'] }),
+          );
+        }}
+      />
     </div>
   );
 }

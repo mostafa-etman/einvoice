@@ -1460,7 +1460,21 @@
     "breakGlass": "كسر الزجاج (تفعيل الكتابة)",
     "endImpersonation": "إنهاء الجلسة",
     "back": "العودة إلى المستأجرين",
-    "error": "حدث خطأ ما"
+    "error": "حدث خطأ ما",
+    "retryLoad": "إعادة المحاولة",
+    "listCaption": "مستأجرو المنصة",
+    "edit": "تعديل",
+    "documentQuota": "حصة المستندات",
+    "fieldCode": "الرمز",
+    "fieldNameEn": "الاسم (الإنجليزية)",
+    "fieldNameAr": "الاسم (العربية)",
+    "addonKind": "النوع",
+    "quantity": "الكمية",
+    "consumed": "مستهلك",
+    "confirmApprove": "اعتماد هذا المستأجر؟",
+    "docs": "مستندات",
+    "branches": "فروع",
+    "devices": "أجهزة"
   },
   "pending": {
     "logout": "تسجيل الخروج",
