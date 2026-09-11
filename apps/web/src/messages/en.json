@@ -185,6 +185,16 @@
     "role": "Role",
     "actions": "Actions",
     "empty": "No members yet",
+    "emptyFiltered": "No members match this search.",
+    "searchPlaceholder": "Search by name or email",
+    "listCaption": "Company members",
+    "inviteTitle": "Add member",
+    "member": "Member",
+    "retryLoad": "Retry",
+    "errorGeneric": "Something went wrong. Try again.",
+    "manageRoles": "Manage roles",
+    "invalidEmail": "Enter a valid email address",
+    "selectRole": "Select a role",
     "forbidden": "You do not have permission to manage users."
   },
   "customers": {
@@ -284,6 +294,7 @@
     "forbidden": "You do not have permission to view roles.",
     "forbiddenManage": "You do not have permission to manage roles.",
     "errorGeneric": "Something went wrong. Try again.",
+    "retryLoad": "Retry",
     "hasMembers": "This role still has members. Reassign them before deleting.",
     "saved": "Permissions saved",
     "groups": {
