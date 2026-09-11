@@ -21,7 +21,8 @@ export {
 export { Pagination, type PaginationProps } from './pagination';
 export { Modal, type ModalProps, type ModalSize } from './modal';
 export { Drawer, type DrawerProps } from './drawer';
-export { ToastProvider, useToast, type ToastInput, type ToastKind } from './toast';
+export { ToastProvider, useToast, useOptionalToast, type ToastInput, type ToastKind } from './toast';
+export { useMutationToast } from './use-mutation-toast';
 export { Tabs, type TabItem, type TabsProps } from './tabs';
 export { DropdownMenu, type DropdownItem, type DropdownMenuProps } from './dropdown-menu';
 export { Tooltip, type TooltipProps } from './tooltip';
@@ -33,5 +34,6 @@ export { Breadcrumbs, type BreadcrumbItem, type BreadcrumbsProps } from './bread
 export { StatCard, type StatCardProps, type StatDelta } from './stat-card';
 export { FilterBar, type FilterBarProps, type FilterChip } from './filter-bar';
 export { ConfirmDialog, type ConfirmDialogProps } from './confirm-dialog';
+export { QueryErrorCard, type QueryErrorCardProps } from './query-error-card';
 export { CopyButton, CopyableTenantId, type CopyButtonProps } from './copy-button';
 export { Spinner } from './spinner';

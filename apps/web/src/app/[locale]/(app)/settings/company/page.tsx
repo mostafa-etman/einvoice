@@ -16,13 +16,18 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SettingsPageHeader } from '../_components/settings-page-header';
+import { QueryErrorCard } from '@/components/ui/query-error-card';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 
 export default function CompanySettingsPage() {
   const t = useTranslations('settingsCompany');
+  const tRetry = useTranslations('common.actions');
   const locale = useLocale();
   const { tenantId } = useTenant();
+  const toast = useMutationToast();
   const [profile, setProfile] = useState<CompanyProfile | null>(null);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const logoUrlRef = useRef<string | null>(null);
@@ -31,6 +36,7 @@ export default function CompanySettingsPage() {
   const reload = async () => {
     const p = await getCompanyProfile();
     setProfile(p);
+    setLoadError(null);
     if (logoUrlRef.current) {
       URL.revokeObjectURL(logoUrlRef.current);
       logoUrlRef.current = null;
@@ -45,7 +51,7 @@ export default function CompanySettingsPage() {
   };
 
   useEffect(() => {
-    reload().catch((e: Error) => setError(e.message));
+    reload().catch((e: Error) => setLoadError(e.message));
     return () => {
       if (logoUrlRef.current) URL.revokeObjectURL(logoUrlRef.current);
     };
@@ -58,8 +64,10 @@ export default function CompanySettingsPage() {
     try {
       await uploadCompanyLogo(file);
       await reload();
+      toast.saved();
     } catch (e) {
       setError(e instanceof Error ? e.message : t('uploadFailed'));
+      toast.error(e, t('uploadFailed'));
     } finally {
       setBusy(false);
     }
@@ -71,21 +79,33 @@ export default function CompanySettingsPage() {
     try {
       await removeCompanyLogo();
       await reload();
+      toast.deleted();
     } catch (e) {
       setError(e instanceof Error ? e.message : t('removeFailed'));
+      toast.error(e, t('removeFailed'));
     } finally {
       setBusy(false);
     }
   };
 
   const addr = profile?.defaultBranchAddress;
-  const loading = !profile && !error;
+  const loading = !profile && !loadError;
 
   return (
     <div className="space-y-token-lg">
       <SettingsPageHeader title={t('title')} subtitle={t('intro')} />
       <CopyableTenantId id={tenantId} />
 
+      {loadError ? (
+        <QueryErrorCard
+          message={loadError}
+          retryLabel={tRetry('retry')}
+          onRetry={() => {
+            setLoadError(null);
+            void reload().catch((e: Error) => setLoadError(e.message));
+          }}
+        />
+      ) : null}
       {error ? (
         <p
           role="alert"
@@ -102,7 +122,7 @@ export default function CompanySettingsPage() {
           <Skeleton className="mb-token-sm w-2/3" />
           <Skeleton variant="rect" className="mt-token-md h-token-xl" />
         </Card>
-      ) : (
+      ) : profile ? (
         <Card className="space-y-token-md">
           <div>
             <h2 className="m-0 text-token-md font-semibold text-foreground">
@@ -194,7 +214,7 @@ export default function CompanySettingsPage() {
             </div>
           </div>
         </Card>
-      )}
+      ) : null}
     </div>
   );
 }

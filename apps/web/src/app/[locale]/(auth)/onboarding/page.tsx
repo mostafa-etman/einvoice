@@ -15,6 +15,7 @@ import { PlanCards, PromoNote } from '@/components/billing/plan-cards';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { BuildingIcon } from '@/components/auth/auth-icons';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 
 const schema = z.object({
   name: z.string().min(2),
@@ -29,6 +30,7 @@ export default function OnboardingPage() {
   const locale = useLocale();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const toast = useMutationToast();
   const [error, setError] = useState<string | null>(null);
   const [choosing, setChoosing] = useState(false);
   const catalogQuery = useQuery({ queryKey: ['signup-catalog'], queryFn: fetchCatalog });
@@ -70,13 +72,17 @@ export default function OnboardingPage() {
       const trialMsg = trialAlreadyUsedMessage(err, locale);
       if (trialMsg) {
         setError(trialMsg);
+        toast.error(undefined, trialMsg);
         return;
       }
       if (err instanceof ApiError && err.status === 409) {
-        setError(typeof err.message === 'string' ? err.message : t('companyLimit'));
+        const msg = typeof err.message === 'string' ? err.message : t('companyLimit');
+        setError(msg);
+        toast.error(err, msg);
         return;
       }
       setError(t('errorGeneric'));
+      toast.error(err, t('errorGeneric'));
     } finally {
       setChoosing(false);
     }

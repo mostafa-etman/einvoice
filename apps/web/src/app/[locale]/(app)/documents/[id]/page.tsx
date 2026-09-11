@@ -76,6 +76,8 @@ import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Modal } from '@/components/ui/modal';
 import { CopyButton } from '@/components/ui/copy-button';
+import { QueryErrorCard } from '@/components/ui/query-error-card';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 import { DocumentStatusBadge } from '../_components/document-status-badge';
 import { CancelReasonDialog } from '../_components/cancel-reason-dialog';
 
@@ -272,6 +274,8 @@ export default function DocumentEditorPage() {
   const t = useTranslations('documents');
   const tOffline = useTranslations('offline');
   const tNav = useTranslations('nav');
+  const tRetry = useTranslations('common.actions');
+  const toast = useMutationToast();
   const locale = useLocale();
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -392,6 +396,8 @@ export default function DocumentEditorPage() {
   const [totals, setTotals] = useState<Record<string, unknown> | null>(null);
   const [issues, setIssues] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadNonce, setLoadNonce] = useState(0);
   const [docStatus, setDocStatus] = useState<string>('DRAFT');
   const [etaStatusRaw, setEtaStatusRaw] = useState<string | null>(null);
   const [documentOrigin, setDocumentOrigin] = useState<string>('LOCAL');
@@ -628,6 +634,7 @@ export default function DocumentEditorPage() {
     setSubmitAttemptLog([]);
     setIssues([]);
     setError(null);
+    setLoadError(null);
   }, [params.id]);
 
   useEffect(() => {
@@ -770,8 +777,8 @@ export default function DocumentEditorPage() {
           );
         }
       })
-      .catch((e: Error) => setError(e.message));
-  }, [isNew, params.id]);
+      .catch((e: Error) => setLoadError(e.message));
+  }, [isNew, params.id, loadNonce]);
 
   const issueIso = useMemo(() => {
     const d = new Date(issueDateTime);
@@ -1262,6 +1269,16 @@ export default function DocumentEditorPage() {
               </details>
             ) : null}
           </Card>
+        ) : null}
+        {loadError ? (
+          <QueryErrorCard
+            message={loadError}
+            retryLabel={tRetry('retry')}
+            onRetry={() => {
+              setLoadError(null);
+              setLoadNonce((n) => n + 1);
+            }}
+          />
         ) : null}
         {error ? (
           <p
@@ -2174,6 +2191,7 @@ export default function DocumentEditorPage() {
                 setOfflineHint(null);
                 if (isNew) {
                   const created = await createDocument(body());
+                  toast.saved();
                   router.replace(`/${locale}/documents/${String(created.id)}`);
                 } else {
                   const updated = await updateDocument(params.id, body());
@@ -2181,6 +2199,7 @@ export default function DocumentEditorPage() {
                   setCanonical(String(updated.canonicalString ?? ''));
                   setEtaJson(JSON.stringify(updated.etaPayload, null, 2));
                   setTotals(updated.totals as Record<string, unknown>);
+                  toast.saved();
                 }
               } catch (e) {
                 const offline = typeof navigator !== 'undefined' && !navigator.onLine;
@@ -2206,8 +2225,10 @@ export default function DocumentEditorPage() {
                 }
                 if (e instanceof ApiError && e.status === 409) {
                   setError(t('staleVersion'));
+                  toast.error(undefined, t('staleVersion'));
                 } else {
                   setError(e instanceof Error ? e.message : t('forbidden'));
+                  toast.error(e, t('forbidden'));
                 }
               }
             }}

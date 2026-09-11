@@ -137,12 +137,16 @@ export default function PurchasesPage() {
         }
       }
       reload();
+      push({ title: t('syncNow'), kind: 'success', timeoutMs: 12000 });
     } catch (e) {
       if (isAlreadyRunningError(e)) {
         setShowStuckReset(true);
         setError(t('syncAlreadyRunning'));
+        push({ title: t('syncAlreadyRunning'), kind: 'error', timeoutMs: 12000 });
       } else {
-        setError(e instanceof Error ? e.message : String(e));
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(msg);
+        push({ title: msg, kind: 'error', timeoutMs: 12000 });
       }
     } finally {
       setBusy(false);
@@ -158,11 +162,11 @@ export default function PurchasesPage() {
       setShowStuckReset(false);
       push({ title: t('syncResetOk'), kind: 'success', timeoutMs: 12000 });
     } catch (e) {
-      setError(
-        t('syncResetFailed', {
-          message: e instanceof Error ? e.message : String(e),
-        }),
-      );
+      const msg = t('syncResetFailed', {
+        message: e instanceof Error ? e.message : String(e),
+      });
+      setError(msg);
+      push({ title: msg, kind: 'error', timeoutMs: 12000 });
     } finally {
       setBusy(false);
     }

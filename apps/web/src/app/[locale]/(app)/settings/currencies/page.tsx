@@ -22,6 +22,8 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Table, type TableColumn } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SettingsPageHeader } from '../_components/settings-page-header';
+import { QueryErrorCard } from '@/components/ui/query-error-card';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 
 const rateSchema = z.object({
   baseCurrencyCode: z.string().min(1),
@@ -43,8 +45,10 @@ type RateRow = {
 
 export default function CurrenciesSettingsPage() {
   const t = useTranslations('settingsCurrencies');
+  const tRetry = useTranslations('common.actions');
   const { tenantId } = useTenant();
   const qc = useQueryClient();
+  const toast = useMutationToast();
 
   const catalog = useQuery({
     queryKey: ['currency-catalog', tenantId],
@@ -64,11 +68,19 @@ export default function CurrenciesSettingsPage() {
 
   const enable = useMutation({
     mutationFn: (code: string) => enableCurrency(code),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tenant-currencies', tenantId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tenant-currencies', tenantId] });
+      toast.saved();
+    },
+    onError: (err) => toast.error(err),
   });
   const setDefault = useMutation({
     mutationFn: (code: string) => setDefaultCurrency(code),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tenant-currencies', tenantId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tenant-currencies', tenantId] });
+      toast.saved();
+    },
+    onError: (err) => toast.error(err),
   });
 
   const {
@@ -87,7 +99,9 @@ export default function CurrenciesSettingsPage() {
     onSuccess: async () => {
       reset();
       await qc.invalidateQueries({ queryKey: ['exchange-rates', tenantId] });
+      toast.created();
     },
+    onError: (err) => toast.error(err),
   });
 
   const catalogColumns: TableColumn<CatalogRow>[] = [
@@ -151,7 +165,13 @@ export default function CurrenciesSettingsPage() {
 
       <section className="space-y-token-sm">
         <h2 className="m-0 text-token-md font-semibold text-foreground">{t('catalog')}</h2>
-        {catalog.isLoading ? (
+        {catalog.isError ? (
+          <QueryErrorCard
+            message={catalog.error instanceof Error ? catalog.error.message : tRetry('retry')}
+            retryLabel={tRetry('retry')}
+            onRetry={() => void catalog.refetch()}
+          />
+        ) : catalog.isLoading ? (
           <Card aria-busy="true">
             <Skeleton />
           </Card>
@@ -168,7 +188,13 @@ export default function CurrenciesSettingsPage() {
 
       <section className="space-y-token-sm">
         <h2 className="m-0 text-token-md font-semibold text-foreground">{t('title')}</h2>
-        {enabled.isLoading ? (
+        {enabled.isError ? (
+          <QueryErrorCard
+            message={enabled.error instanceof Error ? enabled.error.message : tRetry('retry')}
+            retryLabel={tRetry('retry')}
+            onRetry={() => void enabled.refetch()}
+          />
+        ) : enabled.isLoading ? (
           <Card aria-busy="true">
             <Skeleton />
           </Card>
@@ -178,7 +204,19 @@ export default function CurrenciesSettingsPage() {
             columns={enabledColumns}
             rows={enabled.data ?? []}
             getRowId={(c) => c.currencyCode}
-            empty={<EmptyState title={t('empty')} />}
+            empty={
+              <EmptyState
+                title={t('empty')}
+                action={
+                  catalog.data?.[0]
+                    ? {
+                        label: t('enable'),
+                        onClick: () => enable.mutate(catalog.data[0]!.code),
+                      }
+                    : undefined
+                }
+              />
+            }
           />
         )}
       </section>

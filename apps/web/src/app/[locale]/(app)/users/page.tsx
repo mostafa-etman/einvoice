@@ -22,6 +22,7 @@ import { FilterBar } from '@/components/ui/filter-bar';
 import { Modal } from '@/components/ui/modal';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Table, type TableColumn } from '@/components/ui/table';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 
 const schema = z.object({
   email: z.string().email(),
@@ -41,7 +42,9 @@ export default function UsersPage() {
   const t = useTranslations('users');
   const tNav = useTranslations('nav');
   const tActions = useTranslations('common.actions');
+  const tUi = useTranslations('ui');
   const locale = useLocale();
+  const toast = useMutationToast();
   const { tenantId } = useTenant();
   const qc = useQueryClient();
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -71,6 +74,10 @@ export default function UsersPage() {
       reset();
       setInviteOpen(false);
       await qc.invalidateQueries({ queryKey: ['members', tenantId] });
+      toast.created();
+    },
+    onError: (err) => {
+      toast.error(err);
     },
   });
 
@@ -79,6 +86,10 @@ export default function UsersPage() {
       updateMemberRole(input.membershipId, input.roleId),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['members', tenantId] });
+      toast.saved();
+    },
+    onError: (err) => {
+      toast.error(err);
     },
   });
 
@@ -225,9 +236,11 @@ export default function UsersPage() {
             <EmptyState
               title={search.trim() ? t('emptyFiltered') : t('empty')}
               action={
-                search.trim() || forbidden
+                forbidden
                   ? undefined
-                  : { label: t('invite'), onClick: () => setInviteOpen(true) }
+                  : search.trim()
+                    ? { label: tUi('filterReset'), onClick: () => setSearch('') }
+                    : { label: t('invite'), onClick: () => setInviteOpen(true) }
               }
             />
           }

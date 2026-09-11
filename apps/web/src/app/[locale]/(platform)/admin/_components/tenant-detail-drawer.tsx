@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Modal } from '@/components/ui/modal';
 import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 import {
   adjustPoints,
   applyAddon,
@@ -38,6 +39,7 @@ export function TenantDetailDrawer({
   const t = useTranslations('admin');
   const tActions = useTranslations('common.actions');
   const qc = useQueryClient();
+  const toast = useMutationToast();
   const [session, setSession] = useState<ImpersonationSessionView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [impersonateOpen, setImpersonateOpen] = useState(false);
@@ -76,8 +78,12 @@ export function TenantDetailDrawer({
       setError(null);
       setSession(s);
       console.info('Impersonation access token (dev only):', s.accessToken);
+      toast.saved();
     },
-    onError: (e) => setError(e instanceof Error ? e.message : t('error')),
+    onError: (e) => {
+      setError(e instanceof Error ? e.message : t('error'));
+      toast.error(e, t('error'));
+    },
   });
 
   const planMut = useMutation({
@@ -85,8 +91,12 @@ export function TenantDetailDrawer({
     onSuccess: () => {
       setPlanReasonOpen(false);
       invalidate();
+      toast.saved();
     },
-    onError: (e) => setError(e instanceof Error ? e.message : t('error')),
+    onError: (e) => {
+      setError(e instanceof Error ? e.message : t('error'));
+      toast.error(e, t('error'));
+    },
   });
 
   const detail = detailQuery.data;
@@ -291,7 +301,7 @@ export function TenantDetailDrawer({
                     type="button"
                     variant="secondary"
                     size="sm"
-                    onClick={() => void endImpersonation(session.id).then(() => setSession(null))}
+                    onClick={() => void toast.track(endImpersonation(session.id).then(() => setSession(null)))}
                   >
                     {t('endImpersonation')}
                   </Button>
@@ -324,7 +334,7 @@ export function TenantDetailDrawer({
         onSubmit={(reason) => {
           if (!session) return;
           setBreakGlassOpen(false);
-          void breakGlass(session.id, reason).then(setSession);
+          void toast.track(breakGlass(session.id, reason).then(setSession));
         }}
       />
       <ReasonDialog
@@ -353,7 +363,7 @@ export function TenantDetailDrawer({
                 setPointsOpen(false);
                 setPointsDelta('');
                 setPointsNote('');
-                void adjustPoints(tenantId, pointsDeltaNumber, note).then(invalidate);
+                void toast.track(adjustPoints(tenantId, pointsDeltaNumber, note).then(invalidate));
               }}
             >
               {t('adjustPoints')}
@@ -394,7 +404,7 @@ export function TenantDetailDrawer({
                 setAddonOpen(false);
                 setAddonCode('');
                 setAddonReason('');
-                void applyAddon(tenantId, code.toUpperCase(), reason).then(invalidate);
+                void toast.track(applyAddon(tenantId, code.toUpperCase(), reason).then(invalidate));
               }}
             >
               {t('applyAddon')}

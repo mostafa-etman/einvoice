@@ -14,6 +14,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Table, type TableColumn } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SettingsPageHeader } from '../_components/settings-page-header';
+import { QueryErrorCard } from '@/components/ui/query-error-card';
 
 type DocTypeRow = {
   id: string;
@@ -23,6 +24,7 @@ type DocTypeRow = {
 
 export default function EtaDocumentTypesPage() {
   const t = useTranslations('settingsEtaDocTypes');
+  const tRetry = useTranslations('common.actions');
   const { tenantId } = useTenant();
   const qc = useQueryClient();
   const [selected, setSelected] = useState<string | null>(null);
@@ -93,12 +95,21 @@ export default function EtaDocumentTypesPage() {
         </p>
       ) : null}
 
-      {types.isLoading ? (
+      {types.isError ? (
+        <QueryErrorCard
+          message={types.error instanceof Error ? types.error.message : tRetry('retry')}
+          retryLabel={tRetry('retry')}
+          onRetry={() => void types.refetch()}
+        />
+      ) : types.isLoading ? (
         <Card aria-busy="true">
           <Skeleton />
         </Card>
       ) : items.length === 0 ? (
-        <EmptyState title={t('empty')} />
+        <EmptyState
+          title={t('empty')}
+          action={{ label: t('refresh'), onClick: () => void refresh() }}
+        />
       ) : (
         <Table
           caption={t('title')}

@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { AuthPasswordField } from '@/components/auth/auth-password-field';
 import { MailIcon, UserIcon } from '@/components/auth/auth-icons';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 
 const schema = z.object({
   name: z.string().optional(),
@@ -26,6 +27,7 @@ export default function RegisterPage() {
   const locale = useLocale();
   const router = useRouter();
   const { register: registerUser } = useAuth();
+  const toast = useMutationToast();
   const [error, setError] = useState<string | null>(null);
   const {
     register,
@@ -45,6 +47,7 @@ export default function RegisterPage() {
       router.push(`/${locale}/onboarding`);
     } catch {
       setError(t('errorGeneric'));
+      toast.error(undefined, t('errorGeneric'));
     }
   });
 

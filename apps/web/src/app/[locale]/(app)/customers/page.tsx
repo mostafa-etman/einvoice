@@ -26,6 +26,7 @@ import { Badge } from '@/components/ui/badge';
 import { TableWrap, Th, Td } from '@/components/ui/table';
 import { Drawer } from '@/components/ui/drawer';
 import { CustomerForm } from './_components/customer-form';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 import {
   PAGE_SIZE,
   emptyAddress,
@@ -39,6 +40,7 @@ export default function CustomersPage() {
   const locale = useLocale();
   const { tenantId } = useTenant();
   const qc = useQueryClient();
+  const toast = useMutationToast();
 
   const [q, setQ] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
@@ -113,6 +115,7 @@ export default function CustomersPage() {
       setFormError(null);
       setCursor(undefined);
       await qc.invalidateQueries({ queryKey: ['customers', tenantId] });
+      toast.saved();
     },
     onError: (err) => {
       setFormError(
@@ -122,6 +125,7 @@ export default function CustomersPage() {
             ? err.message
             : t('errorGeneric'),
       );
+      toast.error(err, t('errorGeneric'));
     },
   });
 
@@ -130,6 +134,10 @@ export default function CustomersPage() {
     onSuccess: async () => {
       setCursor(undefined);
       await qc.invalidateQueries({ queryKey: ['customers', tenantId] });
+      toast.saved();
+    },
+    onError: (err) => {
+      toast.error(err);
     },
   });
 

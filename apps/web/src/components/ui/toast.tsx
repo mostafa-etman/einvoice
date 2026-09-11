@@ -86,3 +86,10 @@ export function useToast(): ToastContextValue {
   }
   return ctx;
 }
+
+const silentToast: ToastContextValue = { push: () => undefined };
+
+/** Safe in page tests that do not mount ToastProvider. Production AppProviders still wraps the tree. */
+export function useOptionalToast(): ToastContextValue {
+  return useContext(ToastContext) ?? silentToast;
+}

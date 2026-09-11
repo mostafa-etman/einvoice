@@ -12,11 +12,13 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 
 export default function ConflictPage() {
   const t = useTranslations();
   const tNav = useTranslations('nav');
   const locale = useLocale();
+  const toast = useMutationToast();
   const router = useRouter();
   const params = useSearchParams();
   const key = params.get('key') ?? '';
@@ -67,9 +69,11 @@ export default function ConflictPage() {
         lastError: undefined,
         updatedAt: new Date().toISOString(),
       });
+      toast.saved();
       router.push(`/${locale}/sync`);
     } catch (e) {
       setError(e instanceof Error ? e.message : t('conflict.resolveFailed'));
+      toast.error(e, t('conflict.resolveFailed'));
     } finally {
       setResolving(false);
     }

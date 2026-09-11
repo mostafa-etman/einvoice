@@ -21,6 +21,8 @@ import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SettingsPageHeader } from '../_components/settings-page-header';
+import { QueryErrorCard } from '@/components/ui/query-error-card';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 
 const addressSchema = z.object({
   country: z.string().min(1),
@@ -62,8 +64,10 @@ const OPTIONAL_ADDRESS_FIELDS = [
 
 export default function BranchesSettingsPage() {
   const t = useTranslations('settingsBranches');
+  const tRetry = useTranslations('common.actions');
   const { tenantId } = useTenant();
   const qc = useQueryClient();
+  const toast = useMutationToast();
   const [editing, setEditing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -89,8 +93,12 @@ export default function BranchesSettingsPage() {
       setError(null);
       reset({ isDefault: false, address: { country: 'EG' } });
       await qc.invalidateQueries({ queryKey: ['branches', tenantId] });
+      toast.created();
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => {
+      setError(e.message);
+      toast.error(e);
+    },
   });
 
   return (
@@ -99,6 +107,7 @@ export default function BranchesSettingsPage() {
 
       <Card>
         <form
+          id="branch-create-form"
           className="space-y-token-md"
           onSubmit={handleSubmit((v) => create.mutateAsync(v))}
         >
@@ -153,13 +162,25 @@ export default function BranchesSettingsPage() {
         </form>
       </Card>
 
-      {query.isLoading ? (
+      {query.isError ? (
+        <QueryErrorCard
+          message={query.error instanceof Error ? query.error.message : tRetry('retry')}
+          retryLabel={tRetry('retry')}
+          onRetry={() => void query.refetch()}
+        />
+      ) : query.isLoading ? (
         <Card aria-busy="true">
           <Skeleton className="mb-token-sm" />
           <Skeleton className="w-2/3" />
         </Card>
       ) : !query.data?.length ? (
-        <EmptyState title={t('empty')} />
+        <EmptyState
+          title={t('empty')}
+          action={{
+            label: t('create'),
+            onClick: () => document.getElementById('branch-create-form')?.scrollIntoView({ behavior: 'smooth' }),
+          }}
+        />
       ) : (
         <ul className="m-0 list-none space-y-token-sm p-0">
           {query.data.map((b) => (
@@ -210,6 +231,7 @@ function BranchAddressEditor({
   onSaved: () => Promise<void> | void;
 }) {
   const t = useTranslations('settingsBranches');
+  const toast = useMutationToast();
   const [error, setError] = useState<string | null>(null);
   const {
     register,
@@ -238,9 +260,11 @@ function BranchAddressEditor({
         try {
           setError(null);
           await updateBranch(branch.id, { address });
+          toast.saved();
           await onSaved();
         } catch (e) {
           setError(e instanceof Error ? e.message : t('addressIncomplete'));
+          toast.error(e, t('addressIncomplete'));
         }
       })}
     >

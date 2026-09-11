@@ -33,6 +33,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Table, type TableColumn } from '@/components/ui/table';
 import { FileDropzone } from './_components/file-dropzone';
 import { JobStatusBadge } from './_components/job-status-badge';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 
 const STUCK_STATUSES = new Set(['VALIDATING', 'RUNNING']);
 
@@ -50,6 +51,7 @@ export default function ImportsPage() {
   const tNav = useTranslations('nav');
   const locale = useLocale();
   const { tenantId } = useTenant();
+  const toast = useMutationToast();
   const [jobs, setJobs] = useState<ImportJob[]>([]);
   const [jobsLoading, setJobsLoading] = useState(true);
   const [listFailed, setListFailed] = useState(false);
@@ -155,9 +157,12 @@ export default function ImportsPage() {
       setActive(job);
       setMapping((job.mappingJson as Record<string, string>) || {});
       reloadJobs();
+      toast.created();
     } catch (e) {
       setListFailed(false);
-      setError(e instanceof Error ? e.message : t('uploadFailed'));
+      const msg = e instanceof Error ? e.message : t('uploadFailed');
+      setError(msg);
+      toast.error(e, t('uploadFailed'));
     } finally {
       setBusy(false);
     }
@@ -183,10 +188,12 @@ export default function ImportsPage() {
         500,
       );
       if (!job) setError(t('stuckHint'));
+      else toast.saved();
       reloadJobs();
     } catch (e) {
       setListFailed(false);
       setError(e instanceof Error ? e.message : t('validateFailed'));
+      toast.error(e, t('validateFailed'));
     } finally {
       setBusy(false);
     }
@@ -205,10 +212,12 @@ export default function ImportsPage() {
         700,
       );
       if (!job) setError(t('stuckHint'));
+      else toast.saved();
       reloadJobs();
     } catch (e) {
       setListFailed(false);
       setError(e instanceof Error ? e.message : t('runFailed'));
+      toast.error(e, t('runFailed'));
     } finally {
       setBusy(false);
     }
@@ -348,7 +357,7 @@ export default function ImportsPage() {
         </Card>
       ) : null}
 
-      <Card>
+      <Card id="import-start">
         <CardHeader>
           <div>
             <CardTitle>{t('start')}</CardTitle>
@@ -587,7 +596,15 @@ export default function ImportsPage() {
             rows={jobs}
             getRowId={(j) => j.id}
             loading={jobsLoading}
-            empty={<EmptyState title={t('noJobs')} />}
+            empty={
+              <EmptyState
+                title={t('noJobs')}
+                action={{
+                  label: t('start'),
+                  onClick: () => document.getElementById('import-start')?.scrollIntoView({ behavior: 'smooth' }),
+                }}
+              />
+            }
           />
         )}
       </section>

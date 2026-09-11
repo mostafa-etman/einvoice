@@ -22,6 +22,8 @@ import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Table, type TableColumn } from '@/components/ui/table';
 import { SettingsPageHeader } from '../_components/settings-page-header';
+import { QueryErrorCard } from '@/components/ui/query-error-card';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 
 const schema = z.object({
   type: z.enum(['EGS', 'GS1']),
@@ -33,8 +35,10 @@ type FormValues = z.infer<typeof schema>;
 
 export default function ItemCodesPage() {
   const t = useTranslations('settingsItemCodes');
+  const tRetry = useTranslations('common.actions');
   const { tenantId } = useTenant();
   const qc = useQueryClient();
+  const toast = useMutationToast();
   const query = useQuery({
     queryKey: ['item-codes', tenantId],
     queryFn: listItemCodes,
@@ -66,14 +70,18 @@ export default function ItemCodesPage() {
     onSuccess: async () => {
       reset({ type: 'EGS', code: '', description: '' });
       await qc.invalidateQueries({ queryKey: ['item-codes', tenantId] });
+      toast.created();
     },
+    onError: (err) => toast.error(err),
   });
 
   const sync = useMutation({
     mutationFn: startItemCodeSync,
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['item-codes-sync', tenantId] });
+      toast.saved();
     },
+    onError: (err) => toast.error(err),
   });
 
   const syncStatus = syncQuery.data?.status;
@@ -166,14 +174,27 @@ export default function ItemCodesPage() {
         </form>
       </Card>
 
-      <Table
-        caption={t('title')}
-        columns={columns}
-        rows={query.data ?? []}
-        getRowId={(i) => i.id}
-        loading={query.isLoading}
-        empty={<EmptyState title={t('empty')} />}
-      />
+      {query.isError ? (
+        <QueryErrorCard
+          message={query.error instanceof Error ? query.error.message : t('syncFailed')}
+          retryLabel={tRetry('retry')}
+          onRetry={() => void query.refetch()}
+        />
+      ) : (
+        <Table
+          caption={t('title')}
+          columns={columns}
+          rows={query.data ?? []}
+          getRowId={(i) => i.id}
+          loading={query.isLoading}
+          empty={
+            <EmptyState
+              title={t('empty')}
+              action={{ label: t('syncEta'), onClick: () => sync.mutate() }}
+            />
+          }
+        />
+      )}
     </div>
   );
 }

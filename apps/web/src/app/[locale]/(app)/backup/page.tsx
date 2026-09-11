@@ -18,6 +18,7 @@ import { Badge, type BadgeVariant } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Table, type TableColumn } from '@/components/ui/table';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 
 function backupStatusVariant(status: string): BadgeVariant {
   const upper = status.toUpperCase();
@@ -41,6 +42,7 @@ export default function BackupPage() {
   const tNav = useTranslations('nav');
   const locale = useLocale();
   const qc = useQueryClient();
+  const toast = useMutationToast();
   const [wipeOpen, setWipeOpen] = useState(false);
   const [restoreId, setRestoreId] = useState<string | null>(null);
 
@@ -52,16 +54,26 @@ export default function BackupPage() {
 
   const createMut = useMutation({
     mutationFn: () => createBackupJob(),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['backup-jobs'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['backup-jobs'] });
+      toast.created();
+    },
+    onError: (err) => toast.error(err),
   });
 
   const wipeMut = useMutation({
     mutationFn: () => wipeOperational(),
+    onSuccess: () => toast.saved(),
+    onError: (err) => toast.error(err),
   });
 
   const restoreMut = useMutation({
     mutationFn: (backupJobId: string) => restoreBackup(backupJobId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['backup-jobs'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['backup-jobs'] });
+      toast.saved();
+    },
+    onError: (err) => toast.error(err),
   });
 
   const columns: TableColumn<BackupJob>[] = [

@@ -18,6 +18,7 @@ function statusVariant(status: LifecycleStatus): BadgeVariant {
 export function TenantTable({
   tenants,
   loading,
+  emptyAction,
   onView,
   onApprove,
   onReject,
@@ -26,6 +27,7 @@ export function TenantTable({
 }: {
   tenants: TenantSummary[];
   loading: boolean;
+  emptyAction?: { label: string; onClick: () => void };
   onView: (tenant: TenantSummary) => void;
   onApprove: (tenant: TenantSummary) => void;
   onReject: (tenant: TenantSummary) => void;
@@ -115,7 +117,7 @@ export function TenantTable({
       rows={tenants}
       getRowId={(tenant) => tenant.id}
       loading={loading}
-      empty={<EmptyState title={t('empty')} />}
+      empty={<EmptyState title={t('empty')} action={emptyAction} />}
     />
   );
 }

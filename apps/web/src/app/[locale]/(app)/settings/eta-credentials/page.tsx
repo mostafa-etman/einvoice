@@ -33,6 +33,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SettingsPageHeader } from '../_components/settings-page-header';
+import { QueryErrorCard } from '@/components/ui/query-error-card';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 
 const schema = z.object({
   clientId: z.string().min(1),
@@ -49,9 +51,11 @@ type FormValues = z.infer<typeof schema>;
 
 export default function EtaCredentialsPage() {
   const t = useTranslations('settingsEta');
+  const tRetry = useTranslations('common.actions');
   const locale = useLocale();
   const { tenantId } = useTenant();
   const qc = useQueryClient();
+  const toast = useMutationToast();
   const [credEnv, setCredEnv] = useState<EtaEnvironment>('SANDBOX');
   const [rotateOpen, setRotateOpen] = useState(false);
   const [newSecret, setNewSecret] = useState('');
@@ -120,7 +124,9 @@ export default function EtaCredentialsPage() {
     onSuccess: async () => {
       reset({ clientSecret: '' });
       await invalidateAll();
+      toast.saved();
     },
+    onError: (err) => toast.error(err),
   });
 
   const rotate = useMutation({
@@ -130,7 +136,9 @@ export default function EtaCredentialsPage() {
       setRotateOpen(false);
       setNewSecret('');
       await invalidateAll();
+      toast.saved();
     },
+    onError: (err) => toast.error(err),
   });
 
   const test = useMutation({
@@ -138,8 +146,13 @@ export default function EtaCredentialsPage() {
     onSuccess: async (res) => {
       setTestMsg(res.connected ? t('testSuccess') : t('testFailure'));
       await invalidateAll();
+      if (res.connected) toast.success(t('testSuccess'));
+      else toast.error(undefined, t('testFailure'));
     },
-    onError: () => setTestMsg(t('testFailure')),
+    onError: () => {
+      setTestMsg(t('testFailure'));
+      toast.error(undefined, t('testFailure'));
+    },
   });
 
   const switchEnv = useMutation({
@@ -148,6 +161,7 @@ export default function EtaCredentialsPage() {
     onSuccess: async () => {
       setActionMsg(null);
       await invalidateAll();
+      toast.saved();
     },
     onError: (err: unknown) => {
       const msg =
@@ -155,6 +169,7 @@ export default function EtaCredentialsPage() {
           ? String((err as { message: string }).message)
           : t('testFailure');
       setActionMsg(msg);
+      toast.error(err, msg);
     },
   });
 
@@ -166,6 +181,7 @@ export default function EtaCredentialsPage() {
         `${t('clearSandboxSuccess')}: ${res.deletedDocuments} docs`,
       );
       await invalidateAll();
+      toast.success(t('clearSandboxSuccess'));
     },
     onError: (err: unknown) => {
       const msg =
@@ -173,6 +189,7 @@ export default function EtaCredentialsPage() {
           ? String((err as { message: string }).message)
           : t('testFailure');
       setActionMsg(msg);
+      toast.error(err, msg);
     },
   });
 
@@ -187,6 +204,7 @@ export default function EtaCredentialsPage() {
       setGoLiveClear(false);
       setActionMsg(t('goLiveConfirm'));
       await invalidateAll();
+      toast.saved();
     },
     onError: (err: unknown) => {
       const msg =
@@ -194,6 +212,7 @@ export default function EtaCredentialsPage() {
           ? String((err as { message: string }).message)
           : t('testFailure');
       setActionMsg(msg);
+      toast.error(err, msg);
     },
   });
 
@@ -201,7 +220,9 @@ export default function EtaCredentialsPage() {
     mutationFn: dismissEtaSetupPrompt,
     onSuccess: async (data) => {
       qc.setQueryData(['eta-setup', tenantId], data);
+      toast.saved();
     },
+    onError: (err) => toast.error(err),
   });
 
   const status = connection.data;
@@ -255,6 +276,32 @@ export default function EtaCredentialsPage() {
               </Badge>
             }
           />
+
+          {envStatus.isError ? (
+            <QueryErrorCard
+              message={
+                envStatus.error instanceof Error ? envStatus.error.message : tRetry('retry')
+              }
+              retryLabel={tRetry('retry')}
+              onRetry={() => void envStatus.refetch()}
+            />
+          ) : null}
+          {query.isError ? (
+            <QueryErrorCard
+              message={query.error instanceof Error ? query.error.message : tRetry('retry')}
+              retryLabel={tRetry('retry')}
+              onRetry={() => void query.refetch()}
+            />
+          ) : null}
+          {connection.isError ? (
+            <QueryErrorCard
+              message={
+                connection.error instanceof Error ? connection.error.message : tRetry('retry')
+              }
+              retryLabel={tRetry('retry')}
+              onRetry={() => void connection.refetch()}
+            />
+          ) : null}
 
           <Card>
             <h2 className="m-0 text-token-md font-semibold text-foreground">

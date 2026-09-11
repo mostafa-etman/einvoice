@@ -13,9 +13,13 @@ import { Select } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SettingsPageHeader } from '../_components/settings-page-header';
+import { QueryErrorCard } from '@/components/ui/query-error-card';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 
 export default function InvoiceNumberingPage() {
   const t = useTranslations('settingsNumbering');
+  const tRetry = useTranslations('common.actions');
+  const toast = useMutationToast();
   const [form, setForm] = useState<Omit<InvoiceNumbering, 'previewNext'>>({
     prefix: 'INV-',
     padWidth: 6,
@@ -24,6 +28,7 @@ export default function InvoiceNumberingPage() {
     scope: 'TENANT',
   });
   const [preview, setPreview] = useState('');
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -40,8 +45,9 @@ export default function InvoiceNumberingPage() {
           scope: v.scope,
         });
         setPreview(v.previewNext);
+        setLoadError(null);
       })
-      .catch((e: Error) => setError(e.message))
+      .catch((e: Error) => setLoadError(e.message))
       .finally(() => setLoaded(true));
   }, []);
 
@@ -53,8 +59,10 @@ export default function InvoiceNumberingPage() {
       const v = await upsertInvoiceNumbering(form);
       setPreview(v.previewNext);
       setSaved(true);
+      toast.saved();
     } catch (e) {
       setError(e instanceof Error ? e.message : t('saveFailed'));
+      toast.error(e, t('saveFailed'));
     } finally {
       setBusy(false);
     }
@@ -64,6 +72,30 @@ export default function InvoiceNumberingPage() {
     <div className="space-y-token-lg">
       <SettingsPageHeader title={t('title')} subtitle={t('intro')} />
 
+      {loadError ? (
+        <QueryErrorCard
+          message={loadError}
+          retryLabel={tRetry('retry')}
+          onRetry={() => {
+            setLoaded(false);
+            setLoadError(null);
+            getInvoiceNumbering()
+              .then((v) => {
+                setForm({
+                  prefix: v.prefix,
+                  padWidth: v.padWidth,
+                  startingNumber: v.startingNumber,
+                  charset: v.charset,
+                  scope: v.scope,
+                });
+                setPreview(v.previewNext);
+                setLoadError(null);
+              })
+              .catch((e: Error) => setLoadError(e.message))
+              .finally(() => setLoaded(true));
+          }}
+        />
+      ) : null}
       {error ? (
         <p
           role="alert"
@@ -85,7 +117,7 @@ export default function InvoiceNumberingPage() {
           <Skeleton className="mb-token-sm" />
           <Skeleton variant="rect" className="h-token-xl" />
         </Card>
-      ) : (
+      ) : loadError ? null : (
         <Card className="space-y-token-md">
           <Input
             label={t('prefix')}

@@ -9,6 +9,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-provider';
 import { establishTenantContext } from '@/lib/establish-tenant-context';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { AuthPasswordField } from '@/components/auth/auth-password-field';
@@ -26,6 +27,7 @@ export default function LoginPage() {
   const locale = useLocale();
   const router = useRouter();
   const { login, user, ready } = useAuth();
+  const toast = useMutationToast();
   const [error, setError] = useState<string | null>(null);
   const {
     register,
@@ -57,6 +59,7 @@ export default function LoginPage() {
       router.replace(`/${locale}`);
     } catch {
       setError(t('errorGeneric'));
+      toast.error(undefined, t('errorGeneric'));
     }
   });
 

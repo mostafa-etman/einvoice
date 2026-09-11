@@ -16,6 +16,7 @@ import {
   type PurchaseLine,
 } from '@/lib/api/purchases';
 import { formatMoneyDisplay, formatQuantityDisplay } from '@/lib/format-number';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 import { PageHeader } from '@/components/ui/page-header';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { Button } from '@/components/ui/button';
@@ -50,6 +51,7 @@ export default function PurchaseDetailPage() {
   const t = useTranslations('purchases');
   const tNav = useTranslations('nav');
   const locale = useLocale();
+  const toast = useMutationToast();
   const params = useParams<{ id: string }>();
   const id = params.id;
   const [doc, setDoc] = useState<PurchaseDetail | null>(null);
@@ -82,8 +84,11 @@ export default function PurchaseDetailPage() {
     try {
       await fn();
       reload();
+      toast.saved();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      toast.error(e, msg);
     } finally {
       setBusy(false);
     }
@@ -100,8 +105,11 @@ export default function PurchaseDetailPage() {
       a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
+      toast.success();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      toast.error(e, msg);
     } finally {
       setBusy(false);
     }

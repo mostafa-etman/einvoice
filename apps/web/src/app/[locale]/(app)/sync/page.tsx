@@ -24,6 +24,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { Table, type TableColumn } from '@/components/ui/table';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 
 const statusVariant: Record<DraftQueueStatus, BadgeVariant> = {
   pending: 'warning',
@@ -38,6 +39,7 @@ export default function SyncPage() {
   const tNav = useTranslations('nav');
   const locale = useLocale();
   const { user } = useAuth();
+  const toast = useMutationToast();
   const [items, setItems] = useState<DraftQueueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [drainCount, setDrainCount] = useState(0);
@@ -79,6 +81,9 @@ export default function SyncPage() {
     try {
       await engine.drain();
       await refresh();
+      toast.saved();
+    } catch (e) {
+      toast.error(e);
     } finally {
       setDrainCount((n) => n - 1);
     }
@@ -93,6 +98,7 @@ export default function SyncPage() {
     }
     await clearTenantQueue(tenantId);
     await refresh();
+    toast.deleted();
   }
 
   async function confirmDiscard() {
@@ -100,6 +106,7 @@ export default function SyncPage() {
     await clearTenantQueue(tenantId);
     setDiscardOpen(false);
     await refresh();
+    toast.deleted();
   }
 
   const columns: TableColumn<DraftQueueItem>[] = [

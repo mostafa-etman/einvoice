@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
+import { ToastProvider } from '@/components/ui/toast';
 import en from '@/messages/en.json';
 import { ApiError } from '@/lib/api/client';
 import { addMember, listMembers, updateMemberRole, type Member } from '@/lib/api/members';
@@ -67,7 +68,9 @@ function renderPage(client?: QueryClient) {
     ...render(
       <QueryClientProvider client={qc}>
         <NextIntlClientProvider locale="en" messages={en}>
-          <UsersPage />
+          <ToastProvider>
+            <UsersPage />
+          </ToastProvider>
         </NextIntlClientProvider>
       </QueryClientProvider>,
     ),
@@ -120,6 +123,8 @@ describe('users page', () => {
     });
     expect(screen.getByText(en.users.emptyFiltered)).toBeInTheDocument();
     expect(screen.queryByText('ada@example.com')).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: en.ui.filterReset })[0]!);
+    expect(await screen.findByText('ada@example.com')).toBeInTheDocument();
   });
 
   it('shows forbidden without listing when the members query is 403', async () => {
@@ -174,6 +179,7 @@ describe('users page', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
+    expect(screen.getByRole('status')).toHaveTextContent(en.common.toast.created);
   });
 
   it('submits the existing invite payload', async () => {

@@ -362,6 +362,7 @@ export default function DocumentsPage() {
             ? e.message
             : t('submitFailed');
       setError(msg);
+      showToast(msg, 'err');
     } finally {
       setBusy(false);
     }
@@ -370,6 +371,7 @@ export default function DocumentsPage() {
   const executeCancel = async (ids: string[], reason: string, batch: boolean) => {
     if (!reason.trim()) {
       setError(t('cancelReasonRequired'));
+      showToast(t('cancelReasonRequired'), 'err');
       return;
     }
     setBusy(true);
@@ -393,7 +395,9 @@ export default function DocumentsPage() {
       setSelected(new Set());
       await reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : t('forbidden'));
+      const msg = e instanceof Error ? e.message : t('forbidden');
+      setError(msg);
+      showToast(msg, 'err');
     } finally {
       setBusy(false);
     }
@@ -405,6 +409,7 @@ export default function DocumentsPage() {
       .map((d) => d.id);
     if (!ids.length) {
       setError(t('cancelNoneEligible'));
+      showToast(t('cancelNoneEligible'), 'err');
       return;
     }
     setCancelTarget({ ids, batch: true });
@@ -429,7 +434,9 @@ export default function DocumentsPage() {
       );
       await reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : t('refreshStatusFailed'));
+      const msg = e instanceof Error ? e.message : t('refreshStatusFailed');
+      setError(msg);
+      showToast(msg, 'err');
     } finally {
       setBusy(false);
     }
@@ -452,7 +459,9 @@ export default function DocumentsPage() {
       );
       await reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : t('refreshStatusFailed'));
+      const msg = e instanceof Error ? e.message : t('refreshStatusFailed');
+      setError(msg);
+      showToast(msg, 'err');
     } finally {
       setBusy(false);
     }
@@ -472,7 +481,9 @@ export default function DocumentsPage() {
       );
       await reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : t('refreshStatusFailed'));
+      const msg = e instanceof Error ? e.message : t('refreshStatusFailed');
+      setError(msg);
+      showToast(msg, 'err');
     } finally {
       setBusy(false);
     }
@@ -484,8 +495,11 @@ export default function DocumentsPage() {
     try {
       const { blob, filename } = await downloadDocumentPrintout(id);
       triggerBrowserDownload(blob, filename);
+      showToast(t('downloadPrintout'), 'ok');
     } catch (e) {
-      setError(e instanceof Error ? e.message : t('downloadFailed'));
+      const msg = e instanceof Error ? e.message : t('downloadFailed');
+      setError(msg);
+      showToast(msg, 'err');
     } finally {
       setBusy(false);
     }
@@ -499,11 +513,14 @@ export default function DocumentsPage() {
       const newId = String(created.id ?? '');
       if (!newId) {
         setError(t('returnCreditNoteFailed'));
+        showToast(t('returnCreditNoteFailed'), 'err');
         return;
       }
       router.push(`/${locale}/documents/${newId}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : t('returnCreditNoteFailed'));
+      const msg = e instanceof Error ? e.message : t('returnCreditNoteFailed');
+      setError(msg);
+      showToast(msg, 'err');
     } finally {
       setBusy(false);
     }
@@ -532,7 +549,9 @@ export default function DocumentsPage() {
       );
       await reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : t('submitFailed'));
+      const msg = e instanceof Error ? e.message : t('submitFailed');
+      setError(msg);
+      showToast(msg, 'err');
     } finally {
       setBusy(false);
     }

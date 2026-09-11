@@ -18,6 +18,13 @@
       "delete": "Delete",
       "confirm": "Confirm",
       "close": "Close"
+    },
+    "toast": {
+      "saved": "Saved",
+      "created": "Created",
+      "deleted": "Deleted",
+      "success": "Done",
+      "error": "Something went wrong"
     }
   },
   "ui": {
@@ -82,6 +89,8 @@
     "haveAccount": "Already have an account?",
     "needAccount": "Need an account?",
     "errorGeneric": "Something went wrong. Try again.",
+    "logoutUnsyncedTitle": "Unsynced drafts",
+    "logoutUnsyncedBody": "You have {count} unsynced draft(s). Sign out anyway? Offline drafts stay in this browser until cleared.",
     "loginSubtitle": "Welcome back. Sign in to continue to your account.",
     "registerSubtitle": "Create an account to start issuing documents.",
     "loginCta": "Enter the control center",

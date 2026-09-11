@@ -20,11 +20,13 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Table, type TableColumn } from '@/components/ui/table';
 import { JobStatusBadge } from '../imports/_components/job-status-badge';
 import { PackageProgress } from './_components/package-progress';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 
 export default function ExportsPage() {
   const t = useTranslations('exports');
   const tNav = useTranslations('nav');
   const locale = useLocale();
+  const toast = useMutationToast();
   const [jobs, setJobs] = useState<ExportJob[]>([]);
   const [jobsLoading, setJobsLoading] = useState(true);
   const [listFailed, setListFailed] = useState(false);
@@ -84,9 +86,11 @@ export default function ExportsPage() {
       });
       await pollUntilReady(job.id);
       reload();
+      toast.created();
     } catch (e) {
       setListFailed(false);
       setError(e instanceof Error ? e.message : t('exportFailed'));
+      toast.error(e, t('exportFailed'));
     } finally {
       setBusy(false);
     }
@@ -113,9 +117,11 @@ export default function ExportsPage() {
         setNotice(finished.errorSummary);
       }
       reload();
+      toast.created();
     } catch (e) {
       setListFailed(false);
       setError(e instanceof Error ? e.message : t('packageFailed'));
+      toast.error(e, t('packageFailed'));
     } finally {
       setBusy(false);
     }
@@ -261,7 +267,7 @@ export default function ExportsPage() {
         </Card>
       ) : null}
 
-      <section className="grid gap-token-lg md:grid-cols-2">
+      <section id="export-create" className="grid gap-token-lg md:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle>{t('local')}</CardTitle>

@@ -3,6 +3,7 @@ import { getMessages, setRequestLocale } from 'next-intl/server';
 import { notFound } from 'next/navigation';
 import { locales, type AppLocale } from '@/i18n/config';
 import { DocumentLocale } from '@/components/document-locale';
+import { LogoutUnsyncedDialog } from '@/components/auth/logout-unsynced-dialog';
 
 export function generateStaticParams() {
   return locales.map((locale) => ({ locale }));
@@ -26,7 +27,10 @@ export default async function LocaleLayout({
   return (
     <>
       <DocumentLocale locale={locale} />
-      <NextIntlClientProvider messages={messages}>{children}</NextIntlClientProvider>
+      <NextIntlClientProvider messages={messages}>
+        <LogoutUnsyncedDialog />
+        {children}
+      </NextIntlClientProvider>
     </>
   );
 }

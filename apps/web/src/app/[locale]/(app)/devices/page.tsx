@@ -22,6 +22,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Table, type TableColumn } from '@/components/ui/table';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { CopyButton } from '@/components/ui/copy-button';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 
 function deviceStatusVariant(status: string): BadgeVariant {
   const upper = status.toUpperCase();
@@ -33,9 +34,11 @@ function deviceStatusVariant(status: string): BadgeVariant {
 export default function DevicesPage() {
   const t = useTranslations('devices');
   const tNav = useTranslations('nav');
+  const tUi = useTranslations('ui');
   const locale = useLocale();
   const { tenantId } = useTenant();
   const qc = useQueryClient();
+  const toast = useMutationToast();
   const [freshCode, setFreshCode] = useState<PairingCodeCreated | null>(null);
   const [search, setSearch] = useState('');
   const [unpairId, setUnpairId] = useState<string | null>(null);
@@ -53,6 +56,10 @@ export default function DevicesPage() {
     mutationFn: createPairingCode,
     onSuccess: (data) => {
       setFreshCode(data);
+      toast.created();
+    },
+    onError: (err) => {
+      toast.error(err);
     },
   });
 
@@ -60,6 +67,10 @@ export default function DevicesPage() {
     mutationFn: (id: string) => unpairDevice(id),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['devices', tenantId] });
+      toast.saved();
+    },
+    onError: (err) => {
+      toast.error(err);
     },
   });
 
@@ -208,9 +219,11 @@ export default function DevicesPage() {
             <EmptyState
               title={search.trim() ? t('emptyFiltered') : t('empty')}
               action={
-                search.trim() || forbidden
+                forbidden
                   ? undefined
-                  : { label: t('createPairingCode'), onClick: () => createCode.mutate() }
+                  : search.trim()
+                    ? { label: tUi('filterReset'), onClick: () => setSearch('') }
+                    : { label: t('createPairingCode'), onClick: () => createCode.mutate() }
               }
             />
           }

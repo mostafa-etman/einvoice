@@ -24,6 +24,7 @@ import { Modal } from '@/components/ui/modal';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PermissionMatrix } from './_components/permission-matrix';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 
 export default function RolesPage() {
   const t = useTranslations('roles');
@@ -31,6 +32,7 @@ export default function RolesPage() {
   const locale = useLocale();
   const { tenantId } = useTenant();
   const qc = useQueryClient();
+  const toast = useMutationToast();
   const permLabels = t.raw('perm') as Record<string, string>;
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -102,9 +104,11 @@ export default function RolesPage() {
     onSuccess: async () => {
       setBanner(t('saved'));
       await invalidate();
+      toast.saved();
     },
     onError: (err) => {
       setError(err instanceof ApiError ? err.message : t('errorGeneric'));
+      toast.error(err, t('errorGeneric'));
     },
   });
 
@@ -115,9 +119,11 @@ export default function RolesPage() {
       setNewName('');
       setSelectedId(role.id);
       await invalidate();
+      toast.created();
     },
     onError: (err) => {
       setError(err instanceof ApiError ? err.message : t('errorGeneric'));
+      toast.error(err, t('errorGeneric'));
     },
   });
 
@@ -132,9 +138,11 @@ export default function RolesPage() {
     onSuccess: async () => {
       setSelectedId(null);
       await invalidate();
+      toast.deleted();
     },
     onError: (err) => {
       setError(err instanceof ApiError ? err.message : t('errorGeneric'));
+      toast.error(err, t('errorGeneric'));
     },
   });
 
@@ -143,9 +151,11 @@ export default function RolesPage() {
     onSuccess: async () => {
       setAssignMembershipId('');
       await invalidate();
+      toast.saved();
     },
     onError: (err) => {
       setError(err instanceof ApiError ? err.message : t('errorGeneric'));
+      toast.error(err, t('errorGeneric'));
     },
   });
 

@@ -33,6 +33,7 @@ import { Card } from '@/components/ui/card';
 import { FilterBar } from '@/components/ui/filter-bar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 import { REPORT_CHART_COLORS } from '../../analytics/_components/chart-colors';
 import { ReportDetailDocumentsTable } from './report-detail-table';
 
@@ -233,6 +234,8 @@ export default function ReportDetailPage() {
   const reportId = String(routeParams.reportId ?? '').toUpperCase() as ReportId;
   const t = useTranslations('reports');
   const tNav = useTranslations('nav');
+  const tRetry = useTranslations('common.actions');
+  const toast = useMutationToast();
   const locale = useLocale();
   const { tenantId } = useTenant();
 
@@ -405,8 +408,10 @@ export default function ReportDetailPage() {
     setExporting(true);
     try {
       await downloadReportExport(reportId, format, filters);
+      toast.success();
     } catch {
       setError(t('exportError'));
+      toast.error(undefined, t('exportError'));
     } finally {
       setExporting(false);
     }
@@ -983,7 +988,10 @@ export default function ReportDetailPage() {
 
           <section className="overflow-x-auto rounded-md border border-border">
             {tableRows.length === 0 ? (
-              <EmptyState title={t('emptyResults')} />
+              <EmptyState
+                title={t('emptyResults')}
+                action={{ label: tRetry('retry'), onClick: () => void load() }}
+              />
             ) : (
             <table className="min-w-full text-sm">
               <thead className="bg-surface">

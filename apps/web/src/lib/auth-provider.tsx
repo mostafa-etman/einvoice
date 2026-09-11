@@ -19,6 +19,7 @@ import {
   setSessionHint,
 } from '@/lib/session';
 import { countUnsynced } from '@/lib/offline/draft-queue';
+import { confirmLogoutIfUnsynced } from '@/lib/logout-unsynced-confirm';
 
 type AuthContextValue = {
   user: AuthUser | null;
@@ -92,11 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (tenantId) {
       const unsynced = await countUnsynced(tenantId);
       if (unsynced > 0) {
-        const ok =
-          typeof window === 'undefined' ||
-          window.confirm(
-            `You have ${unsynced} unsynced draft(s). Sign out anyway? Offline drafts stay in this browser until cleared.`,
-          );
+        const ok = await confirmLogoutIfUnsynced(unsynced);
         if (!ok) return;
       }
     }

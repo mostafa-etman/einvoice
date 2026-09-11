@@ -39,6 +39,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { TenantTable } from './_components/tenant-table';
 import { TenantDetailDrawer } from './_components/tenant-detail-drawer';
 import { ReasonDialog } from './_components/reason-dialog';
+import { useMutationToast } from '@/components/ui/use-mutation-toast';
 
 type Tab = 'tenants' | 'plans' | 'addons' | 'costs' | 'settings' | 'trials';
 
@@ -49,6 +50,8 @@ type LifecycleDialog =
 
 export default function PlatformAdminPage() {
   const t = useTranslations('admin');
+  const tUi = useTranslations('ui');
+  const toast = useMutationToast();
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>('tenants');
   const [q, setQ] = useState('');
@@ -137,7 +140,9 @@ export default function PlatformAdminPage() {
       setShowProvision(false);
       setForm({ name: '', ownerEmail: '', ownerName: '', planCode: 'BASIC', reason: '' });
       void qc.invalidateQueries({ queryKey: ['platform-admin-tenants'] });
+      toast.created();
     },
+    onError: (err) => toast.error(err),
   });
 
   const refreshTenants = () => void qc.invalidateQueries({ queryKey: ['platform-admin-tenants'] });
@@ -268,10 +273,23 @@ export default function PlatformAdminPage() {
                   <TenantTable
                     tenants={tenantsQuery.data?.items ?? []}
                     loading={tenantsQuery.isLoading}
+                    emptyAction={
+                      q.trim() || lifecycle
+                        ? {
+                            label: tUi('filterReset'),
+                            onClick: () => {
+                              setQ('');
+                              setLifecycle('');
+                            },
+                          }
+                        : { label: t('provision'), onClick: () => setShowProvision(true) }
+                    }
                     onView={(tenant) => setSelectedTenantId(tenant.id)}
                     onApprove={(tenant) => setLifecycleDialog({ kind: 'approve', tenant })}
                     onReject={(tenant) => setLifecycleDialog({ kind: 'reject', tenant })}
-                    onActivate={(tenant) => void activateTenant(tenant.id).then(refreshTenants)}
+                    onActivate={(tenant) =>
+                      void toast.track(activateTenant(tenant.id).then(refreshTenants))
+                    }
                     onSuspend={(tenant) => setLifecycleDialog({ kind: 'suspend', tenant })}
                   />
                 )}
@@ -288,9 +306,11 @@ export default function PlatformAdminPage() {
                     className="grid gap-token-md sm:grid-cols-2"
                     onSubmit={(e) => {
                       e.preventDefault();
-                      void upsertPlan(planForm).then(() => {
-                        void qc.invalidateQueries({ queryKey: ['platform-admin-plans'] });
-                      });
+                      void toast.track(
+                        upsertPlan(planForm).then(() => {
+                          void qc.invalidateQueries({ queryKey: ['platform-admin-plans'] });
+                        }),
+                      );
                     }}
                   >
                     <h2 className="col-span-full m-0 text-token-lg font-semibold">{t('newPlan')}</h2>
@@ -429,8 +449,10 @@ export default function PlatformAdminPage() {
                               variant="secondary"
                               size="sm"
                               onClick={() => {
-                                void setPlanActive(p.code, !p.isActive).then(() =>
-                                  qc.invalidateQueries({ queryKey: ['platform-admin-plans'] }),
+                                void toast.track(
+                                  setPlanActive(p.code, !p.isActive).then(() =>
+                                    qc.invalidateQueries({ queryKey: ['platform-admin-plans'] }),
+                                  ),
                                 );
                               }}
                             >
@@ -455,9 +477,11 @@ export default function PlatformAdminPage() {
                     className="grid gap-token-md sm:grid-cols-2"
                     onSubmit={(e) => {
                       e.preventDefault();
-                      void upsertAddon(addonForm).then(() => {
-                        void qc.invalidateQueries({ queryKey: ['platform-admin-addons'] });
-                      });
+                      void toast.track(
+                        upsertAddon(addonForm).then(() => {
+                          void qc.invalidateQueries({ queryKey: ['platform-admin-addons'] });
+                        }),
+                      );
                     }}
                   >
                     <h2 className="col-span-full m-0 text-token-lg font-semibold">{t('tabAddons')}</h2>
@@ -587,8 +611,10 @@ export default function PlatformAdminPage() {
                           row.points,
                       ),
                     }));
-                    void setDocumentCosts(items).then(() =>
-                      qc.invalidateQueries({ queryKey: ['platform-admin-costs'] }),
+                    void toast.track(
+                      setDocumentCosts(items).then(() =>
+                        qc.invalidateQueries({ queryKey: ['platform-admin-costs'] }),
+                      ),
                     );
                   }}
                 >
@@ -640,7 +666,8 @@ export default function PlatformAdminPage() {
                   onSubmit={(e) => {
                     e.preventDefault();
                     const formEl = e.currentTarget;
-                    void updateSettings({
+                    void toast.track(
+                      updateSettings({
                       autoActivateSubCompanies: (formEl.elements.namedItem('autoSubs') as HTMLInputElement)
                         .checked,
                       supportWhatsappE164: (formEl.elements.namedItem('waE164') as HTMLInputElement).value,
@@ -653,7 +680,8 @@ export default function PlatformAdminPage() {
                       etaTutorialVideoUrl: (
                         formEl.elements.namedItem('etaTutorialVideoUrl') as HTMLInputElement
                       ).value,
-                    }).then(() => qc.invalidateQueries({ queryKey: ['platform-admin-settings'] }));
+                    }).then(() => qc.invalidateQueries({ queryKey: ['platform-admin-settings'] })),
+                    );
                   }}
                 >
                   <Checkbox name="autoSubs" defaultChecked={settingsQuery.data.autoActivateSubCompanies}>
@@ -750,7 +778,10 @@ export default function PlatformAdminPage() {
                     ))}
                   </ul>
                 ) : !trialRegsQuery.isLoading ? (
-                  <EmptyState title={t('noTrialTaxRegs')} />
+                  <EmptyState
+                    title={t('noTrialTaxRegs')}
+                    action={{ label: t('retryLoad'), onClick: () => void trialRegsQuery.refetch() }}
+                  />
                 ) : null}
               </div>
             ),
@@ -776,7 +807,7 @@ export default function PlatformAdminPage() {
           if (lifecycleDialog?.kind !== 'approve') return;
           const id = lifecycleDialog.tenant.id;
           setLifecycleDialog(null);
-          void approveTenant(id, 'ui').then(refreshTenants);
+          void toast.track(approveTenant(id, 'ui').then(refreshTenants));
         }}
       />
       <ReasonDialog
@@ -791,7 +822,7 @@ export default function PlatformAdminPage() {
           if (lifecycleDialog?.kind !== 'reject') return;
           const id = lifecycleDialog.tenant.id;
           setLifecycleDialog(null);
-          void rejectTenant(id, reason).then(refreshTenants);
+          void toast.track(rejectTenant(id, reason).then(refreshTenants));
         }}
       />
       <ReasonDialog
@@ -806,7 +837,7 @@ export default function PlatformAdminPage() {
           if (lifecycleDialog?.kind !== 'suspend') return;
           const id = lifecycleDialog.tenant.id;
           setLifecycleDialog(null);
-          void suspendTenant(id, reason).then(refreshTenants);
+          void toast.track(suspendTenant(id, reason).then(refreshTenants));
         }}
       />
       <ReasonDialog
@@ -821,8 +852,10 @@ export default function PlatformAdminPage() {
           if (!resetTax) return;
           const tax = resetTax;
           setResetTax(null);
-          void resetTrialTaxRegistration(tax, reason || undefined).then(() =>
-            qc.invalidateQueries({ queryKey: ['platform-admin-trial-tax-regs'] }),
+          void toast.track(
+            resetTrialTaxRegistration(tax, reason || undefined).then(() =>
+              qc.invalidateQueries({ queryKey: ['platform-admin-trial-tax-regs'] }),
+            ),
           );
         }}
       />
