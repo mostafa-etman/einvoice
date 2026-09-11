@@ -9,10 +9,11 @@ export type InputProps = InputHTMLAttributes<HTMLInputElement> & {
   hint?: ReactNode;
   error?: ReactNode;
   iconStart?: ReactNode;
+  iconEnd?: ReactNode;
 };
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
-  { label, hint, error, iconStart, required, id, className, ...props },
+  { label, hint, error, iconStart, iconEnd, required, id, className, ...props },
   ref,
 ) {
   const autoId = useId();
@@ -20,7 +21,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
   const errorId = error ? `${inputId}-error` : undefined;
 
   const control = (
-    <div className={cn('relative', iconStart && 'block')}>
+    <div className={cn('relative', (iconStart || iconEnd) && 'block')}>
       {iconStart ? (
         <span className="pointer-events-none absolute start-token-sm top-1/2 -translate-y-1/2 text-foreground-subtle">
           {iconStart}
@@ -39,11 +40,17 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
           'focus:border-brand focus:shadow-ring-input focus:outline-none',
           'disabled:cursor-not-allowed disabled:opacity-50',
           iconStart && 'ps-token-xl',
+          iconEnd && 'pe-token-xl',
           error && 'border-danger',
           className,
         )}
         {...props}
       />
+      {iconEnd ? (
+        <span className="absolute end-token-sm top-1/2 -translate-y-1/2 text-foreground-subtle">
+          {iconEnd}
+        </span>
+      ) : null}
     </div>
   );
 

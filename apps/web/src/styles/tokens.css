@@ -95,6 +95,30 @@
   --size-sidebar-collapsed: 4.5rem;
   --size-avatar: 2.25rem;
   --size-nav-icon: 1.125rem;
+  --size-auth-form: 480px;
+  --size-auth-form-wide: 42rem;
+  --size-hero-blob: 25rem;
+  --size-hero-min: 43.75rem;
+  --size-hero-min-sm: 25rem;
+  --space-hero-y: 3rem;
+  --space-hero-x: 3.5rem;
+  --space-hero-y-sm: 2rem;
+  --space-hero-x-sm: 1.5rem;
+  --space-auth-form-y: 3.5rem;
+  --space-auth-form-x: 3rem;
+  --space-auth-form-y-sm: 2rem;
+  --space-auth-form-x-sm: 1.5rem;
+  --font-size-hero-title: 2.5rem;
+  --font-size-hero-title-sm: 1.75rem;
+  --font-size-login-title: 1.75rem;
+  --font-size-hero-stat: 1.375rem;
+  --font-size-hero-chip: 0.6875rem;
+  --font-size-hero-tag: 0.75rem;
+  --color-hero-chip-bg: rgba(255, 255, 255, 0.06);
+  --color-hero-chip-border: rgba(255, 255, 255, 0.1);
+  --color-hero-stat-bg: rgba(255, 255, 255, 0.04);
+  --color-hero-tag-bg: rgba(20, 184, 166, 0.15);
+  --color-hero-tag-border: rgba(20, 184, 166, 0.3);
   --space-nav-y: 0.5rem;
   --space-nav-x: 0.75rem;
   --space-nav-gap: 0.125rem;
@@ -162,6 +186,7 @@
   --gradient-hero-text: linear-gradient(90deg, #14b8a6, #38bdf8);
   --gradient-hero-glow: radial-gradient(circle at 20% 20%, rgba(20, 184, 166, 0.15), transparent 50%),
     radial-gradient(circle at 80% 80%, rgba(47, 111, 237, 0.2), transparent 50%);
+  --gradient-hero-blob: radial-gradient(circle, rgba(20, 184, 166, 0.15), transparent 70%);
   --gradient-skeleton: linear-gradient(
     90deg,
     var(--color-surface-alt),
@@ -207,4 +232,36 @@ body {
   background: var(--color-background);
   color: var(--color-foreground);
   font-family: var(--font-sans);
+}
+
+.auth-hero {
+  position: relative;
+  overflow: hidden;
+  background-image: var(--gradient-hero);
+  color: var(--color-on-dark);
+}
+.auth-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: var(--gradient-hero-glow);
+  pointer-events: none;
+}
+.auth-hero::after {
+  content: "";
+  position: absolute;
+  inset-inline-end: calc(var(--size-hero-blob) / -4);
+  bottom: calc(var(--size-hero-blob) / -4);
+  width: var(--size-hero-blob);
+  height: var(--size-hero-blob);
+  border-radius: 50%;
+  background-image: var(--gradient-hero-blob);
+  pointer-events: none;
+}
+.auth-hero-grad {
+  background-image: var(--gradient-hero-text);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
 }

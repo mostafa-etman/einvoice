@@ -12,6 +12,9 @@ import { fetchCatalog, type PlanView } from '@/lib/api/billing';
 import { ApiError } from '@/lib/api/client';
 import { trialAlreadyUsedMessage } from '@/lib/api/trial-already-used';
 import { PlanCards, PromoNote } from '@/components/billing/plan-cards';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { BuildingIcon } from '@/components/auth/auth-icons';
 
 const schema = z.object({
   name: z.string().min(2),
@@ -34,10 +37,12 @@ export default function OnboardingPage() {
     handleSubmit,
     getValues,
     trigger,
-    formState: { isSubmitting },
+    formState: { isSubmitting, errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
   });
+  const { ref: nameRef, ...nameField } = register('name');
+  const { ref: taxRef, ...taxField } = register('taxRegistrationNumber');
 
   const busy = isSubmitting || choosing;
 
@@ -83,49 +88,44 @@ export default function OnboardingPage() {
   });
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-5xl flex-col justify-center px-token-lg py-token-xl">
-      <h1 className="font-display text-token-xl text-brand">{t('onboardingTitle')}</h1>
-      <p className="mt-token-sm text-token-sm text-foreground/70">{t('trialHint')}</p>
-      <form className="mt-token-lg flex flex-col gap-token-md" onSubmit={onSubmit}>
-        <label className="text-token-sm">
-          {t('tenantName')}
-          <input
-            className="mt-token-xs w-full rounded border border-border bg-surface px-token-sm py-token-sm"
-            type="text"
-            {...register('name')}
-          />
-        </label>
-        <label className="text-token-sm">
-          {t('taxRegistrationNumber')}
-          <input
-            className="mt-token-xs w-full rounded border border-border bg-surface px-token-sm py-token-sm"
-            type="text"
-            inputMode="numeric"
-            dir="ltr"
-            autoComplete="off"
-            {...register('taxRegistrationNumber')}
-          />
-          <span className="mt-token-xs block text-token-xs text-foreground/70">
-            {t('taxRegistrationHint')}
-          </span>
-        </label>
+    <main>
+      <h2 className="text-login-title font-bold text-foreground">{t('onboardingTitle')}</h2>
+      <p className="mt-token-sm text-token-sm text-foreground-muted">{t('trialHint')}</p>
+      <form className="mt-token-lg flex flex-col" onSubmit={onSubmit}>
+        <Input
+          label={t('tenantName')}
+          type="text"
+          error={errors.name ? t('fillCompanyFirst') : undefined}
+          iconStart={<BuildingIcon />}
+          {...nameField}
+          ref={nameRef}
+        />
+        <Input
+          label={t('taxRegistrationNumber')}
+          type="text"
+          inputMode="numeric"
+          dir="ltr"
+          autoComplete="off"
+          hint={t('taxRegistrationHint')}
+          {...taxField}
+          ref={taxRef}
+        />
         {error ? (
-          <p className="text-token-sm text-red-700" role="alert">
+          <p
+            className="mb-token-md rounded-md border border-danger/30 bg-danger-muted px-token-sm py-token-sm text-token-sm text-danger"
+            role="alert"
+          >
             {error}
           </p>
         ) : null}
-        <button
-          type="submit"
-          disabled={busy}
-          className="rounded bg-brand px-token-md py-token-sm text-white disabled:opacity-60"
-        >
+        <Button type="submit" size="lg" block loading={busy}>
           {tb('startFreeTrial')}
-        </button>
+        </Button>
       </form>
 
-      <section className="mt-token-xl space-y-3">
-        <h2 className="text-lg font-medium">{t('choosePlan')}</h2>
-        <p className="text-sm text-foreground/70">{t('planBranchHint')}</p>
+      <section className="mt-token-xl space-y-token-sm">
+        <h2 className="text-token-lg font-medium text-foreground">{t('choosePlan')}</h2>
+        <p className="text-token-sm text-foreground-muted">{t('planBranchHint')}</p>
         {catalogQuery.data ? <PromoNote catalog={catalogQuery.data} /> : null}
         <PlanCards
           plans={catalogQuery.data?.plans ?? []}

@@ -9,6 +9,10 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-provider';
 import { establishTenantContext } from '@/lib/establish-tenant-context';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { AuthPasswordField } from '@/components/auth/auth-password-field';
+import { ArrowIcon, MailIcon } from '@/components/auth/auth-icons';
 
 const schema = z.object({
   email: z.string().email(),
@@ -26,8 +30,10 @@ export default function LoginPage() {
   const {
     register,
     handleSubmit,
-    formState: { isSubmitting },
+    formState: { isSubmitting, errors },
   } = useForm<FormValues>({ resolver: zodResolver(schema) });
+  const { ref: emailRef, ...emailField } = register('email');
+  const passwordField = register('password');
 
   useEffect(() => {
     if (ready && user) {
@@ -55,39 +61,56 @@ export default function LoginPage() {
   });
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-token-lg">
-      <h1 className="font-display text-token-xl text-brand">{t('loginTitle')}</h1>
-      <form className="mt-token-lg flex flex-col gap-token-md" onSubmit={onSubmit}>
-        <label className="text-token-sm">
-          {t('email')}
-          <input
-            className="mt-token-xs w-full rounded border border-border bg-surface px-token-sm py-token-sm"
-            type="email"
-            autoComplete="email"
-            {...register('email')}
-          />
-        </label>
-        <label className="text-token-sm">
-          {t('password')}
-          <input
-            className="mt-token-xs w-full rounded border border-border bg-surface px-token-sm py-token-sm"
-            type="password"
-            autoComplete="current-password"
-            {...register('password')}
-          />
-        </label>
-        {error ? <p className="text-token-sm text-red-700">{error}</p> : null}
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="rounded bg-brand px-token-md py-token-sm text-white disabled:opacity-60"
-        >
-          {t('submitLogin')}
-        </button>
+    <main>
+      <h2 className="text-login-title font-bold text-foreground">{t('loginTitle')}</h2>
+      <p className="mb-token-xl mt-token-sm text-token-sm text-foreground-muted">{t('loginSubtitle')}</p>
+      <form className="flex flex-col" onSubmit={onSubmit}>
+        <Input
+          label={t('email')}
+          type="email"
+          autoComplete="email"
+          error={errors.email ? t('invalidEmail') : undefined}
+          iconStart={<MailIcon />}
+          {...emailField}
+          ref={emailRef}
+        />
+        <AuthPasswordField
+          registration={passwordField}
+          error={errors.password ? t('passwordTooShort') : undefined}
+          autoComplete="current-password"
+        />
+        <div className="mb-token-lg flex items-center justify-end text-token-sm">
+          <button
+            type="button"
+            disabled
+            className="cursor-not-allowed text-brand/50"
+            title={t('forgotPasswordUnavailable')}
+            aria-label={`${t('forgotPassword')} — ${t('forgotPasswordUnavailable')}`}
+          >
+            {t('forgotPassword')}
+          </button>
+        </div>
+        {error ? (
+          <p
+            className="mb-token-md rounded-md border border-danger/30 bg-danger-muted px-token-sm py-token-sm text-token-sm text-danger"
+            role="alert"
+          >
+            {error}
+          </p>
+        ) : null}
+        <Button type="submit" size="lg" block loading={isSubmitting} iconEnd={<ArrowIcon />}>
+          {t('loginCta')}
+        </Button>
+        <p className="mt-token-lg text-center text-token-sm text-foreground-muted">
+          {t.rich('securityFootnote', {
+            tls: (chunks) => <strong className="text-foreground">{chunks}</strong>,
+            pdpl: (chunks) => <strong className="text-foreground">{chunks}</strong>,
+          })}
+        </p>
       </form>
-      <p className="mt-token-md text-token-sm">
+      <p className="mt-token-md text-center text-token-sm text-foreground-muted">
         {t('needAccount')}{' '}
-        <Link className="text-brand underline" href={`/${locale}/register`}>
+        <Link className="font-medium text-brand" href={`/${locale}/register`}>
           {t('submitRegister')}
         </Link>
       </p>
