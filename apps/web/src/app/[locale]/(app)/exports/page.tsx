@@ -1,6 +1,6 @@
 'use client';
 
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useCallback, useEffect, useState } from 'react';
 import {
   createEtaPackageExport,
@@ -8,56 +8,26 @@ import {
   downloadExportArtifact,
   getExportJob,
   listExportJobs,
-  packageStepIndex,
-  PACKAGE_STEPS,
   type ExportJob,
 } from '@/lib/api/exports';
-
-function PackageProgress({
-  job,
-  downloaded,
-  label,
-}: {
-  job: ExportJob;
-  downloaded: boolean;
-  label: (key: string) => string;
-}) {
-  const stepLabelKeys: Record<string, string> = {
-    REQUESTED: 'stepRequested',
-    IN_PROGRESS: 'stepInProgress',
-    READY: 'stepReady',
-    DOWNLOADED: 'stepDownloaded',
-  };
-  const reached = packageStepIndex(job, downloaded);
-  const failed = reached < 0;
-  return (
-    <span
-      className="flex flex-wrap items-center gap-token-xs"
-      data-testid={`package-progress-${job.id}`}
-    >
-      {PACKAGE_STEPS.map((step, index) => {
-        const done = !failed && index <= reached;
-        return (
-          <span
-            key={step}
-            aria-current={done && index === reached ? 'step' : undefined}
-            className={
-              done
-                ? 'rounded-full bg-brand px-token-sm py-token-xs text-token-xs text-white'
-                : 'rounded-full border border-border px-token-sm py-token-xs text-token-xs text-foreground/60'
-            }
-          >
-            {label(stepLabelKeys[step]!)}
-          </span>
-        );
-      })}
-    </span>
-  );
-}
+import { PageHeader } from '@/components/ui/page-header';
+import { Breadcrumbs } from '@/components/ui/breadcrumbs';
+import { Button } from '@/components/ui/button';
+import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Table, type TableColumn } from '@/components/ui/table';
+import { JobStatusBadge } from '../imports/_components/job-status-badge';
+import { PackageProgress } from './_components/package-progress';
 
 export default function ExportsPage() {
   const t = useTranslations('exports');
+  const tNav = useTranslations('nav');
+  const locale = useLocale();
   const [jobs, setJobs] = useState<ExportJob[]>([]);
+  const [jobsLoading, setJobsLoading] = useState(true);
+  const [listFailed, setListFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [downloaded, setDownloaded] = useState<Record<string, boolean>>({});
@@ -70,13 +40,20 @@ export default function ExportsPage() {
   const [to, setTo] = useState('');
 
   const reload = useCallback(() => {
-    listExportJobs()
-      .then((r) => setJobs(r.items))
-      .catch((e: Error) => setError(e.message));
+    return listExportJobs()
+      .then((r) => {
+        setJobs(r.items);
+        setListFailed(false);
+      })
+      .catch((e: Error) => {
+        setListFailed(true);
+        setError(e.message);
+      });
   }, []);
 
   useEffect(() => {
-    reload();
+    setJobsLoading(true);
+    void reload().finally(() => setJobsLoading(false));
   }, [reload]);
 
   const toggleFormat = (f: 'CSV' | 'XLSX' | 'PDF' | 'JSON') => {
@@ -108,6 +85,7 @@ export default function ExportsPage() {
       await pollUntilReady(job.id);
       reload();
     } catch (e) {
+      setListFailed(false);
       setError(e instanceof Error ? e.message : t('exportFailed'));
     } finally {
       setBusy(false);
@@ -116,6 +94,7 @@ export default function ExportsPage() {
 
   const startPackage = async () => {
     if (!from || !to) {
+      setListFailed(false);
       setError(t('rangeRequired'));
       return;
     }
@@ -135,6 +114,7 @@ export default function ExportsPage() {
       }
       reload();
     } catch (e) {
+      setListFailed(false);
       setError(e instanceof Error ? e.message : t('packageFailed'));
     } finally {
       setBusy(false);
@@ -155,153 +135,213 @@ export default function ExportsPage() {
       URL.revokeObjectURL(url);
       setDownloaded((prev) => ({ ...prev, [job.id]: true }));
     } catch (e) {
+      setListFailed(false);
       setError(e instanceof Error ? e.message : t('downloadFailed'));
     }
   };
 
+  const columns: TableColumn<ExportJob>[] = [
+    {
+      id: 'kind',
+      header: t('kind'),
+      cell: (j) => (
+        <span className="font-en" dir="ltr">
+          {j.kind}
+        </span>
+      ),
+    },
+    {
+      id: 'status',
+      header: t('status'),
+      cell: (j) => (
+        <div className="space-y-token-2xs">
+          <JobStatusBadge status={j.status} />
+          {j.kind === 'ETA_PACKAGE' ? (
+            <PackageProgress
+              job={j}
+              downloaded={Boolean(downloaded[j.id])}
+              label={(key) => t(key)}
+            />
+          ) : null}
+          {(j.errorSummary || j.etaPackage?.errorSummary) ? (
+            <p className="m-0 text-token-xs text-danger" role="alert">
+              {j.errorSummary || j.etaPackage?.errorSummary}
+            </p>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      id: 'download',
+      header: t('download'),
+      align: 'end',
+      cell: (j) => (
+        <span className="flex flex-wrap justify-end gap-token-sm">
+          {j.status === 'READY' && j.kind === 'LOCAL'
+            ? (['csv', 'xlsx', 'pdf', 'json'] as const).map((f) => (
+                <Button
+                  key={f}
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  onClick={() => void download(j, f)}
+                >
+                  {t('download')}{' '}
+                  <span className="font-en" dir="ltr">
+                    {f.toUpperCase()}
+                  </span>
+                </Button>
+              ))
+            : null}
+          {j.status === 'READY' && j.kind === 'ETA_PACKAGE' ? (
+            <Button type="button" variant="link" size="sm" onClick={() => void download(j)}>
+              {t('download')}{' '}
+              <span className="font-en" dir="ltr">
+                ZIP
+              </span>
+            </Button>
+          ) : null}
+        </span>
+      ),
+    },
+  ];
+
   return (
-    <main className="mx-auto max-w-5xl px-token-lg py-token-xl">
-      <h1 className="font-display text-token-2xl text-brand">{t('title')}</h1>
-      <p className="mt-token-sm text-token-md text-foreground/80">{t('intro')}</p>
+    <div className="space-y-token-lg" aria-busy={busy || jobsLoading || undefined}>
+      <PageHeader
+        breadcrumbs={
+          <Breadcrumbs
+            items={[
+              { label: tNav('home'), href: `/${locale}` },
+              { label: t('title') },
+            ]}
+          />
+        }
+        title={t('title')}
+        subtitle={t('intro')}
+        actions={
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setError(null);
+              setJobsLoading(true);
+              void reload().finally(() => setJobsLoading(false));
+            }}
+          >
+            {t('refresh')}
+          </Button>
+        }
+      />
 
-      {error && (
-        <p
-          role="alert"
-          className="mt-token-md rounded border border-danger/40 bg-danger/10 px-token-md py-token-sm text-token-sm text-danger"
-        >
-          {error}
-        </p>
-      )}
-      {notice && (
-        <p
-          role="status"
-          className="mt-token-md rounded border border-border bg-brand-muted px-token-md py-token-sm text-token-sm"
-        >
-          {notice}
-        </p>
-      )}
+      {error ? (
+        <Card className="border-danger" role="alert">
+          <p className="m-0 text-token-sm text-danger">{error}</p>
+          {listFailed ? (
+            <Button
+              className="mt-token-sm"
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setError(null);
+                setListFailed(false);
+                setJobsLoading(true);
+                void reload().finally(() => setJobsLoading(false));
+              }}
+            >
+              {t('retryLoad')}
+            </Button>
+          ) : null}
+        </Card>
+      ) : null}
+      {notice ? (
+        <Card role="status">
+          <p className="m-0 text-token-sm">{notice}</p>
+        </Card>
+      ) : null}
 
-      <section className="mt-token-xl grid gap-token-lg md:grid-cols-2">
-        <div className="rounded border border-border bg-surface p-token-lg">
-          <h2 className="font-display text-token-xl">{t('local')}</h2>
-          <div className="mt-token-md flex flex-wrap gap-token-sm">
-            {(['CSV', 'XLSX', 'PDF', 'JSON'] as const).map((f) => (
-              <label key={f} className="flex items-center gap-token-xs text-token-sm">
-                <input
-                  type="checkbox"
+      <section className="grid gap-token-lg md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>{t('local')}</CardTitle>
+          </CardHeader>
+          <fieldset className="m-0 border-0 p-0">
+            <legend className="mb-token-sm text-token-sm font-medium text-foreground">
+              {t('formats')}
+            </legend>
+            <div className="flex flex-wrap gap-token-md">
+              {(['CSV', 'XLSX', 'PDF', 'JSON'] as const).map((f) => (
+                <Checkbox
+                  key={f}
                   checked={formats.includes(f)}
                   onChange={() => toggleFormat(f)}
+                  label={
+                    <span className="font-en" dir="ltr">
+                      {f}
+                    </span>
+                  }
                 />
-                {f}
-              </label>
-            ))}
-          </div>
+              ))}
+            </div>
+          </fieldset>
           <div className="mt-token-md grid gap-token-sm sm:grid-cols-2">
-            <label className="text-token-sm">
-              {t('from')}
-              <input
-                type="date"
-                className="mt-token-xs w-full rounded border border-border bg-background px-token-sm py-token-xs"
-                value={from}
-                onChange={(e) => setFrom(e.target.value)}
-              />
-            </label>
-            <label className="text-token-sm">
-              {t('to')}
-              <input
-                type="date"
-                className="mt-token-md w-full rounded border border-border bg-background px-token-sm py-token-xs sm:mt-token-xs"
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-              />
-            </label>
+            <Input
+              type="date"
+              label={t('from')}
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+            />
+            <Input
+              type="date"
+              label={t('to')}
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+            />
           </div>
-          <button
+          <Button
             type="button"
+            className="mt-token-md"
             disabled={busy || formats.length === 0}
-            className="mt-token-md rounded bg-brand px-token-md py-token-xs text-token-sm text-white disabled:opacity-50"
             onClick={() => void startLocal()}
           >
             {t('createLocal')}
-          </button>
-        </div>
+          </Button>
+        </Card>
 
-        <div className="rounded border border-border bg-surface p-token-lg">
-          <h2 className="font-display text-token-xl">{t('etaPackage')}</h2>
-          <p className="mt-token-sm text-token-sm text-foreground/70">
-            Request → Get Package Requests → download zip
-          </p>
-          <button
+        <Card>
+          <CardHeader>
+            <div>
+              <CardTitle>{t('etaPackage')}</CardTitle>
+              <CardDescription>{t('etaPackageHelp')}</CardDescription>
+            </div>
+          </CardHeader>
+          <Button
             type="button"
+            variant="secondary"
             disabled={busy || !from || !to}
-            className="mt-token-md rounded border border-border px-token-md py-token-xs text-token-sm hover:bg-brand-muted disabled:opacity-50"
             onClick={() => void startPackage()}
           >
             {t('createPackage')}
-          </button>
-        </div>
+          </Button>
+        </Card>
       </section>
 
-      <section className="mt-token-xl">
-        <div className="flex items-center gap-token-md">
-          <h2 className="font-display text-token-xl">{t('history')}</h2>
-          <button type="button" className="text-token-sm underline" onClick={reload}>
-            {t('refresh')}
-          </button>
-        </div>
-        {jobs.length === 0 ? (
-          <p className="mt-token-sm text-token-sm text-foreground/70">{t('noJobs')}</p>
-        ) : (
-          <ul className="mt-token-md divide-y divide-border rounded border border-border">
-            {jobs.map((j) => (
-              <li
-                key={j.id}
-                className="flex flex-wrap items-center gap-token-md px-token-md py-token-sm text-token-sm"
-              >
-                <span>{t('kind')}: {j.kind}</span>
-                <span>
-                  {t('status')}: {j.status}
-                </span>
-                {j.kind === 'ETA_PACKAGE' && (
-                  <PackageProgress
-                    job={j}
-                    downloaded={Boolean(downloaded[j.id])}
-                    label={(key) => t(key)}
-                  />
-                )}
-                {j.status === 'READY' && j.kind === 'LOCAL' && (
-                  <span className="flex gap-token-sm">
-                    {(['csv', 'xlsx', 'pdf', 'json'] as const).map((f) => (
-                      <button
-                        key={f}
-                        type="button"
-                        className="underline"
-                        onClick={() => void download(j, f)}
-                      >
-                        {t('download')} {f.toUpperCase()}
-                      </button>
-                    ))}
-                  </span>
-                )}
-                {j.status === 'READY' && j.kind === 'ETA_PACKAGE' && (
-                  <button
-                    type="button"
-                    className="underline"
-                    onClick={() => void download(j)}
-                  >
-                    {t('download')} ZIP
-                  </button>
-                )}
-                {(j.errorSummary || j.etaPackage?.errorSummary) && (
-                  <span className="text-danger">
-                    {j.errorSummary || j.etaPackage?.errorSummary}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
+      <section>
+        <h2 className="m-0 mb-token-md text-token-lg font-semibold text-foreground">
+          {t('history')}
+        </h2>
+        {listFailed && !jobsLoading ? null : (
+          <Table
+            caption={t('listCaption')}
+            columns={columns}
+            rows={jobs}
+            getRowId={(j) => j.id}
+            loading={jobsLoading}
+            empty={<EmptyState title={t('noJobs')} />}
+          />
         )}
       </section>
-    </main>
+    </div>
   );
 }

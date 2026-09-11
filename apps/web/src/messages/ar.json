@@ -975,7 +975,22 @@
     "sourceColumn": "عمود المصدر",
     "uploadFailed": "فشل الرفع",
     "validateFailed": "فشل التحقق",
-    "runFailed": "فشل تشغيل الاستيراد"
+    "runFailed": "فشل تشغيل الاستيراد",
+    "retryLoad": "إعادة المحاولة",
+    "errorGeneric": "حدث خطأ. حاول مرة أخرى.",
+    "listCaption": "عمليات الاستيراد",
+    "rowsCaption": "نتائج صفوف الاستيراد",
+    "dropHint": "أسقط ملف CSV أو XLSX هنا، أو اختر ملفاً.",
+    "fileTypesHint": "CSV أو Excel (XLSX)",
+    "stepUpload": "رفع",
+    "stepMapping": "تعيين الأعمدة",
+    "stepResults": "تحقق وتشغيل",
+    "typeI": "فاتورة (I)",
+    "typeC": "إشعار دائن (C)",
+    "typeD": "إشعار مدين (D)",
+    "typeEI": "فاتورة تصدير (EI)",
+    "typeEC": "إشعار دائن تصدير (EC)",
+    "typeED": "إشعار مدين تصدير (ED)"
   },
   "exports": {
     "title": "مركز التصدير",
@@ -1002,7 +1017,11 @@
     "rangeRequired": "اختر تاريخ البداية والنهاية قبل طلب حزمة المصلحة.",
     "packageFailed": "فشل طلب حزمة المصلحة.",
     "downloadFailed": "فشل التنزيل. حاول مرة أخرى أو أعد تشغيل التصدير.",
-    "exportFailed": "فشل التصدير"
+    "exportFailed": "فشل التصدير",
+    "retryLoad": "إعادة المحاولة",
+    "errorGeneric": "حدث خطأ. حاول مرة أخرى.",
+    "listCaption": "عمليات التصدير",
+    "etaPackageHelp": "طلب → متابعة الطلبات → تنزيل zip"
   },
   "devices": {
     "title": "أجهزة التوقيع",

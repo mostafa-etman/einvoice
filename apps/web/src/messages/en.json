@@ -974,7 +974,22 @@
     "sourceColumn": "Source column",
     "uploadFailed": "Upload failed",
     "validateFailed": "Validation failed",
-    "runFailed": "Import run failed"
+    "runFailed": "Import run failed",
+    "retryLoad": "Retry",
+    "errorGeneric": "Something went wrong. Try again.",
+    "listCaption": "Import jobs",
+    "rowsCaption": "Import row results",
+    "dropHint": "Drop a CSV or XLSX file here, or choose a file.",
+    "fileTypesHint": "CSV or Excel (XLSX)",
+    "stepUpload": "Upload",
+    "stepMapping": "Map columns",
+    "stepResults": "Validate & run",
+    "typeI": "Invoice (I)",
+    "typeC": "Credit note (C)",
+    "typeD": "Debit note (D)",
+    "typeEI": "Export invoice (EI)",
+    "typeEC": "Export credit (EC)",
+    "typeED": "Export debit (ED)"
   },
   "exports": {
     "title": "Export center",
@@ -1001,7 +1016,11 @@
     "rangeRequired": "Choose a From and To date before requesting an ETA package.",
     "packageFailed": "The ETA package request failed.",
     "downloadFailed": "The download failed. Try again or re-run the export.",
-    "exportFailed": "Export failed"
+    "exportFailed": "Export failed",
+    "retryLoad": "Retry",
+    "errorGeneric": "Something went wrong. Try again.",
+    "listCaption": "Export jobs",
+    "etaPackageHelp": "Request -> Get Package Requests -> download zip"
   },
   "devices": {
     "title": "Signing devices",
