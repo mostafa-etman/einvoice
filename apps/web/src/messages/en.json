@@ -1229,6 +1229,8 @@
       "lineTaxes": "Line taxes",
       "lineTotal": "Line total",
       "noLines": "No line items",
+      "expandRow": "Expand document {id}",
+      "collapseRow": "Collapse document {id}",
       "empty": "No documents in this period",
       "loadMore": "Load more",
       "search": "Search",

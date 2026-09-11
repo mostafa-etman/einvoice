@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { triggerBrowserDownload } from '@/lib/api/submissions';
+import { Button } from '@/components/ui/button';
+import { Modal } from '@/components/ui/modal';
 
 type Props = {
   open: boolean;
@@ -70,56 +72,48 @@ export function LocalPdfPreviewModal({
     };
   }, [open]);
 
-  if (!open) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-token-md"
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-      onClick={onClose}
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={title}
+      size="xl"
+      className="flex max-h-[90vh] max-w-5xl flex-col overflow-hidden"
+      footer={
+        <>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={!blob}
+            onClick={() => {
+              if (blob) triggerBrowserDownload(blob, filename);
+            }}
+          >
+            {downloadLabel}
+          </Button>
+          <Button type="button" variant="ghost" onClick={onClose}>
+            {closeLabel}
+          </Button>
+        </>
+      }
     >
-      <div
-        className="flex h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded border border-border bg-surface shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex flex-wrap items-center justify-between gap-token-sm border-b border-border px-token-md py-token-sm">
-          <h2 className="font-medium text-brand">{title}</h2>
-          <div className="flex flex-wrap gap-token-sm">
-            <button
-              type="button"
-              className="rounded border border-border px-token-sm py-token-xs text-token-sm disabled:opacity-50"
-              disabled={!blob}
-              onClick={() => {
-                if (blob) triggerBrowserDownload(blob, filename);
-              }}
-            >
-              {downloadLabel}
-            </button>
-            <button
-              type="button"
-              className="rounded border border-border px-token-sm py-token-xs text-token-sm"
-              onClick={onClose}
-            >
-              {closeLabel}
-            </button>
-          </div>
-        </div>
-        <div className="min-h-0 flex-1 bg-background">
-          {loading ? (
-            <p className="p-token-md text-token-sm text-foreground/70">{loadingLabel}</p>
-          ) : error ? (
-            <p className="p-token-md text-token-sm text-danger">{error}</p>
-          ) : url ? (
-            <iframe
-              title={title}
-              src={url}
-              className="h-full w-full border-0"
-            />
-          ) : null}
-        </div>
+      <div className="h-[70vh] min-h-0 overflow-hidden bg-background">
+        {loading ? (
+          <p
+            className="p-token-md text-token-sm text-foreground-muted"
+            role="status"
+            aria-busy="true"
+          >
+            {loadingLabel}
+          </p>
+        ) : error ? (
+          <p className="p-token-md text-token-sm text-danger" role="alert">
+            {error}
+          </p>
+        ) : url ? (
+          <iframe title={title} src={url} className="h-full w-full border-0" />
+        ) : null}
       </div>
-    </div>
+    </Modal>
   );
 }

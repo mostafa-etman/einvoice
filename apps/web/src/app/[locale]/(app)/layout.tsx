@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useLocale } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { AppShell } from '@/components/shell/app-shell';
 import { PendingActivationScreen } from '@/components/shell/pending-activation-screen';
@@ -13,6 +13,7 @@ export default function AppGroupLayout({ children }: { children: React.ReactNode
   const { memberships, tenantId } = useTenant();
   const locale = useLocale();
   const router = useRouter();
+  const tStates = useTranslations('common.states');
 
   useEffect(() => {
     if (ready && !user) {
@@ -22,8 +23,12 @@ export default function AppGroupLayout({ children }: { children: React.ReactNode
 
   if (!ready || !user) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-token-sm text-foreground/70">
-        …
+      <div
+        className="flex min-h-screen items-center justify-center text-token-sm text-foreground-muted"
+        role="status"
+        aria-busy="true"
+      >
+        {tStates('loading')}
       </div>
     );
   }

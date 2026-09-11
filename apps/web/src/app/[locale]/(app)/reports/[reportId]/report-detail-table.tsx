@@ -280,12 +280,21 @@ export function ReportDetailDocumentsTable({
               return (
                 <Fragment key={id}>
                   <tr className="odd:bg-background even:bg-surface/40">
-                    <td className="border-b border-border px-2 py-2">
+                    <td className="border-b border-border px-token-sm py-token-sm">
                       <button
                         type="button"
-                        className="rounded border border-border px-2 py-0.5 text-xs"
+                        className="rounded-sm border border-border px-token-sm py-token-xs text-token-xs text-foreground"
                         onClick={() => toggle(id)}
                         aria-expanded={isOpen}
+                        aria-label={
+                          isOpen
+                            ? t('detail.collapseRow', {
+                                id: String(row.internalId ?? id),
+                              })
+                            : t('detail.expandRow', {
+                                id: String(row.internalId ?? id),
+                              })
+                        }
                       >
                         {isOpen ? '−' : '+'}
                       </button>
