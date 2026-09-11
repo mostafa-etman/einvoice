@@ -350,6 +350,16 @@
     "etaDocumentTypes": "ETA document types",
     "itemCodes": "Item codes",
     "invoiceNumbering": "Invoice numbering",
+    "groupCompany": "Company",
+    "groupEta": "Egyptian Tax Authority",
+    "groupCatalog": "Catalog",
+    "cardCompany": "Legal name, tax ID, address, and branding used on invoices.",
+    "cardBranches": "Branch names, default branch, and issuer address for ETA.",
+    "cardNumbering": "Internal invoice number format and sequence scope.",
+    "cardEta": "Sandbox and production credentials, connection test, and go-live.",
+    "cardDocTypes": "Document types and versions loaded from ETA.",
+    "cardCurrencies": "Enabled currencies, default currency, and exchange rates.",
+    "cardItemCodes": "Local and ETA item codes used on invoice lines.",
     "forbidden": "You do not have permission to view these settings."
   },
   "settingsCompany": {
@@ -434,6 +444,7 @@
     "quote": "Quote",
     "rate": "Rate",
     "addRate": "Add rate",
+    "effectiveFrom": "From",
     "empty": "No currencies enabled"
   },
   "settingsEta": {

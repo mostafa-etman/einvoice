@@ -13,9 +13,15 @@ import {
   type Branch,
 } from '@/lib/api/branches';
 import { useTenant } from '@/lib/tenant-provider';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Skeleton } from '@/components/ui/skeleton';
+import { SettingsPageHeader } from '../_components/settings-page-header';
 
-// ETA refuses documents without these issuer address fields, and the issuer is
-// company-level — so they are required here rather than on every invoice.
 const addressSchema = z.object({
   country: z.string().min(1),
   governate: z.string().min(1),
@@ -54,9 +60,6 @@ const OPTIONAL_ADDRESS_FIELDS = [
   'additionalInformation',
 ] as const;
 
-const inputClass =
-  'mt-token-xs block w-full rounded border border-border bg-surface px-token-sm py-token-sm';
-
 export default function BranchesSettingsPage() {
   const t = useTranslations('settingsBranches');
   const { tenantId } = useTenant();
@@ -91,123 +94,111 @@ export default function BranchesSettingsPage() {
   });
 
   return (
-    <section className="space-y-token-xl">
-      <h1 className="font-display text-token-xl">{t('title')}</h1>
+    <div className="space-y-token-lg">
+      <SettingsPageHeader title={t('title')} />
 
-      <form
-        className="space-y-token-md"
-        onSubmit={handleSubmit((v) => create.mutateAsync(v))}
-      >
-        <div className="flex flex-wrap items-end gap-token-md">
-          <label className="text-token-sm">
-            {t('name')}
-            <input className={inputClass} {...register('name')} />
-          </label>
-          <label className="text-token-sm">
-            {t('etaBranchCode')}
-            <input className={inputClass} {...register('etaBranchCode')} />
-          </label>
-          <label className="text-token-sm">
-            {t('activityCode')}
-            <input className={inputClass} {...register('activityCode')} />
-          </label>
-          <label className="flex items-center gap-token-xs text-token-sm">
-            <input type="checkbox" {...register('isDefault')} />
-            {t('default')}
-          </label>
-        </div>
+      <Card>
+        <form
+          className="space-y-token-md"
+          onSubmit={handleSubmit((v) => create.mutateAsync(v))}
+        >
+          <div className="grid gap-token-md sm:grid-cols-2 lg:grid-cols-3">
+            <Input label={t('name')} {...register('name')} />
+            <Input label={t('etaBranchCode')} {...register('etaBranchCode')} />
+            <Input label={t('activityCode')} {...register('activityCode')} />
+          </div>
+          <Checkbox label={t('default')} {...register('isDefault')} />
 
-        <fieldset className="rounded border border-border p-token-md">
-          <legend className="px-token-xs text-token-sm font-medium">
-            {t('issuerAddress')}
-          </legend>
-          <p className="mb-token-sm text-token-xs text-foreground/70">
-            {t('issuerAddressHelp')}
-          </p>
-          <div className="grid gap-token-sm sm:grid-cols-2 lg:grid-cols-3">
-            <label className="text-token-sm">
-              {t('country')} *
-              <input
-                className={inputClass}
+          <fieldset className="rounded-lg border border-border p-token-md">
+            <legend className="px-token-xs text-token-sm font-medium">
+              {t('issuerAddress')}
+            </legend>
+            <p className="mb-token-sm text-token-xs text-foreground-muted">
+              {t('issuerAddressHelp')}
+            </p>
+            <div className="grid gap-token-sm sm:grid-cols-2 lg:grid-cols-3">
+              <Input
+                label={`${t('country')} *`}
                 defaultValue="EG"
+                error={errors.address?.country ? t('required') : undefined}
                 {...register('address.country')}
               />
-              {errors.address?.country ? (
-                <span className="text-token-xs text-danger">{t('required')}</span>
-              ) : null}
-            </label>
-            {REQUIRED_ADDRESS_FIELDS.map((field) => (
-              <label key={field} className="text-token-sm">
-                {t(field)} *
-                <input className={inputClass} {...register(`address.${field}`)} />
-                {errors.address?.[field] ? (
-                  <span className="text-token-xs text-danger">
-                    {t('required')}
-                  </span>
-                ) : null}
-              </label>
-            ))}
-            {OPTIONAL_ADDRESS_FIELDS.map((field) => (
-              <label key={field} className="text-token-sm">
-                {t(field)}
-                <input className={inputClass} {...register(`address.${field}`)} />
-              </label>
-            ))}
-          </div>
-        </fieldset>
-
-        {error ? <p className="text-token-sm text-danger">{error}</p> : null}
-
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="rounded bg-brand px-token-md py-token-sm text-token-sm text-white disabled:opacity-50"
-        >
-          {t('create')}
-        </button>
-      </form>
-
-      <ul className="space-y-token-sm">
-        {(query.data ?? []).map((b) => (
-          <li key={b.id} className="border-b border-border py-token-sm text-token-sm">
-            <div className="flex flex-wrap items-center gap-token-xs">
-              <span className="font-medium">{b.name}</span>
-              {b.isDefault ? <span>· {t('default')}</span> : null}
-              {b.isActive ? <span>· {t('active')}</span> : null}
-              {b.activityCode ? <span>· {b.activityCode}</span> : null}
-              <span
-                className={
-                  b.addressComplete
-                    ? 'text-token-xs text-foreground/60'
-                    : 'text-token-xs text-danger'
-                }
-              >
-                · {b.addressComplete ? t('addressComplete') : t('addressIncomplete')}
-              </span>
-              <button
-                type="button"
-                className="ms-auto text-brand"
-                onClick={() => setEditing(editing === b.id ? null : b.id)}
-              >
-                {editing === b.id ? t('cancel') : t('edit')}
-              </button>
+              {REQUIRED_ADDRESS_FIELDS.map((field) => (
+                <Input
+                  key={field}
+                  label={`${t(field)} *`}
+                  error={errors.address?.[field] ? t('required') : undefined}
+                  {...register(`address.${field}`)}
+                />
+              ))}
+              {OPTIONAL_ADDRESS_FIELDS.map((field) => (
+                <Input
+                  key={field}
+                  label={t(field)}
+                  {...register(`address.${field}`)}
+                />
+              ))}
             </div>
-            {editing === b.id ? (
-              <BranchAddressEditor
-                branch={b}
-                onSaved={async () => {
-                  setEditing(null);
-                  await qc.invalidateQueries({ queryKey: ['branches', tenantId] });
-                }}
-              />
-            ) : null}
-          </li>
-        ))}
-        {!query.data?.length ? (
-          <li className="text-token-sm text-foreground/60">{t('empty')}</li>
-        ) : null}
-      </ul>
-    </section>
+          </fieldset>
+
+          {error ? (
+            <p className="text-token-sm text-danger" role="alert">
+              {error}
+            </p>
+          ) : null}
+
+          <Button type="submit" disabled={isSubmitting}>
+            {t('create')}
+          </Button>
+        </form>
+      </Card>
+
+      {query.isLoading ? (
+        <Card aria-busy="true">
+          <Skeleton className="mb-token-sm" />
+          <Skeleton className="w-2/3" />
+        </Card>
+      ) : !query.data?.length ? (
+        <EmptyState title={t('empty')} />
+      ) : (
+        <ul className="m-0 list-none space-y-token-sm p-0">
+          {query.data.map((b) => (
+            <li key={b.id}>
+              <Card className="text-token-sm">
+                <div className="flex flex-wrap items-center gap-token-xs">
+                  <span className="font-medium">{b.name}</span>
+                  {b.isDefault ? <Badge variant="info">{t('default')}</Badge> : null}
+                  {b.isActive ? <Badge variant="success">{t('active')}</Badge> : null}
+                  {b.activityCode ? (
+                    <span className="text-foreground-muted">{b.activityCode}</span>
+                  ) : null}
+                  <Badge variant={b.addressComplete ? 'success' : 'danger'}>
+                    {b.addressComplete ? t('addressComplete') : t('addressIncomplete')}
+                  </Badge>
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="ms-auto"
+                    onClick={() => setEditing(editing === b.id ? null : b.id)}
+                  >
+                    {editing === b.id ? t('cancel') : t('edit')}
+                  </Button>
+                </div>
+                {editing === b.id ? (
+                  <BranchAddressEditor
+                    branch={b}
+                    onSaved={async () => {
+                      setEditing(null);
+                      await qc.invalidateQueries({ queryKey: ['branches', tenantId] });
+                    }}
+                  />
+                ) : null}
+              </Card>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -254,37 +245,31 @@ function BranchAddressEditor({
       })}
     >
       <div className="grid gap-token-sm sm:grid-cols-2 lg:grid-cols-3">
-        <label className="text-token-sm">
-          {t('country')} *
-          <input className={inputClass} {...register('country')} />
-          {errors.country ? (
-            <span className="text-token-xs text-danger">{t('required')}</span>
-          ) : null}
-        </label>
+        <Input
+          label={`${t('country')} *`}
+          error={errors.country ? t('required') : undefined}
+          {...register('country')}
+        />
         {REQUIRED_ADDRESS_FIELDS.map((field) => (
-          <label key={field} className="text-token-sm">
-            {t(field)} *
-            <input className={inputClass} {...register(field)} />
-            {errors[field] ? (
-              <span className="text-token-xs text-danger">{t('required')}</span>
-            ) : null}
-          </label>
+          <Input
+            key={field}
+            label={`${t(field)} *`}
+            error={errors[field] ? t('required') : undefined}
+            {...register(field)}
+          />
         ))}
         {OPTIONAL_ADDRESS_FIELDS.map((field) => (
-          <label key={field} className="text-token-sm">
-            {t(field)}
-            <input className={inputClass} {...register(field)} />
-          </label>
+          <Input key={field} label={t(field)} {...register(field)} />
         ))}
       </div>
-      {error ? <p className="text-token-sm text-danger">{error}</p> : null}
-      <button
-        type="submit"
-        disabled={isSubmitting}
-        className="rounded bg-brand px-token-md py-token-sm text-token-sm text-white disabled:opacity-50"
-      >
+      {error ? (
+        <p className="text-token-sm text-danger" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <Button type="submit" disabled={isSubmitting}>
         {t('save')}
-      </button>
+      </Button>
     </form>
   );
 }

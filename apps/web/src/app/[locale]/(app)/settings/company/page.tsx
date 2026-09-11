@@ -12,6 +12,10 @@ import {
 } from '@/lib/api/company';
 import { CopyableTenantId } from '@/components/copyable-tenant-id';
 import { useTenant } from '@/lib/tenant-provider';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { SettingsPageHeader } from '../_components/settings-page-header';
 
 export default function CompanySettingsPage() {
   const t = useTranslations('settingsCompany');
@@ -22,6 +26,7 @@ export default function CompanySettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const logoUrlRef = useRef<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const reload = async () => {
     const p = await getCompanyProfile();
@@ -74,111 +79,122 @@ export default function CompanySettingsPage() {
   };
 
   const addr = profile?.defaultBranchAddress;
+  const loading = !profile && !error;
 
   return (
-    <section className="mx-auto max-w-2xl">
-      <h1 className="font-display text-token-xl">{t('title')}</h1>
-      <p className="mt-token-sm text-token-md text-foreground/70">{t('intro')}</p>
-      <CopyableTenantId id={tenantId} className="mt-token-md" />
+    <div className="space-y-token-lg">
+      <SettingsPageHeader title={t('title')} subtitle={t('intro')} />
+      <CopyableTenantId id={tenantId} />
 
       {error ? (
         <p
           role="alert"
-          className="mt-token-md rounded border border-danger/40 bg-danger/10 px-token-md py-token-sm text-token-sm text-danger"
+          className="rounded-lg border border-danger bg-danger-muted px-token-md py-token-sm text-token-sm text-danger"
         >
           {error}
         </p>
       ) : null}
 
-      <div className="mt-token-lg space-y-token-md rounded border border-border bg-surface p-token-lg">
-        <div>
-          <h2 className="font-display text-token-lg">{t('companySummary')}</h2>
-          <dl className="mt-token-sm space-y-token-xs text-token-sm">
-            <div>
-              <dt className="text-foreground/60">{t('workspaceName')}</dt>
-              <dd>{profile?.workspaceName ?? '—'}</dd>
-            </div>
-            <div>
-              <dt className="text-foreground/60">{t('legalName')}</dt>
-              <dd>{profile?.legalName ?? t('legalNameMissing')}</dd>
-            </div>
-            <div>
-              <dt className="text-foreground/60">{t('issuerType')}</dt>
-              <dd>{profile?.issuerType ?? '—'}</dd>
-            </div>
-            {addr ? (
+      {loading ? (
+        <Card aria-busy="true">
+          <Skeleton className="mb-token-md w-1/3" />
+          <Skeleton className="mb-token-sm" />
+          <Skeleton className="mb-token-sm w-2/3" />
+          <Skeleton variant="rect" className="mt-token-md h-token-xl" />
+        </Card>
+      ) : (
+        <Card className="space-y-token-md">
+          <div>
+            <h2 className="m-0 text-token-md font-semibold text-foreground">
+              {t('companySummary')}
+            </h2>
+            <dl className="mt-token-sm space-y-token-xs text-token-sm">
               <div>
-                <dt className="text-foreground/60">{t('defaultAddress')}</dt>
-                <dd>
-                  {[
-                    addr.buildingNumber,
-                    addr.street,
-                    addr.regionCity,
-                    addr.governate,
-                    addr.country,
-                  ]
-                    .filter(Boolean)
-                    .join(', ') || '—'}
-                  <span className="mt-token-xs block text-token-xs text-foreground/60">
-                    {t('addressHint')}{' '}
-                    <Link
-                      className="underline"
-                      href={`/${locale}/settings/branches`}
-                    >
-                      {t('branchesLink')}
-                    </Link>
-                    {' · '}
-                    <Link
-                      className="underline"
-                      href={`/${locale}/settings/eta-credentials`}
-                    >
-                      {t('etaLink')}
-                    </Link>
-                  </span>
-                </dd>
+                <dt className="text-foreground-muted">{t('workspaceName')}</dt>
+                <dd>{profile?.workspaceName ?? '—'}</dd>
               </div>
-            ) : null}
-          </dl>
-        </div>
+              <div>
+                <dt className="text-foreground-muted">{t('legalName')}</dt>
+                <dd>{profile?.legalName ?? t('legalNameMissing')}</dd>
+              </div>
+              <div>
+                <dt className="text-foreground-muted">{t('issuerType')}</dt>
+                <dd>{profile?.issuerType ?? '—'}</dd>
+              </div>
+              {addr ? (
+                <div>
+                  <dt className="text-foreground-muted">{t('defaultAddress')}</dt>
+                  <dd>
+                    {[
+                      addr.buildingNumber,
+                      addr.street,
+                      addr.regionCity,
+                      addr.governate,
+                      addr.country,
+                    ]
+                      .filter(Boolean)
+                      .join(', ') || '—'}
+                    <span className="mt-token-xs block text-token-xs text-foreground-muted">
+                      {t('addressHint')}{' '}
+                      <Link
+                        className="text-brand underline-offset-2 hover:underline"
+                        href={`/${locale}/settings/branches`}
+                      >
+                        {t('branchesLink')}
+                      </Link>
+                      {' · '}
+                      <Link
+                        className="text-brand underline-offset-2 hover:underline"
+                        href={`/${locale}/settings/eta-credentials`}
+                      >
+                        {t('etaLink')}
+                      </Link>
+                    </span>
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
+          </div>
 
-        <div className="border-t border-border pt-token-md">
-          <h2 className="font-display text-token-lg">{t('logo')}</h2>
-          <p className="mt-token-xs text-token-sm text-foreground/70">{t('logoHelp')}</p>
+          <div className="border-t border-border pt-token-md">
+            <h2 className="m-0 text-token-md font-semibold text-foreground">{t('logo')}</h2>
+            <p className="mt-token-xs text-token-sm text-foreground-muted">{t('logoHelp')}</p>
 
-          {logoUrl ? (
-            <img
-              src={logoUrl}
-              alt={t('logoPreviewAlt')}
-              className="mt-token-md max-h-24 max-w-xs object-contain"
-            />
-          ) : (
-            <p className="mt-token-md text-token-sm text-foreground/60">{t('noLogo')}</p>
-          )}
+            {logoUrl ? (
+              <img
+                src={logoUrl}
+                alt={t('logoPreviewAlt')}
+                className="mt-token-md max-h-24 max-w-xs object-contain"
+              />
+            ) : (
+              <p className="mt-token-md text-token-sm text-foreground-muted">{t('noLogo')}</p>
+            )}
 
-          <div className="mt-token-md flex flex-wrap gap-token-sm">
-            <label className="inline-flex cursor-pointer rounded bg-brand px-token-md py-token-xs text-token-sm text-white aria-disabled:opacity-50">
-              {logoUrl ? t('replace') : t('upload')}
+            <div className="mt-token-md flex flex-wrap gap-token-sm">
               <input
+                ref={fileRef}
                 type="file"
                 accept="image/png,image/jpeg,image/webp,image/svg+xml"
                 className="sr-only"
                 disabled={busy}
                 onChange={(e) => void onUpload(e.target.files?.[0] ?? null)}
               />
-            </label>
-            {logoUrl ? (
-              <button
+              <Button
                 type="button"
                 disabled={busy}
-                className="rounded border border-border px-token-md py-token-xs text-token-sm disabled:opacity-50"
-                onClick={() => void onRemove()}
+                onClick={() => fileRef.current?.click()}
               >
-                {t('remove')}
-              </button>
-            ) : null}
+                {logoUrl ? t('replace') : t('upload')}
+              </Button>
+              {logoUrl ? (
+                <Button type="button" variant="secondary" disabled={busy} onClick={() => void onRemove()}>
+                  {t('remove')}
+                </Button>
+              ) : null}
+            </div>
           </div>
-        </div>
-      </div>
-    </section>
+        </Card>
+      )}
+    </div>
   );
 }

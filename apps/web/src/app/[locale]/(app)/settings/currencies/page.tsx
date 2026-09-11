@@ -14,6 +14,14 @@ import {
   setDefaultCurrency,
 } from '@/lib/api/currencies';
 import { useTenant } from '@/lib/tenant-provider';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Table, type TableColumn } from '@/components/ui/table';
+import { Skeleton } from '@/components/ui/skeleton';
+import { SettingsPageHeader } from '../_components/settings-page-header';
 
 const rateSchema = z.object({
   baseCurrencyCode: z.string().min(1),
@@ -23,6 +31,15 @@ const rateSchema = z.object({
 });
 
 type RateForm = z.infer<typeof rateSchema>;
+
+type CatalogRow = { code: string; nameEn: string };
+type EnabledRow = { currencyCode: string; isDefault: boolean };
+type RateRow = {
+  id: string;
+  baseCurrencyCode: string;
+  quoteCurrencyCode: string;
+  rate: string;
+};
 
 export default function CurrenciesSettingsPage() {
   const t = useTranslations('settingsCurrencies');
@@ -73,101 +90,128 @@ export default function CurrenciesSettingsPage() {
     },
   });
 
+  const catalogColumns: TableColumn<CatalogRow>[] = [
+    {
+      id: 'code',
+      header: t('catalog'),
+      cell: (c) => `${c.code} — ${c.nameEn}`,
+    },
+    {
+      id: 'enable',
+      header: t('enable'),
+      align: 'end',
+      cell: (c) => (
+        <Button type="button" variant="secondary" size="sm" onClick={() => enable.mutate(c.code)}>
+          {t('enable')}
+        </Button>
+      ),
+    },
+  ];
+
+  const enabledColumns: TableColumn<EnabledRow>[] = [
+    {
+      id: 'code',
+      header: t('title'),
+      cell: (c) => (
+        <span className="inline-flex items-center gap-token-xs">
+          {c.currencyCode}
+          {c.isDefault ? <Badge variant="info">★</Badge> : null}
+        </span>
+      ),
+    },
+    {
+      id: 'default',
+      header: t('setDefault'),
+      align: 'end',
+      cell: (c) =>
+        c.isDefault ? null : (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => setDefault.mutate(c.currencyCode)}
+          >
+            {t('setDefault')}
+          </Button>
+        ),
+    },
+  ];
+
+  const rateColumns: TableColumn<RateRow>[] = [
+    {
+      id: 'pair',
+      header: t('rates'),
+      cell: (r) => `${r.baseCurrencyCode}/${r.quoteCurrencyCode} = ${r.rate}`,
+    },
+  ];
+
   return (
-    <section>
-      <h1 className="font-display text-token-xl">{t('title')}</h1>
+    <div className="space-y-token-lg">
+      <SettingsPageHeader title={t('title')} />
 
-      <h2 className="mt-token-lg text-token-lg">{t('catalog')}</h2>
-      <ul className="mt-token-sm space-y-token-xs">
-        {(catalog.data ?? []).map((c) => (
-          <li key={c.code} className="flex items-center gap-token-md text-token-sm">
-            <span>
-              {c.code} — {c.nameEn}
-            </span>
-            <button
-              type="button"
-              className="rounded border border-border px-token-sm py-token-xs"
-              onClick={() => enable.mutate(c.code)}
-            >
-              {t('enable')}
-            </button>
-          </li>
-        ))}
-      </ul>
+      <section className="space-y-token-sm">
+        <h2 className="m-0 text-token-md font-semibold text-foreground">{t('catalog')}</h2>
+        {catalog.isLoading ? (
+          <Card aria-busy="true">
+            <Skeleton />
+          </Card>
+        ) : (
+          <Table
+            caption={t('catalog')}
+            columns={catalogColumns}
+            rows={catalog.data ?? []}
+            getRowId={(c) => c.code}
+            empty={null}
+          />
+        )}
+      </section>
 
-      <h2 className="mt-token-lg text-token-lg">{t('title')}</h2>
-      <ul className="mt-token-sm space-y-token-xs">
-        {(enabled.data ?? []).map((c) => (
-          <li key={c.currencyCode} className="flex items-center gap-token-md text-token-sm">
-            <span>
-              {c.currencyCode}
-              {c.isDefault ? ' ★' : ''}
-            </span>
-            {!c.isDefault ? (
-              <button
-                type="button"
-                className="rounded border border-border px-token-sm py-token-xs"
-                onClick={() => setDefault.mutate(c.currencyCode)}
-              >
-                {t('setDefault')}
-              </button>
-            ) : null}
-          </li>
-        ))}
-        {!enabled.data?.length ? (
-          <li className="text-foreground/60">{t('empty')}</li>
-        ) : null}
-      </ul>
+      <section className="space-y-token-sm">
+        <h2 className="m-0 text-token-md font-semibold text-foreground">{t('title')}</h2>
+        {enabled.isLoading ? (
+          <Card aria-busy="true">
+            <Skeleton />
+          </Card>
+        ) : (
+          <Table
+            caption={t('title')}
+            columns={enabledColumns}
+            rows={enabled.data ?? []}
+            getRowId={(c) => c.currencyCode}
+            empty={<EmptyState title={t('empty')} />}
+          />
+        )}
+      </section>
 
-      <h2 className="mt-token-lg text-token-lg">{t('rates')}</h2>
-      <form
-        className="mt-token-sm flex flex-wrap items-end gap-token-md"
-        onSubmit={handleSubmit((v) => addRate.mutateAsync(v))}
-      >
-        <label className="text-token-sm">
-          {t('base')}
-          <input
-            className="mt-token-xs block rounded border border-border bg-surface px-token-sm py-token-sm"
-            {...register('baseCurrencyCode')}
-          />
-        </label>
-        <label className="text-token-sm">
-          {t('quote')}
-          <input
-            className="mt-token-xs block rounded border border-border bg-surface px-token-sm py-token-sm"
-            {...register('quoteCurrencyCode')}
-          />
-        </label>
-        <label className="text-token-sm">
-          {t('rate')}
-          <input
-            className="mt-token-xs block rounded border border-border bg-surface px-token-sm py-token-sm"
-            {...register('rate')}
-          />
-        </label>
-        <label className="text-token-sm">
-          From
-          <input
-            type="datetime-local"
-            className="mt-token-xs block rounded border border-border bg-surface px-token-sm py-token-sm"
-            {...register('effectiveFrom')}
-          />
-        </label>
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="rounded bg-brand px-token-md py-token-sm text-token-sm text-white"
-        >
-          {t('addRate')}
-        </button>
-      </form>
-      <ul className="mt-token-md space-y-token-xs text-token-sm">
-        {(rates.data ?? []).map((r) => (
-          <li key={r.id}>
-            {r.baseCurrencyCode}/{r.quoteCurrencyCode} = {r.rate}
-          </li>
-        ))}
-      </ul>
-    </section>
+      <section className="space-y-token-sm">
+        <h2 className="m-0 text-token-md font-semibold text-foreground">{t('rates')}</h2>
+        <Card>
+          <form
+            className="grid gap-token-md sm:grid-cols-2 lg:grid-cols-5 lg:items-end"
+            onSubmit={handleSubmit((v) => addRate.mutateAsync(v))}
+          >
+            <Input label={t('base')} {...register('baseCurrencyCode')} />
+            <Input label={t('quote')} {...register('quoteCurrencyCode')} />
+            <Input label={t('rate')} {...register('rate')} />
+            <Input
+              type="datetime-local"
+              label={t('effectiveFrom')}
+              {...register('effectiveFrom')}
+            />
+            <Button type="submit" disabled={isSubmitting}>
+              {t('addRate')}
+            </Button>
+          </form>
+        </Card>
+        <Table
+          caption={t('rates')}
+          columns={rateColumns}
+          rows={rates.data ?? []}
+          getRowId={(r) => r.id}
+          loading={rates.isLoading}
+          empty={null}
+        />
+      </section>
+    </div>
   );
 }

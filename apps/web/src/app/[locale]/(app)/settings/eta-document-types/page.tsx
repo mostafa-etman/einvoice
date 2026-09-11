@@ -8,6 +8,18 @@ import {
   listEtaDocumentTypes,
 } from '@/lib/api/eta';
 import { useTenant } from '@/lib/tenant-provider';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Table, type TableColumn } from '@/components/ui/table';
+import { Skeleton } from '@/components/ui/skeleton';
+import { SettingsPageHeader } from '../_components/settings-page-header';
+
+type DocTypeRow = {
+  id: string;
+  label: string;
+  raw: Record<string, unknown>;
+};
 
 export default function EtaDocumentTypesPage() {
   const t = useTranslations('settingsEtaDocTypes');
@@ -39,67 +51,83 @@ export default function EtaDocumentTypesPage() {
   }
 
   const items = types.data?.items ?? [];
+  const rows: DocTypeRow[] = items.map((item, idx) => {
+    const id = String(item.documentTypeId ?? item.id ?? item.typeName ?? idx);
+    const label = String(
+      item.descriptionPrimaryLang ??
+        item.description ??
+        item.documentTypeNamePrimaryLang ??
+        id,
+    );
+    return { id, label, raw: item };
+  });
+
+  const columns: TableColumn<DocTypeRow>[] = [
+    {
+      id: 'label',
+      header: t('title'),
+      cell: (row) => (
+        <Button type="button" variant="link" onClick={() => setSelected(row.id)}>
+          {row.label} ({row.id})
+        </Button>
+      ),
+    },
+  ];
 
   return (
-    <section>
-      <h1 className="font-display text-token-xl">{t('title')}</h1>
-      <p className="mt-token-sm text-token-md text-foreground/70">{t('intro')}</p>
-      <button
-        type="button"
-        className="mt-token-md rounded border border-border px-token-md py-token-sm text-token-sm"
-        onClick={() => void refresh()}
-      >
-        {t('refresh')}
-      </button>
+    <div className="space-y-token-lg">
+      <SettingsPageHeader
+        title={t('title')}
+        subtitle={t('intro')}
+        actions={
+          <Button type="button" variant="secondary" onClick={() => void refresh()}>
+            {t('refresh')}
+          </Button>
+        }
+      />
 
       {types.data ? (
-        <p className="mt-token-sm text-token-sm text-foreground/60">
+        <p className="text-token-sm text-foreground-muted">
           {t('fetchedAt')}: {types.data.fetchedAt}
           {types.data.fromCache ? ` (${t('fromCache')})` : ''}
         </p>
       ) : null}
 
-      {items.length === 0 && !types.isLoading ? (
-        <p className="mt-token-lg text-token-sm">{t('empty')}</p>
+      {types.isLoading ? (
+        <Card aria-busy="true">
+          <Skeleton />
+        </Card>
+      ) : items.length === 0 ? (
+        <EmptyState title={t('empty')} />
       ) : (
-        <ul className="mt-token-lg flex flex-col gap-token-sm">
-          {items.map((item, idx) => {
-            const id = String(
-              item.documentTypeId ?? item.id ?? item.typeName ?? idx,
-            );
-            const label = String(
-              item.descriptionPrimaryLang ??
-                item.description ??
-                item.documentTypeNamePrimaryLang ??
-                id,
-            );
-            return (
-              <li key={id}>
-                <button
-                  type="button"
-                  className="text-token-md text-brand underline-offset-2 hover:underline"
-                  onClick={() => setSelected(id)}
-                >
-                  {label} ({id})
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+        <Table
+          caption={t('title')}
+          columns={columns}
+          rows={rows}
+          getRowId={(row) => row.id}
+        />
       )}
 
       {selected ? (
-        <div className="mt-token-xl">
-          <h2 className="text-token-lg">
+        <Card>
+          <h2 className="m-0 text-token-md font-semibold text-foreground">
             {t('versions')}: {selected}
           </h2>
-          <ul className="mt-token-sm flex flex-col gap-token-xs text-token-sm">
-            {(versions.data?.items ?? []).map((v, i) => (
-              <li key={i}>{JSON.stringify(v)}</li>
-            ))}
-          </ul>
-        </div>
+          {versions.isLoading ? (
+            <div className="mt-token-sm" aria-busy="true">
+              <Skeleton />
+            </div>
+          ) : (
+            <ul className="mt-token-sm flex flex-col gap-token-xs overflow-x-auto text-token-sm">
+              {(versions.data?.items ?? []).map((v, i) => (
+                <li key={i} className="font-en">
+                  {JSON.stringify(v)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
       ) : null}
-    </section>
+    </div>
   );
 }

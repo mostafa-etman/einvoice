@@ -11,8 +11,17 @@ import {
   getLatestItemCodeSync,
   listItemCodes,
   startItemCodeSync,
+  type ItemCode,
 } from '@/lib/api/item-codes';
 import { useTenant } from '@/lib/tenant-provider';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Table, type TableColumn } from '@/components/ui/table';
+import { SettingsPageHeader } from '../_components/settings-page-header';
 
 const schema = z.object({
   type: z.enum(['EGS', 'GS1']),
@@ -77,20 +86,52 @@ export default function ItemCodesPage() {
     }
   }, [syncStatus, qc, tenantId]);
 
+  const columns: TableColumn<ItemCode>[] = [
+    {
+      id: 'type',
+      header: t('type'),
+      cell: (i) => i.type,
+    },
+    {
+      id: 'code',
+      header: t('code'),
+      cell: (i) => i.code,
+    },
+    {
+      id: 'description',
+      header: t('description'),
+      cell: (i) => (
+        <span>
+          {i.description}
+          {!i.isActive ? ` (${t('inactive')})` : ''}
+        </span>
+      ),
+    },
+    {
+      id: 'source',
+      header: t('sourceLocal'),
+      cell: (i) => (
+        <Badge variant={i.source === 'ETA' ? 'info' : 'neutral'}>
+          {i.source === 'ETA' ? t('sourceEta') : t('sourceLocal')}
+        </Badge>
+      ),
+    },
+  ];
+
   return (
-    <section>
-      <h1 className="font-display text-token-xl">{t('title')}</h1>
-      <div className="mt-token-sm flex flex-wrap items-center gap-token-md">
-        <button
-          type="button"
-          disabled={syncRunning}
-          onClick={() => sync.mutate()}
-          className="rounded border border-border bg-surface px-token-md py-token-sm text-token-sm disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {syncRunning ? t('syncRunning') : t('syncEta')}
-        </button>
+    <div className="space-y-token-lg">
+      <SettingsPageHeader
+        title={t('title')}
+        actions={
+          <Button type="button" variant="secondary" disabled={syncRunning} onClick={() => sync.mutate()}>
+            {syncRunning ? t('syncRunning') : t('syncEta')}
+          </Button>
+        }
+      />
+
+      <div className="flex flex-wrap items-center gap-token-md">
         {syncQuery.data?.lastSyncAt ? (
-          <p className="text-token-sm text-foreground/70">
+          <p className="text-token-sm text-foreground-muted">
             {t('lastSync', {
               at: new Date(syncQuery.data.lastSyncAt).toLocaleString(),
               added: syncQuery.data.added,
@@ -99,77 +140,40 @@ export default function ItemCodesPage() {
             })}
           </p>
         ) : (
-          <p className="text-token-sm text-foreground/60">{t('neverSynced')}</p>
+          <p className="text-token-sm text-foreground-muted">{t('neverSynced')}</p>
         )}
         {sync.error ? (
-          <p className="text-token-sm text-danger">
+          <p className="text-token-sm text-danger" role="alert">
             {sync.error instanceof Error ? sync.error.message : t('syncFailed')}
           </p>
         ) : null}
       </div>
 
-      <form
-        className="mt-token-lg flex flex-wrap items-end gap-token-md"
-        onSubmit={handleSubmit((v) => create.mutateAsync(v))}
-      >
-        <label className="text-token-sm">
-          {t('type')}
-          <select
-            className="mt-token-xs block rounded border border-border bg-surface px-token-sm py-token-sm"
-            {...register('type')}
-          >
+      <Card>
+        <form
+          className="grid gap-token-md sm:grid-cols-2 lg:grid-cols-4 lg:items-end"
+          onSubmit={handleSubmit((v) => create.mutateAsync(v))}
+        >
+          <Select label={t('type')} {...register('type')}>
             <option value="EGS">EGS</option>
             <option value="GS1">GS1</option>
-          </select>
-        </label>
-        <label className="text-token-sm">
-          {t('code')}
-          <input
-            className="mt-token-xs block rounded border border-border bg-surface px-token-sm py-token-sm"
-            {...register('code')}
-          />
-        </label>
-        <label className="text-token-sm">
-          {t('description')}
-          <input
-            className="mt-token-xs block rounded border border-border bg-surface px-token-sm py-token-sm"
-            {...register('description')}
-          />
-        </label>
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="rounded bg-brand px-token-md py-token-sm text-token-sm text-white"
-        >
-          {t('create')}
-        </button>
-      </form>
+          </Select>
+          <Input label={t('code')} {...register('code')} />
+          <Input label={t('description')} {...register('description')} />
+          <Button type="submit" disabled={isSubmitting}>
+            {t('create')}
+          </Button>
+        </form>
+      </Card>
 
-      <ul className="mt-token-xl space-y-token-sm text-token-sm">
-        {(query.data ?? []).map((i) => (
-          <li
-            key={i.id}
-            className="flex flex-wrap items-center gap-token-sm border-b border-border py-token-sm"
-          >
-            <span>
-              [{i.type}] {i.code} — {i.description}
-              {!i.isActive ? ` (${t('inactive')})` : ''}
-            </span>
-            <span
-              className={
-                i.source === 'ETA'
-                  ? 'rounded bg-brand/10 px-token-xs text-token-xs text-brand'
-                  : 'rounded bg-foreground/10 px-token-xs text-token-xs'
-              }
-            >
-              {i.source === 'ETA' ? t('sourceEta') : t('sourceLocal')}
-            </span>
-          </li>
-        ))}
-        {!query.data?.length ? (
-          <li className="text-foreground/60">{t('empty')}</li>
-        ) : null}
-      </ul>
-    </section>
+      <Table
+        caption={t('title')}
+        columns={columns}
+        rows={query.data ?? []}
+        getRowId={(i) => i.id}
+        loading={query.isLoading}
+        empty={<EmptyState title={t('empty')} />}
+      />
+    </div>
   );
 }

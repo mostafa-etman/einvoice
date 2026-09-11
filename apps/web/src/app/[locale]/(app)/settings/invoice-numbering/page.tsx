@@ -7,6 +7,12 @@ import {
   upsertInvoiceNumbering,
   type InvoiceNumbering,
 } from '@/lib/api/invoice-numbering';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { SettingsPageHeader } from '../_components/settings-page-header';
 
 export default function InvoiceNumberingPage() {
   const t = useTranslations('settingsNumbering');
@@ -21,6 +27,7 @@ export default function InvoiceNumberingPage() {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     getInvoiceNumbering()
@@ -34,7 +41,8 @@ export default function InvoiceNumberingPage() {
         });
         setPreview(v.previewNext);
       })
-      .catch((e: Error) => setError(e.message));
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoaded(true));
   }, []);
 
   const save = async () => {
@@ -53,50 +61,52 @@ export default function InvoiceNumberingPage() {
   };
 
   return (
-    <section className="mx-auto max-w-2xl">
-      <h1 className="font-display text-token-xl">{t('title')}</h1>
-      <p className="mt-token-sm text-token-md text-foreground/70">{t('intro')}</p>
+    <div className="space-y-token-lg">
+      <SettingsPageHeader title={t('title')} subtitle={t('intro')} />
 
       {error ? (
-        <p className="mt-token-md rounded border border-danger/40 bg-danger/10 px-token-md py-token-sm text-token-sm text-danger">
+        <p
+          role="alert"
+          className="rounded-lg border border-danger bg-danger-muted px-token-md py-token-sm text-token-sm text-danger"
+        >
           {error}
         </p>
       ) : null}
       {saved ? (
-        <p className="mt-token-md text-token-sm text-brand">{t('saved')}</p>
+        <p className="text-token-sm text-success" role="status">
+          {t('saved')}
+        </p>
       ) : null}
 
-      <div className="mt-token-lg space-y-token-md rounded border border-border bg-surface p-token-lg">
-        <label className="block text-token-sm">
-          {t('prefix')}
-          <input
-            className="mt-token-xs w-full rounded border border-border bg-background px-token-sm py-token-xs"
+      {!loaded ? (
+        <Card aria-busy="true">
+          <Skeleton className="mb-token-md" />
+          <Skeleton className="mb-token-sm w-2/3" />
+          <Skeleton className="mb-token-sm" />
+          <Skeleton variant="rect" className="h-token-xl" />
+        </Card>
+      ) : (
+        <Card className="space-y-token-md">
+          <Input
+            label={t('prefix')}
+            hint={t('prefixHelp')}
             value={form.prefix}
             onChange={(e) => setForm({ ...form, prefix: e.target.value })}
           />
-          <span className="mt-token-xs block text-token-xs text-foreground/60">
-            {t('prefixHelp')}
-          </span>
-        </label>
-        <label className="block text-token-sm">
-          {t('padWidth')}
-          <input
+          <Input
             type="number"
             min={1}
             max={12}
-            className="mt-token-xs w-full rounded border border-border bg-background px-token-sm py-token-xs"
+            label={t('padWidth')}
             value={form.padWidth}
             onChange={(e) =>
               setForm({ ...form, padWidth: Number(e.target.value) || 1 })
             }
           />
-        </label>
-        <label className="block text-token-sm">
-          {t('startingNumber')}
-          <input
+          <Input
             type="number"
             min={0}
-            className="mt-token-xs w-full rounded border border-border bg-background px-token-sm py-token-xs"
+            label={t('startingNumber')}
             value={form.startingNumber}
             onChange={(e) =>
               setForm({
@@ -105,11 +115,8 @@ export default function InvoiceNumberingPage() {
               })
             }
           />
-        </label>
-        <label className="block text-token-sm">
-          {t('charset')}
-          <select
-            className="mt-token-xs w-full rounded border border-border bg-background px-token-sm py-token-xs"
+          <Select
+            label={t('charset')}
             value={form.charset}
             onChange={(e) =>
               setForm({
@@ -120,12 +127,10 @@ export default function InvoiceNumberingPage() {
           >
             <option value="NUMERIC">{t('charsetNumeric')}</option>
             <option value="ALPHANUMERIC">{t('charsetAlphanumeric')}</option>
-          </select>
-        </label>
-        <label className="block text-token-sm">
-          {t('scope')}
-          <select
-            className="mt-token-xs w-full rounded border border-border bg-background px-token-sm py-token-xs"
+          </Select>
+          <Select
+            label={t('scope')}
+            hint={t('scopeHelp')}
             value={form.scope}
             onChange={(e) =>
               setForm({
@@ -138,24 +143,16 @@ export default function InvoiceNumberingPage() {
             <option value="BRANCH">{t('scopeBranch')}</option>
             <option value="DOCUMENT_KIND">{t('scopeKind')}</option>
             <option value="BRANCH_AND_KIND">{t('scopeBranchKind')}</option>
-          </select>
-          <span className="mt-token-xs block text-token-xs text-foreground/60">
-            {t('scopeHelp')}
-          </span>
-        </label>
-        <p className="text-token-sm">
-          {t('preview')}:{' '}
-          <span className="font-mono text-brand">{preview || '—'}</span>
-        </p>
-        <button
-          type="button"
-          disabled={busy}
-          className="rounded bg-brand px-token-md py-token-xs text-token-sm text-white disabled:opacity-50"
-          onClick={() => void save()}
-        >
-          {t('save')}
-        </button>
-      </div>
-    </section>
+          </Select>
+          <p className="text-token-sm">
+            {t('preview')}:{' '}
+            <span className="font-en text-brand">{preview || '—'}</span>
+          </p>
+          <Button type="button" disabled={busy} onClick={() => void save()}>
+            {t('save')}
+          </Button>
+        </Card>
+      )}
+    </div>
   );
 }
