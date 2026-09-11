@@ -804,6 +804,10 @@
   "purchases": {
     "title": "Purchases",
     "empty": "No received purchases yet. Sync from ETA or wait for the scheduled pull.",
+    "emptyFiltered": "No purchases match these filters.",
+    "listCaption": "Received purchases",
+    "listLoaded": "{count} loaded",
+    "retryLoad": "Retry",
     "syncNow": "Sync Purchases",
     "syncing": "Syncing purchases…",
     "lastSync": "Last purchases sync: {status} (new {newCount}, updated {updatedCount}, skipped {skippedCount})",

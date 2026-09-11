@@ -3,7 +3,6 @@
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import { ApiError } from '@/lib/api/client';
 import {
   latestPurchaseSync,
   listPurchases,
@@ -13,45 +12,41 @@ import {
   type SyncRun,
 } from '@/lib/api/purchases';
 import { formatMoneyDisplay } from '@/lib/format-number';
-
-type SortBy =
-  | 'dateTimeIssued'
-  | 'totalAmount'
-  | 'internalId'
-  | 'issuerName'
-  | 'lastSyncedAt';
-
-const PAGE_SIZE = 50;
-
-function formatIssueDate(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-function isSyncBusy(status: string | null | undefined) {
-  return status === 'PENDING' || status === 'RUNNING';
-}
-
-function isAlreadyRunningError(e: unknown): boolean {
-  if (!(e instanceof ApiError) || e.status !== 409) return false;
-  const msg = e.message.toLowerCase();
-  return msg.includes('already running') || msg.includes('in progress');
-}
+import { useToast } from '@/components/ui/toast';
+import { PageHeader } from '@/components/ui/page-header';
+import { Breadcrumbs } from '@/components/ui/breadcrumbs';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { FilterBar } from '@/components/ui/filter-bar';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Skeleton } from '@/components/ui/skeleton';
+import { CopyButton } from '@/components/ui/copy-button';
+import { Badge } from '@/components/ui/badge';
+import { TableWrap, Th, Td } from '@/components/ui/table';
+import { PurchaseStatusBadge } from './_components/purchase-status-badge';
+import {
+  ETA_STATUS_FILTERS,
+  KIND_FILTERS,
+  PAGE_SIZE,
+  formatIssueDate,
+  isAlreadyRunningError,
+  isSyncBusy,
+  type SortBy,
+} from './_components/purchase-list-utils';
 
 export default function PurchasesPage() {
   const t = useTranslations('purchases');
+  const tNav = useTranslations('nav');
   const locale = useLocale();
+  const { push } = useToast();
   const [items, setItems] = useState<PurchaseSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [sync, setSync] = useState<SyncRun | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [listReady, setListReady] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [kind, setKind] = useState('');
   const [etaStatus, setEtaStatus] = useState('');
@@ -94,7 +89,8 @@ export default function PurchasesPage() {
         setNextCursor(res.nextCursor);
         setError(null);
       })
-      .catch((e: Error) => setError(e.message));
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setListReady(true));
     latestPurchaseSync()
       .then((run) => {
         setSync(run);
@@ -124,7 +120,6 @@ export default function PurchasesPage() {
   const onSync = async () => {
     setBusy(true);
     setError(null);
-    setToast(null);
     try {
       const run = await syncPurchases({
         from: syncFrom ? `${syncFrom}T00:00:00.000Z` : undefined,
@@ -161,7 +156,7 @@ export default function PurchasesPage() {
       const res = await resetPurchaseSync();
       setSync(res.latest);
       setShowStuckReset(false);
-      setToast(t('syncResetOk'));
+      push({ title: t('syncResetOk'), kind: 'success', timeoutMs: 12000 });
     } catch (e) {
       setError(
         t('syncResetFailed', {
@@ -193,65 +188,88 @@ export default function PurchasesPage() {
     return sortDir === 'asc' ? ' ↑' : ' ↓';
   };
 
-  const thClass =
-    'whitespace-nowrap border-b border-border px-token-sm py-token-sm text-start text-token-xs font-medium text-foreground/70';
-  const tdClass = 'border-b border-border px-token-sm py-token-sm text-token-sm';
+  const statusLabel = (row: PurchaseSummary) => {
+    const status = String(row.etaStatus ?? '').toLowerCase();
+    if (status === 'valid') return t('etaStatusValid');
+    if (status === 'invalid') return t('etaStatusInvalid');
+    if (status === 'rejected') return t('etaStatusRejected');
+    if (status === 'cancelled') return t('etaStatusCancelled');
+    if (status === 'submitted') return t('etaStatusSubmitted');
+    return row.etaStatus || row.buyerDecision || '—';
+  };
+
+  const filtersActive = Boolean(
+    kind || etaStatus || from || to || seller.trim() || q.trim(),
+  );
+
+  const resetFilters = () => {
+    setKind('');
+    setEtaStatus('');
+    setFrom('');
+    setTo('');
+    setSeller('');
+    setQ('');
+  };
 
   return (
-    <div className="space-y-token-lg">
-      <div className="flex flex-wrap items-center justify-between gap-token-md">
-        <h1 className="font-display text-token-2xl text-brand">{t('title')}</h1>
-        <div className="flex flex-wrap items-end gap-token-sm">
-          <label className="block text-token-xs">
-            {t('syncFrom')}
-            <input
+    <div className="space-y-token-lg" data-testid="purchases-page">
+      <PageHeader
+        breadcrumbs={
+          <Breadcrumbs
+            items={[
+              { label: tNav('home'), href: `/${locale}` },
+              { label: t('title') },
+            ]}
+          />
+        }
+        title={t('title')}
+        subtitle={`${t('listLoaded', { count: items.length })} · ${t('syncRangeHint')}`}
+        actions={
+          <>
+            <Input
               type="date"
-              className="mt-1 block border border-border bg-background px-2 py-1"
+              label={t('syncFrom')}
               value={syncFrom}
               onChange={(e) => setSyncFrom(e.target.value)}
               dir="ltr"
+              className="w-auto"
             />
-          </label>
-          <label className="block text-token-xs">
-            {t('syncTo')}
-            <input
+            <Input
               type="date"
-              className="mt-1 block border border-border bg-background px-2 py-1"
+              label={t('syncTo')}
               value={syncTo}
               onChange={(e) => setSyncTo(e.target.value)}
               dir="ltr"
+              className="w-auto"
             />
-          </label>
-          {showStuckReset ? (
-            <button
-              type="button"
+            {showStuckReset ? (
+              <Button
+                variant="danger"
+                disabled={busy}
+                onClick={() => void onResetSync()}
+              >
+                {t('syncReset')}
+              </Button>
+            ) : null}
+            <Button
               disabled={busy}
-              onClick={() => void onResetSync()}
-              className="rounded border border-danger/50 px-token-md py-token-sm text-token-sm text-danger disabled:opacity-50"
+              loading={busy}
+              onClick={() => void onSync()}
             >
-              {t('syncReset')}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void onSync()}
-            className="rounded bg-brand px-token-md py-token-sm text-token-sm text-white disabled:opacity-50"
-          >
-            {busy ? t('syncing') : t('syncNow')}
-          </button>
-        </div>
-      </div>
-      <p className="text-token-xs text-foreground/60">{t('syncRangeHint')}</p>
+              {busy ? t('syncing') : t('syncNow')}
+            </Button>
+          </>
+        }
+      />
 
       {sync?.status ? (
         <p
           className={
             sync.status === 'FAILED'
-              ? 'rounded border-2 border-danger bg-danger/10 px-token-md py-token-md text-token-sm font-medium text-danger'
+              ? 'rounded-lg border-2 border-danger bg-danger/10 px-token-md py-token-md text-token-sm font-medium text-danger'
               : sync.status === 'SUCCEEDED'
-                ? 'rounded border-2 border-green-600 bg-green-50 px-token-md py-token-md text-token-sm font-medium text-green-900'
-                : 'text-token-sm text-foreground/70'
+                ? 'rounded-lg border-2 border-success bg-success-muted px-token-md py-token-md text-token-sm font-medium text-foreground'
+                : 'text-token-sm text-foreground-muted'
           }
           role="status"
         >
@@ -265,236 +283,205 @@ export default function PurchasesPage() {
         </p>
       ) : null}
 
-      {toast ? (
-        <p
-          className="rounded border-2 border-green-600 bg-green-50 px-token-md py-token-md text-token-sm font-medium text-green-900"
-          role="status"
+      <FilterBar
+        search={q}
+        onSearchChange={setQ}
+        searchPlaceholder={t('filterSearch')}
+        onReset={resetFilters}
+        chips={[
+          {
+            id: 'all',
+            label: t('filterAll'),
+            active: etaStatus === '',
+            onClick: () => setEtaStatus(''),
+          },
+          ...ETA_STATUS_FILTERS.map((s) => ({
+            id: s.value,
+            label: t(s.labelKey),
+            active: etaStatus === s.value,
+            onClick: () => setEtaStatus(s.value),
+          })),
+        ]}
+      >
+        <Input
+          type="date"
+          label={t('filterFrom')}
+          value={from}
+          onChange={(e) => setFrom(e.target.value)}
+          dir="ltr"
+          className="w-auto"
+        />
+        <Input
+          type="date"
+          label={t('filterTo')}
+          value={to}
+          onChange={(e) => setTo(e.target.value)}
+          dir="ltr"
+          className="w-auto"
+        />
+        <Select
+          label={t('filterKind')}
+          value={kind}
+          onChange={(e) => setKind(e.target.value)}
+          className="w-auto"
         >
-          {toast}
-        </p>
-      ) : null}
-
-      <div className="grid grid-cols-2 gap-token-sm md:grid-cols-3 lg:grid-cols-6">
-        <label className="block text-token-xs">
-          {t('filterFrom')}
-          <input
-            type="date"
-            className="mt-1 w-full border border-border bg-background px-2 py-1"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-          />
-        </label>
-        <label className="block text-token-xs">
-          {t('filterTo')}
-          <input
-            type="date"
-            className="mt-1 w-full border border-border bg-background px-2 py-1"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-          />
-        </label>
-        <label className="block text-token-xs">
-          {t('filterKind')}
-          <select
-            className="mt-1 w-full border border-border bg-background px-2 py-1"
-            value={kind}
-            onChange={(e) => setKind(e.target.value)}
-          >
-            <option value="">{t('filterAll')}</option>
-            <option value="PURCHASE_INVOICE">{t('kindInvoice')}</option>
-            <option value="PURCHASE_RETURN">{t('kindReturn')}</option>
-            <option value="OTHER_RECEIVED">{t('kindOther')}</option>
-          </select>
-        </label>
-        <label className="block text-token-xs">
-          {t('filterStatus')}
-          <select
-            className="mt-1 w-full border border-border bg-background px-2 py-1"
-            value={etaStatus}
-            onChange={(e) => setEtaStatus(e.target.value)}
-          >
-            <option value="">{t('filterAll')}</option>
-            {[
-              { value: 'Valid', label: t('etaStatusValid') },
-              { value: 'Invalid', label: t('etaStatusInvalid') },
-              { value: 'Rejected', label: t('etaStatusRejected') },
-              { value: 'Cancelled', label: t('etaStatusCancelled') },
-              { value: 'Submitted', label: t('etaStatusSubmitted') },
-            ].map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block text-token-xs">
-          {t('filterSeller')}
-          <input
-            className="mt-1 w-full border border-border bg-background px-2 py-1"
-            value={seller}
-            onChange={(e) => setSeller(e.target.value)}
-            placeholder={t('filterSeller')}
-          />
-        </label>
-        <label className="block text-token-xs">
-          {t('filterSearch')}
-          <input
-            className="mt-1 w-full border border-border bg-background px-2 py-1"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder={t('filterSearch')}
-          />
-        </label>
-      </div>
+          <option value="">{t('filterAll')}</option>
+          {KIND_FILTERS.map((k) => (
+            <option key={k} value={k}>
+              {kindLabel(k)}
+            </option>
+          ))}
+        </Select>
+        <Input
+          label={t('filterSeller')}
+          value={seller}
+          onChange={(e) => setSeller(e.target.value)}
+          placeholder={t('filterSeller')}
+          className="min-w-[var(--size-search-min)]"
+        />
+      </FilterBar>
 
       {error ? (
-        <p
-          role="alert"
-          className="rounded border-2 border-danger bg-danger/10 px-token-md py-token-md text-token-sm font-medium text-danger"
-        >
-          {error}
-        </p>
+        <Card className="border-danger" data-testid="purchases-error" role="alert">
+          <p className="m-0 text-token-sm font-medium text-danger">{error}</p>
+          <Button className="mt-token-sm" size="sm" variant="secondary" onClick={() => reload()}>
+            {t('retryLoad')}
+          </Button>
+        </Card>
       ) : null}
 
-      {items.length === 0 ? (
-        <p className="text-foreground/70">{t('empty')}</p>
-      ) : (
-        <div className="overflow-x-auto border border-border">
-          <table className="min-w-full border-collapse text-start">
-            <thead className="bg-background/80">
+      {!listReady ? (
+        <div data-testid="purchases-loading" className="space-y-token-sm" aria-busy="true">
+          <Skeleton variant="rect" className="h-token-xl" />
+          <Skeleton variant="rect" className="h-[12rem]" />
+        </div>
+      ) : items.length === 0 && !error ? (
+        <div data-testid="purchases-empty">
+          <EmptyState
+            title={filtersActive ? t('emptyFiltered') : t('empty')}
+            action={{
+              label: filtersActive ? t('retryLoad') : t('syncNow'),
+              onClick: () => {
+                if (filtersActive) resetFilters();
+                else void onSync();
+              },
+            }}
+          />
+        </div>
+      ) : items.length === 0 ? null : (
+        <TableWrap data-testid="purchases-table">
+          <table className="w-full min-w-[72rem] border-collapse text-start text-token-sm">
+            <caption className="sr-only">{t('listCaption')}</caption>
+            <thead>
               <tr>
-                <th className={thClass}>
-                  <button
-                    type="button"
-                    className="hover:text-brand"
-                    onClick={() => toggleSort('internalId')}
-                    aria-label={
-                      sortDir === 'asc' ? t('sortAsc') : t('sortDesc')
-                    }
-                  >
+                <Th>
+                  <button type="button" className="hover:text-brand" onClick={() => toggleSort('internalId')}>
                     {t('colInvoice')}
                     {sortIndicator('internalId')}
                   </button>
-                </th>
-                <th className={thClass}>{t('colEtaId')}</th>
-                <th className={thClass}>{t('colType')}</th>
-                <th className={thClass}>
-                  <button
-                    type="button"
-                    className="hover:text-brand"
-                    onClick={() => toggleSort('dateTimeIssued')}
-                  >
+                </Th>
+                <Th>{t('colEtaId')}</Th>
+                <Th>{t('colType')}</Th>
+                <Th>
+                  <button type="button" className="hover:text-brand" onClick={() => toggleSort('dateTimeIssued')}>
                     {t('colIssueDate')}
                     {sortIndicator('dateTimeIssued')}
                   </button>
-                </th>
-                <th className={thClass}>
-                  <button
-                    type="button"
-                    className="hover:text-brand"
-                    onClick={() => toggleSort('issuerName')}
-                  >
+                </Th>
+                <Th>
+                  <button type="button" className="hover:text-brand" onClick={() => toggleSort('issuerName')}>
                     {t('colSeller')}
                     {sortIndicator('issuerName')}
                   </button>
-                </th>
-                <th className={thClass}>{t('colSellerTax')}</th>
-                <th className={thClass}>
-                  <button
-                    type="button"
-                    className="hover:text-brand"
-                    onClick={() => toggleSort('totalAmount')}
-                  >
+                </Th>
+                <Th>{t('colSellerTax')}</Th>
+                <Th align="end">
+                  <button type="button" className="hover:text-brand" onClick={() => toggleSort('totalAmount')}>
                     {t('colAmount')}
                     {sortIndicator('totalAmount')}
                   </button>
-                </th>
-                <th className={thClass}>{t('colCurrency')}</th>
-                <th className={thClass}>{t('colStatus')}</th>
-                <th className={thClass}>{t('colSynced')}</th>
+                </Th>
+                <Th>{t('colCurrency')}</Th>
+                <Th>{t('colStatus')}</Th>
+                <Th>{t('colSynced')}</Th>
               </tr>
             </thead>
             <tbody>
-              {items.map((row) => (
-                <tr key={row.id} className="hover:bg-brand/5">
-                  <td className={tdClass}>
-                    <Link
-                      href={`/${locale}/purchases/${row.id}`}
-                      className="font-medium text-brand hover:underline"
-                      dir="ltr"
-                    >
-                      {row.internalId || '—'}
-                    </Link>
-                  </td>
-                  <td className={`${tdClass} max-w-[14rem]`}>
-                    <span
-                      className="block truncate font-mono text-token-xs"
-                      dir="ltr"
-                      title={row.etaLongId || row.documentUuid}
-                    >
-                      {row.etaLongId || row.documentUuid}
-                    </span>
-                  </td>
-                  <td className={tdClass}>{kindLabel(row.kind)}</td>
-                  <td className={tdClass}>
-                    <span dir="ltr" className="tabular-nums">
-                      {formatIssueDate(row.dateTimeIssued)}
-                    </span>
-                  </td>
-                  <td className={tdClass}>{row.issuerName || '—'}</td>
-                  <td className={tdClass}>
-                    <span dir="ltr" className="tabular-nums">
-                      {row.issuerId || '—'}
-                    </span>
-                  </td>
-                  <td className={tdClass}>
-                    <span dir="ltr" className="tabular-nums">
-                      {formatMoneyDisplay(row.totalAmount)}
-                    </span>
-                  </td>
-                  <td className={tdClass}>
-                    <span dir="ltr">{row.currency || '—'}</span>
-                  </td>
-                  <td className={tdClass}>
-                    {(() => {
-                      const status = String(row.etaStatus ?? '').toLowerCase();
-                      const label =
-                        status === 'valid'
-                          ? t('etaStatusValid')
-                          : status === 'invalid'
-                            ? t('etaStatusInvalid')
-                            : status === 'rejected'
-                              ? t('etaStatusRejected')
-                              : status === 'cancelled'
-                                ? t('etaStatusCancelled')
-                                : status === 'submitted'
-                                  ? t('etaStatusSubmitted')
-                                  : row.etaStatus || row.buyerDecision || '—';
-                      return <span>{label}</span>;
-                    })()}
-                  </td>
-                  <td className={tdClass}>
-                    <span className="rounded bg-amber-100 px-token-xs text-token-xs text-amber-900">
-                      {t('syncedBadge')}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {items.map((row) => {
+                const etaId = row.etaLongId || row.documentUuid;
+                return (
+                  <tr key={row.id} className="hover:bg-surface-alt">
+                    <Td>
+                      <Link
+                        href={`/${locale}/purchases/${row.id}`}
+                        className="font-en font-medium text-brand hover:underline"
+                        dir="ltr"
+                      >
+                        {row.internalId || '—'}
+                      </Link>
+                    </Td>
+                    <Td className="max-w-[14rem]">
+                      {etaId ? (
+                        <span className="inline-flex max-w-full items-center gap-token-xs">
+                          <span
+                            className="block truncate font-en text-token-xs text-foreground-muted"
+                            dir="ltr"
+                            title={etaId}
+                          >
+                            {etaId}
+                          </span>
+                          <CopyButton value={etaId} className="shrink-0" />
+                        </span>
+                      ) : (
+                        <span className="text-foreground-muted">—</span>
+                      )}
+                    </Td>
+                    <Td>{kindLabel(row.kind)}</Td>
+                    <Td>
+                      <span dir="ltr" className="font-en tabular-nums">
+                        {formatIssueDate(row.dateTimeIssued)}
+                      </span>
+                    </Td>
+                    <Td className="font-medium">{row.issuerName || '—'}</Td>
+                    <Td>
+                      <span dir="ltr" className="font-en tabular-nums">
+                        {row.issuerId || '—'}
+                      </span>
+                    </Td>
+                    <Td align="end">
+                      <span dir="ltr" className="font-en tabular-nums">
+                        {formatMoneyDisplay(row.totalAmount)}
+                      </span>
+                    </Td>
+                    <Td>
+                      <span dir="ltr" className="font-en">
+                        {row.currency || '—'}
+                      </span>
+                    </Td>
+                    <Td>
+                      <PurchaseStatusBadge status={row.etaStatus} label={statusLabel(row)} />
+                    </Td>
+                    <Td>
+                      <Badge variant="warning">{t('syncedBadge')}</Badge>
+                    </Td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
-        </div>
+        </TableWrap>
       )}
 
       {nextCursor ? (
         <div className="flex justify-center">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
             disabled={loadingMore}
+            loading={loadingMore}
             onClick={() => void loadMore()}
-            className="rounded border border-border px-token-md py-token-sm text-token-sm disabled:opacity-50"
           >
             {loadingMore ? t('loading') : t('loadMore')}
-          </button>
+          </Button>
         </div>
       ) : null}
     </div>

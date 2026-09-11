@@ -13,6 +13,8 @@ describe('purchases smoke', () => {
     expect(en.purchases.issuer).toBeTruthy();
     expect(en.purchases.receiver).toBeTruthy();
     expect(en.purchases.longId).toBeTruthy();
+    expect(en.purchases.retryLoad).toBeTruthy();
+    expect(en.purchases.emptyFiltered).toBeTruthy();
     expect(ar.nav.purchases).toBeTruthy();
     expect(ar.purchases.kindInvoice).toBeTruthy();
     expect(ar.purchases.localPreview).toBeTruthy();
