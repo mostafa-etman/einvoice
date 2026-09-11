@@ -68,6 +68,16 @@ import {
   type LineTaxMode,
 } from '@einvoice/eta-core';
 import { LineTaxesEditor, taxRowSummary } from './line-taxes-editor';
+import { PageHeader } from '@/components/ui/page-header';
+import { Breadcrumbs } from '@/components/ui/breadcrumbs';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { Modal } from '@/components/ui/modal';
+import { CopyButton } from '@/components/ui/copy-button';
+import { DocumentStatusBadge } from '../_components/document-status-badge';
+import { CancelReasonDialog } from '../_components/cancel-reason-dialog';
 
 type Line = DocumentUpsert['lines'][number];
 type LineRow = RowKeyed<Line>;
@@ -96,12 +106,12 @@ const emptyLine = (currency = 'EGP'): Line => ({
 });
 
 function fieldClass() {
-  return 'mt-token-xs w-full rounded border border-border bg-background px-token-sm py-token-xs';
+  return 'mt-token-xs w-full rounded-control border border-border-strong bg-surface px-input-x py-input-y text-token-sm';
 }
 
 /** Compact variant for the dense line-items table (no stacked label above). */
 function cellClass() {
-  return 'w-full rounded border border-border bg-background px-token-xs py-token-xs text-token-xs';
+  return 'w-full rounded-control border border-border-strong bg-surface px-token-xs py-token-xs text-token-xs';
 }
 
 /**
@@ -261,6 +271,7 @@ function documentStatusLabel(
 export default function DocumentEditorPage() {
   const t = useTranslations('documents');
   const tOffline = useTranslations('offline');
+  const tNav = useTranslations('nav');
   const locale = useLocale();
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -396,6 +407,11 @@ export default function DocumentEditorPage() {
   const [submitAttemptCount, setSubmitAttemptCount] = useState(0);
   /** Ticks so an elapsed cooldown re-enables Submit without a reload. */
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [lateConfirm, setLateConfirm] = useState<{
+    days: number;
+    resolve: (ok: boolean) => void;
+  } | null>(null);
+  const [cancelOpen, setCancelOpen] = useState(false);
 
   const cooldownActive = Boolean(cooldownUntil && new Date(cooldownUntil).getTime() > nowMs);
   const displayStatus = resolveDocumentStatus(docStatus, etaStatusRaw);
@@ -411,20 +427,21 @@ export default function DocumentEditorPage() {
   const documentReadOnly =
     !isNew && !canEditDocument(documentOrigin, displayStatus);
 
+  const confirmLateIfNeeded = () => {
+    if (!(issueDateTime && checkLateSubmission(issueDateTime).isLate)) {
+      return Promise.resolve(true);
+    }
+    const check = checkLateSubmission(issueDateTime);
+    return new Promise<boolean>((resolve) => {
+      setLateConfirm({ days: check.warnDays, resolve });
+    });
+  };
+
   useEffect(() => {
     if (!cooldownUntil) return;
     const handle = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(handle);
   }, [cooldownUntil]);
-
-  useEffect(() => {
-    if (taxModalLineIdx == null) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setTaxModalLineIdx(null);
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [taxModalLineIdx]);
 
   useEffect(() => {
     if (!activeTenantId) {
@@ -971,15 +988,41 @@ export default function DocumentEditorPage() {
   const subtypeOptionsFor = (taxType: string) => subtypesForTaxType(taxSubtypes, taxType);
 
   const sectionTitle = (label: string) => (
-    <h2 className="font-medium text-token-md text-brand">{label}</h2>
+    <h2 className="m-0 text-token-sm font-semibold text-foreground">{label}</h2>
   );
 
   const taxModalLine = taxModalLineIdx == null ? null : (lines[taxModalLineIdx] ?? null);
 
   return (
-    <div className="w-full space-y-token-lg pb-token-lg">
+    <div className="w-full space-y-token-lg pb-[4.5rem]" data-testid="document-detail">
       <div className="space-y-token-lg">
-        <h1 className="font-display text-token-2xl text-brand">{isNew ? t('new') : internalId}</h1>
+        <PageHeader
+          breadcrumbs={
+            <Breadcrumbs
+              items={[
+                { label: tNav('documents'), href: `/${locale}/documents` },
+                { label: isNew ? t('new') : internalId || t('title') },
+              ]}
+            />
+          }
+          title={isNew ? t('new') : internalId}
+          subtitle={
+            !isNew ? (
+              <span className="inline-flex flex-wrap items-center gap-token-sm">
+                <DocumentStatusBadge
+                  status={displayStatus}
+                  label={documentStatusLabel(displayStatus, t)}
+                />
+                {displayStatus === 'VALID' ? (
+                  <Badge variant="valid">{t('readOnlyValidBadge')}</Badge>
+                ) : null}
+                {readOnlyHistorical ? (
+                  <Badge variant="warning">{t('importedBadge')}</Badge>
+                ) : null}
+              </span>
+            ) : undefined
+          }
+        />
         {branchAddressIncomplete || settingsFixArea ? (
           <div
             role="status"
@@ -1002,7 +1045,7 @@ export default function DocumentEditorPage() {
         {showTaxFreeWarning ? (
           <div
             role="status"
-            className="space-y-token-xs rounded border border-amber-600/40 bg-amber-50 p-token-sm text-token-sm dark:bg-amber-950/30"
+            className="space-y-token-xs rounded-lg border border-warning bg-warning-muted p-token-sm text-token-sm"
           >
             <p className="font-medium">{t('taxFreeWarningTitle')}</p>
             <p>{t('taxFreeWarningBody')}</p>
@@ -1016,35 +1059,38 @@ export default function DocumentEditorPage() {
           </div>
         ) : null}
         {!isNew ? (
-          <div className="space-y-token-xs rounded border border-border bg-surface p-token-sm text-token-sm">
+          <Card className="space-y-token-xs text-token-sm">
             <p>
               <span className="font-medium">{t('status')}:</span>{' '}
-              {documentStatusLabel(displayStatus, t)}
+              <DocumentStatusBadge
+                status={displayStatus}
+                label={documentStatusLabel(displayStatus, t)}
+              />
               {displayStatus === 'VALID' ? (
-                <span className="ms-token-sm rounded bg-green-100 px-token-xs py-token-xs text-token-xs text-green-900">
-                  {t('readOnlyValidBadge')}
+                <span className="ms-token-sm">
+                  <Badge variant="valid">{t('readOnlyValidBadge')}</Badge>
                 </span>
               ) : documentReadOnly && !readOnlyHistorical ? (
-                <span className="ms-token-sm rounded bg-amber-100 px-token-xs py-token-xs text-token-xs text-amber-900">
-                  {t('readOnlyFinalBadge')}
+                <span className="ms-token-sm">
+                  <Badge variant="warning">{t('readOnlyFinalBadge')}</Badge>
                 </span>
               ) : null}
               {readOnlyHistorical ? (
-                <span className="ms-token-sm rounded bg-amber-100 px-token-xs py-token-xs text-token-xs text-amber-900">
-                  {t('importedBadge')}
+                <span className="ms-token-sm">
+                  <Badge variant="warning">{t('importedBadge')}</Badge>
                 </span>
               ) : null}
             </p>
             {readOnlyHistorical ? (
-              <p className="text-amber-900" role="status">
+              <p className="text-warning" role="status">
                 {t('importedFromEta')}
               </p>
             ) : displayStatus === 'VALID' ? (
-              <p className="text-green-900" role="status">
+              <p className="text-success" role="status">
                 {t('readOnlyValidBanner')}
               </p>
             ) : documentReadOnly ? (
-              <p className="text-amber-900" role="status">
+              <p className="text-warning" role="status">
                 {t('readOnlyFinalBanner')}
               </p>
             ) : null}
@@ -1054,14 +1100,18 @@ export default function DocumentEditorPage() {
               </p>
             ) : null}
             {etaUuid ? (
-              <p>
-                <span className="font-medium">{t('etaUuid')}:</span> {etaUuid}
+              <p className="inline-flex flex-wrap items-center gap-token-xs">
+                <span className="font-medium">{t('etaUuid')}:</span>{' '}
+                <span dir="ltr" className="font-en">
+                  {etaUuid}
+                </span>
+                <CopyButton value={etaUuid} />
               </p>
             ) : null}
             {(docStatus === 'SIGNED' || needsAttention) &&
             issueDateTime &&
             checkLateSubmission(issueDateTime).isLate ? (
-              <p className="text-amber-800" role="status">
+              <p className="text-warning" role="status">
                 {t('lateSubmitWarnBanner', {
                   ageDays: String(Math.round(checkLateSubmission(issueDateTime).ageDays)),
                   warnDays: String(checkLateSubmission(issueDateTime).warnDays),
@@ -1073,10 +1123,10 @@ export default function DocumentEditorPage() {
                 <span className="w-full text-token-xs text-foreground/60">
                   {t('issuedActions')} — {t('officialPrintoutHint')}
                 </span>
-                <button
-                  type="button"
+                <Button
+                  size="sm"
+                  variant="secondary"
                   disabled={submitting}
-                  className="rounded border border-border px-token-sm py-token-xs text-token-sm disabled:opacity-50"
                   title={t('officialPrintoutHint')}
                   onClick={async () => {
                     try {
@@ -1092,11 +1142,11 @@ export default function DocumentEditorPage() {
                   }}
                 >
                   {t('downloadPrintout')}
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
                   disabled={submitting}
-                  className="rounded border border-border px-token-sm py-token-xs text-token-sm disabled:opacity-50"
                   onClick={async () => {
                     try {
                       setSubmitting(true);
@@ -1111,46 +1161,24 @@ export default function DocumentEditorPage() {
                   }}
                 >
                   {t('downloadEtaSource')}
-                </button>
+                </Button>
                 {docStatus === 'VALID' || docStatus === 'SUBMITTED' ? (
-                  <button
-                    type="button"
+                  <Button
+                    size="sm"
+                    variant="danger"
                     disabled={submitting}
-                    className="rounded border border-danger/40 px-token-sm py-token-xs text-token-sm text-danger disabled:opacity-50"
-                    onClick={async () => {
-                      const reason = window.prompt(t('cancelReasonPrompt')) ?? '';
-                      if (!reason.trim()) {
-                        setError(t('cancelReasonRequired'));
-                        return;
-                      }
-                      try {
-                        setSubmitting(true);
-                        setError(null);
-                        await cancelDocument(params.id, reason.trim());
-                        setDocStatus('CANCELLED');
-                        setEtaStatusRaw('Cancelled');
-                        setIssues([
-                          t('batchCancelSummary', {
-                            cancelled: 1,
-                            skipped: 0,
-                            failed: 0,
-                          }),
-                        ]);
-                      } catch (e) {
-                        setError(e instanceof Error ? e.message : t('forbidden'));
-                      } finally {
-                        setSubmitting(false);
-                      }
+                    onClick={() => {
+                      setCancelOpen(true);
                     }}
                   >
                     {t('cancelDocument')}
-                  </button>
+                  </Button>
                 ) : null}
                 {canReturnCreditNote ? (
-                  <button
-                    type="button"
+                  <Button
+                    size="sm"
+                    variant="secondary"
                     disabled={submitting}
-                    className="rounded border border-border px-token-sm py-token-xs text-token-sm disabled:opacity-50"
                     title={t('returnCreditNoteHint')}
                     onClick={async () => {
                       try {
@@ -1173,13 +1201,13 @@ export default function DocumentEditorPage() {
                     }}
                   >
                     {t('returnCreditNote')}
-                  </button>
+                  </Button>
                 ) : null}
                 {docStatus === 'REJECTED' ? (
-                  <button
-                    type="button"
+                  <Button
+                    size="sm"
+                    variant="secondary"
                     disabled={submitting}
-                    className="rounded border border-border px-token-sm py-token-xs text-token-sm disabled:opacity-50"
                     onClick={async () => {
                       try {
                         setSubmitting(true);
@@ -1194,7 +1222,7 @@ export default function DocumentEditorPage() {
                     }}
                   >
                     {t('declineRejection')}
-                  </button>
+                  </Button>
                 ) : null}
               </div>
             ) : null}
@@ -1233,7 +1261,7 @@ export default function DocumentEditorPage() {
                 </ul>
               </details>
             ) : null}
-          </div>
+          </Card>
         ) : null}
         {error ? (
           <p
@@ -1246,7 +1274,7 @@ export default function DocumentEditorPage() {
         {displayStatus === 'VALID' && etaUuid ? (
           <p
             role="status"
-            className="rounded border-2 border-green-600 bg-green-50 px-token-md py-token-md text-token-sm font-medium text-green-900"
+            className="rounded border-2 border-success bg-success-muted px-token-md py-token-md text-token-sm font-medium text-foreground"
           >
             {t('submitSuccessBanner', { uuid: etaUuid, status: displayStatus })}
           </p>
@@ -2094,9 +2122,9 @@ export default function DocumentEditorPage() {
         </section>
       </div>
 
-      <div className="sticky bottom-0 z-30 max-h-[45vh] space-y-token-sm overflow-y-auto rounded-t border border-border bg-surface p-token-sm shadow-lg">
+      <div className="sticky bottom-0 z-30 max-h-[45vh] space-y-token-sm overflow-y-auto border-t border-border bg-surface p-token-md shadow-lg">
         <div className="flex flex-wrap items-end gap-x-token-lg gap-y-token-xs">
-          <h2 className="font-medium text-brand">{t('totals')}</h2>
+          <h2 className="m-0 text-token-sm font-semibold text-foreground">{t('totals')}</h2>
           <p className="text-token-sm">
             <span className="text-foreground/60">{t('totalSalesAmount')}:</span>{' '}
             <span dir="ltr">{formatMoneyDisplay(totals?.totalSalesAmount)}</span>
@@ -2129,19 +2157,16 @@ export default function DocumentEditorPage() {
         </div>
 
         <div className="flex flex-wrap gap-token-sm">
-          <button
-            type="button"
-            className="rounded border border-border px-token-md py-token-sm text-token-sm"
+          <Button
+            variant="secondary"
             title={t('localPrintoutHint')}
             disabled={submitting || !branchId || !internalId}
             onClick={() => setPreviewOpen(true)}
           >
             {t('previewPrint')}
-          </button>
+          </Button>
           {!documentReadOnly ? (
-          <button
-            type="button"
-            className="rounded bg-brand px-token-md py-token-sm text-white"
+          <Button
             disabled={submitting}
             onClick={async () => {
               try {
@@ -2188,16 +2213,15 @@ export default function DocumentEditorPage() {
             }}
           >
             {t('save')}
-          </button>
+          </Button>
           ) : null}
-          {offlineHint ? <span className="text-token-sm text-amber-800">{offlineHint}</span> : null}
+          {offlineHint ? <span className="text-token-sm text-warning">{offlineHint}</span> : null}
           {!isNew ? (
             <>
               {canPrepareForSubmit && !documentReadOnly ? (
               <>
-              <button
-                type="button"
-                className="rounded border border-border px-token-md py-token-sm"
+              <Button
+                variant="secondary"
                 disabled={readOnlyHistorical}
                 onClick={async () => {
                   const res = await validateDocument(params.id);
@@ -2233,13 +2257,13 @@ export default function DocumentEditorPage() {
                 }}
               >
                 {t('validate')}
-              </button>
+              </Button>
               {docStatus === 'DRAFT' || docStatus === 'READY' ? (
-                <button
-                  type="button"
-                  className="rounded border border-border px-token-md py-token-sm"
-                  title={t('recalculateTotalsHint')}
-                  disabled={readOnlyHistorical}
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    title={t('recalculateTotalsHint')}
+                    disabled={readOnlyHistorical}
                   onClick={async () => {
                     try {
                       setError(null);
@@ -2292,11 +2316,10 @@ export default function DocumentEditorPage() {
                   }}
                 >
                   {t('recalculateTotals')}
-                </button>
+                </Button>
               ) : null}
-              <button
-                type="button"
-                className="rounded border border-border px-token-md py-token-sm"
+              <Button
+                variant="secondary"
                 disabled={readOnlyHistorical}
                 onClick={async () => {
                   try {
@@ -2308,10 +2331,9 @@ export default function DocumentEditorPage() {
                 }}
               >
                 {t('markReady')}
-              </button>
-              <button
-                type="button"
-                className="rounded border border-border px-token-md py-token-sm"
+              </Button>
+              <Button
+                variant="secondary"
                 disabled={readOnlyHistorical}
                 onClick={async () => {
                   try {
@@ -2325,7 +2347,7 @@ export default function DocumentEditorPage() {
                 }}
               >
                 {t('sendForSignature')}
-              </button>
+              </Button>
               </>
               ) : null}
               {displayStatus === 'SUBMITTED' ||
@@ -2333,10 +2355,9 @@ export default function DocumentEditorPage() {
               displayStatus === 'INVALID' ||
               displayStatus === 'CANCELLED' ||
               displayStatus === 'REJECTED' ? (
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
                   disabled={submitting}
-                  className="rounded border border-border px-token-md py-token-sm disabled:opacity-50"
                   onClick={async () => {
                     try {
                       setSubmitting(true);
@@ -2359,26 +2380,15 @@ export default function DocumentEditorPage() {
                   }}
                 >
                   {t('refreshStatus')}
-                </button>
+                </Button>
               ) : null}
               {docStatus === 'SIGNED' || needsAttention ? (
                 <>
-                  <button
-                    type="button"
+                  <Button
                     disabled={readOnlyHistorical || submitting || cooldownActive}
-                    className="rounded bg-brand px-token-md py-token-sm text-white disabled:opacity-50"
                     onClick={async () => {
                       try {
-                        if (issueDateTime && checkLateSubmission(issueDateTime).isLate) {
-                          const check = checkLateSubmission(issueDateTime);
-                          const ok = window.confirm(
-                            t('lateSubmitConfirm', {
-                              count: 1,
-                              days: check.warnDays,
-                            }),
-                          );
-                          if (!ok) return;
-                        }
+                        if (!(await confirmLateIfNeeded())) return;
                         setSubmitting(true);
                         setError(null);
                         const res = await submitDocumentToEta(params.id);
@@ -2543,11 +2553,10 @@ export default function DocumentEditorPage() {
                       : submitting
                         ? t('submitting')
                         : t('submitToEta')}
-                  </button>
+                  </Button>
                   {(cooldownActive || needsAttention) && (
-                    <button
-                      type="button"
-                      className="rounded border border-border px-token-md py-token-sm"
+                    <Button
+                      variant="secondary"
                       onClick={async () => {
                         try {
                           setError(null);
@@ -2565,7 +2574,7 @@ export default function DocumentEditorPage() {
                       }}
                     >
                       {t('resetCooldown')}
-                    </button>
+                    </Button>
                   )}
                 </>
               ) : null}
@@ -2574,48 +2583,88 @@ export default function DocumentEditorPage() {
         </div>
       </div>
 
-      {taxModalLine && taxModalLineIdx != null && !documentReadOnly ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-token-md"
-          role="dialog"
-          aria-modal="true"
-          aria-label={t('editTaxes')}
-          onClick={() => setTaxModalLineIdx(null)}
-        >
-          <div
-            className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded border border-border bg-surface p-token-md shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-token-sm flex items-center justify-between gap-token-sm">
-              <h2 className="font-medium text-brand">
-                {t('editTaxes')} — {t('lineNumber', { number: taxModalLineIdx + 1 })}
-              </h2>
-              <button
-                type="button"
-                className="rounded border border-border px-token-sm py-token-xs text-token-sm"
-                onClick={() => setTaxModalLineIdx(null)}
-              >
-                {t('close')}
-              </button>
-            </div>
-            <LineTaxesEditor
-              line={taxModalLine}
-              lineIndex={taxModalLineIdx}
-              locale={locale === 'ar' ? 'ar' : 'en'}
-              taxTypes={taxTypes}
-              taxSubtypes={taxSubtypes}
-              taxTypeOptions={taxTypeOptions}
-              zeroRatedSubtypeOptions={zeroRatedSubtypeOptions}
-              exemptSubtypeOptions={exemptSubtypeOptions}
-              subtypeOptionsFor={subtypeOptionsFor}
-              updateLine={updateLine}
-              setLineTaxMode={setLineTaxMode}
-              setLineZeroExemptKind={setLineZeroExemptKind}
-              t={t}
-            />
-          </div>
-        </div>
-      ) : null}
+      <Modal
+        open={taxModalLine != null && taxModalLineIdx != null && !documentReadOnly}
+        onClose={() => setTaxModalLineIdx(null)}
+        title={
+          taxModalLineIdx != null
+            ? `${t('editTaxes')} — ${t('lineNumber', { number: taxModalLineIdx + 1 })}`
+            : t('editTaxes')
+        }
+        size="xl"
+      >
+        {taxModalLine && taxModalLineIdx != null ? (
+          <LineTaxesEditor
+            line={taxModalLine}
+            lineIndex={taxModalLineIdx}
+            locale={locale === 'ar' ? 'ar' : 'en'}
+            taxTypes={taxTypes}
+            taxSubtypes={taxSubtypes}
+            taxTypeOptions={taxTypeOptions}
+            zeroRatedSubtypeOptions={zeroRatedSubtypeOptions}
+            exemptSubtypeOptions={exemptSubtypeOptions}
+            subtypeOptionsFor={subtypeOptionsFor}
+            updateLine={updateLine}
+            setLineTaxMode={setLineTaxMode}
+            setLineZeroExemptKind={setLineZeroExemptKind}
+            t={t}
+          />
+        ) : null}
+      </Modal>
+
+      <ConfirmDialog
+        open={Boolean(lateConfirm)}
+        title={t('title')}
+        description={
+          lateConfirm
+            ? t('lateSubmitConfirm', {
+                count: 1,
+                days: lateConfirm.days,
+              })
+            : undefined
+        }
+        onClose={() => {
+          lateConfirm?.resolve(false);
+          setLateConfirm(null);
+        }}
+        onConfirm={() => {
+          lateConfirm?.resolve(true);
+          setLateConfirm(null);
+        }}
+      />
+
+      <CancelReasonDialog
+        open={cancelOpen}
+        loading={submitting}
+        onClose={() => setCancelOpen(false)}
+        onConfirm={(reason) => {
+          setCancelOpen(false);
+          void (async () => {
+            if (!reason.trim()) {
+              setError(t('cancelReasonRequired'));
+              return;
+            }
+            try {
+              setSubmitting(true);
+              setError(null);
+              await cancelDocument(params.id, reason.trim());
+              setDocStatus('CANCELLED');
+              setEtaStatusRaw('Cancelled');
+              setIssues([
+                t('batchCancelSummary', {
+                  cancelled: 1,
+                  skipped: 0,
+                  failed: 0,
+                }),
+              ]);
+            } catch (e) {
+              setError(e instanceof Error ? e.message : t('forbidden'));
+            } finally {
+              setSubmitting(false);
+            }
+          })();
+        }}
+      />
 
       <LocalPdfPreviewModal
         open={previewOpen}

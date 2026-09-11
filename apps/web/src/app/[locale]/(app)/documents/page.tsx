@@ -31,14 +31,37 @@ import { LocalPdfPreviewModal } from '@/components/local-pdf-preview-modal';
 import { canCreateReturnCreditNote, canEditDocument } from '@/lib/document-actions';
 import { resolveDocumentStatus } from '@/lib/document-status-display';
 import { formatMoneyDisplay } from '@/lib/format-number';
+import { useToast } from '@/components/ui/toast';
+import { PageHeader } from '@/components/ui/page-header';
+import { Breadcrumbs } from '@/components/ui/breadcrumbs';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { FilterBar } from '@/components/ui/filter-bar';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Skeleton } from '@/components/ui/skeleton';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { DropdownMenu } from '@/components/ui/dropdown-menu';
+import { CopyButton } from '@/components/ui/copy-button';
+import { TableWrap, Th, Td } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { CancelReasonDialog } from './_components/cancel-reason-dialog';
+import { DocumentStatusBadge } from './_components/document-status-badge';
+import {
+  AUTO_POLL_MS,
+  KIND_FILTERS,
+  PAGE_SIZE,
+  STATUS_FILTERS,
+  canCancel,
+  canDownloadEta,
+  formatIssueDate,
+  isPendingEta,
+  isSigned,
+  type SortBy,
+} from './_components/document-list-utils';
 
 type DocRow = DocumentListItem;
-
-type SortBy =
-  | 'issueDateTime'
-  | 'totalAmount'
-  | 'internalId'
-  | 'receiverName';
 
 type CancelBatchResult = {
   requested: number;
@@ -54,73 +77,16 @@ type CancelBatchResult = {
   }>;
 };
 
-const AUTO_POLL_MS = 5_000;
-const PAGE_SIZE = 50;
-
-function isSigned(status: string) {
-  return status === 'SIGNED';
-}
-
-function isPendingEta(status: string, etaUuid?: string | null) {
-  return status === 'SUBMITTED' || (Boolean(etaUuid) && status === 'SUBMITTED');
-}
-
-function canCancel(status: string, etaUuid?: string | null) {
-  return Boolean(etaUuid) && (status === 'VALID' || status === 'SUBMITTED');
-}
-
-function canDownloadEta(status: string, etaUuid?: string | null) {
-  return (
-    Boolean(etaUuid) &&
-    (status === 'VALID' ||
-      status === 'INVALID' ||
-      status === 'SUBMITTED' ||
-      status === 'CANCELLED' ||
-      status === 'REJECTED')
-  );
-}
-
-function formatIssueDate(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-function statusBadgeClass(status: string): string {
-  switch (status) {
-    case 'VALID':
-      return 'bg-green-100 text-green-900';
-    case 'INVALID':
-    case 'REJECTED':
-    case 'CANCELLED':
-      return 'bg-red-100 text-red-900';
-    case 'SUBMITTED':
-      return 'bg-blue-100 text-blue-900';
-    case 'SIGNED':
-      return 'bg-emerald-100 text-emerald-900';
-    case 'DRAFT':
-      return 'bg-zinc-100 text-zinc-800';
-    case 'READY':
-    case 'PENDING_SIGNATURE':
-      return 'bg-amber-100 text-amber-900';
-    default:
-      return 'bg-zinc-100 text-zinc-800';
-  }
-}
-
 export default function DocumentsPage() {
   const t = useTranslations('documents');
+  const tNav = useTranslations('nav');
   const locale = useLocale();
   const router = useRouter();
+  const { push } = useToast();
   const [items, setItems] = useState<DocRow[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
-  const [toastTone, setToastTone] = useState<'ok' | 'err' | 'info'>('info');
   const [busy, setBusy] = useState(false);
+  const [listReady, setListReady] = useState(false);
   const [salesSyncing, setSalesSyncing] = useState(false);
   const [showSalesSyncReset, setShowSalesSyncReset] = useState(false);
   const [syncFrom, setSyncFrom] = useState(() => {
@@ -148,6 +114,15 @@ export default function DocumentsPage() {
     null,
   );
   const [lastCancel, setLastCancel] = useState<CancelBatchResult | null>(null);
+  const [lateConfirm, setLateConfirm] = useState<{
+    count: number;
+    days: number;
+    resolve: (ok: boolean) => void;
+  } | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<{
+    ids: string[];
+    batch: boolean;
+  } | null>(null);
 
   const queryParams = useCallback(
     (cursor?: string) => ({
@@ -175,6 +150,8 @@ export default function DocumentsPage() {
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : t('forbidden'));
+    } finally {
+      setListReady(true);
     }
   }, [queryParams, t]);
 
@@ -235,6 +212,9 @@ export default function DocumentsPage() {
     () => items.filter((d) => selected.has(d.id)),
     [items, selected],
   );
+  const filtersActive = Boolean(
+    statusFilter || kindFilter || from || to || receiver.trim() || q.trim(),
+  );
 
   const toggleAll = () => {
     if (allSelected) setSelected(new Set());
@@ -251,9 +231,11 @@ export default function DocumentsPage() {
   };
 
   const showToast = (message: string, tone: 'ok' | 'err' | 'info' = 'info') => {
-    setToast(message);
-    setToastTone(tone);
-    window.setTimeout(() => setToast(null), 12000);
+    push({
+      title: message,
+      kind: tone === 'ok' ? 'success' : tone === 'err' ? 'error' : 'info',
+      timeoutMs: 12000,
+    });
   };
 
   const runSalesSync = async () => {
@@ -334,21 +316,22 @@ export default function DocumentsPage() {
       if (!isSigned(d.status) || !d.issueDateTime) return false;
       return checkLateSubmission(d.issueDateTime).isLate;
     });
-    if (!late.length) return true;
+    if (!late.length) return Promise.resolve(true);
     const sample = late[0]!;
     const check = checkLateSubmission(sample.issueDateTime!);
-    return window.confirm(
-      t('lateSubmitConfirm', {
+    return new Promise<boolean>((resolve) => {
+      setLateConfirm({
         count: late.length,
         days: check.warnDays,
-      }),
-    );
+        resolve,
+      });
+    });
   };
 
   const runSendSelected = async () => {
     const ids = [...selected];
     if (!ids.length) return;
-    if (!confirmLateIfNeeded(selectedRows)) return;
+    if (!(await confirmLateIfNeeded(selectedRows))) return;
     setBusy(true);
     setError(null);
     setLastBatch(null);
@@ -384,15 +367,7 @@ export default function DocumentsPage() {
     }
   };
 
-  const runCancelSelected = async () => {
-    const ids = selectedRows
-      .filter((d) => canCancel(d.status, d.etaUuid))
-      .map((d) => d.id);
-    if (!ids.length) {
-      setError(t('cancelNoneEligible'));
-      return;
-    }
-    const reason = window.prompt(t('cancelReasonPrompt')) ?? '';
+  const executeCancel = async (ids: string[], reason: string, batch: boolean) => {
     if (!reason.trim()) {
       setError(t('cancelReasonRequired'));
       return;
@@ -401,15 +376,20 @@ export default function DocumentsPage() {
     setError(null);
     setLastCancel(null);
     try {
-      const result = await cancelDocumentsSelected(ids, reason.trim());
-      setLastCancel(result);
-      showToast(
-        t('batchCancelSummary', {
-          cancelled: result.cancelled,
-          skipped: result.skipped,
-          failed: result.failed,
-        }),
-      );
+      if (batch) {
+        const result = await cancelDocumentsSelected(ids, reason.trim());
+        setLastCancel(result);
+        showToast(
+          t('batchCancelSummary', {
+            cancelled: result.cancelled,
+            skipped: result.skipped,
+            failed: result.failed,
+          }),
+        );
+      } else {
+        await cancelDocument(ids[0]!, reason.trim());
+        showToast(t('batchCancelSummary', { cancelled: 1, skipped: 0, failed: 0 }));
+      }
       setSelected(new Set());
       await reload();
     } catch (e) {
@@ -417,6 +397,17 @@ export default function DocumentsPage() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const runCancelSelected = async () => {
+    const ids = selectedRows
+      .filter((d) => canCancel(d.status, d.etaUuid))
+      .map((d) => d.id);
+    if (!ids.length) {
+      setError(t('cancelNoneEligible'));
+      return;
+    }
+    setCancelTarget({ ids, batch: true });
   };
 
   const runRefreshSelected = async () => {
@@ -519,28 +510,13 @@ export default function DocumentsPage() {
   };
 
   const runCancelOne = async (id: string) => {
-    const reason = window.prompt(t('cancelReasonPrompt')) ?? '';
-    if (!reason.trim()) {
-      setError(t('cancelReasonRequired'));
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      await cancelDocument(id, reason.trim());
-      showToast(t('batchCancelSummary', { cancelled: 1, skipped: 0, failed: 0 }));
-      await reload();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t('forbidden'));
-    } finally {
-      setBusy(false);
-    }
+    setCancelTarget({ ids: [id], batch: false });
   };
 
   const runSubmitOne = async (id: string) => {
     const row = items.find((d) => d.id === id);
     if (!row || !isSigned(row.status) || row.origin === 'ETA_SYNC') return;
-    if (!confirmLateIfNeeded([row])) return;
+    if (!(await confirmLateIfNeeded([row]))) return;
     setBusy(true);
     setError(null);
     try {
@@ -623,254 +599,215 @@ export default function DocumentsPage() {
     return sortDir === 'asc' ? ' ↑' : ' ↓';
   };
 
-  const thClass =
-    'whitespace-nowrap border-b border-border px-token-sm py-token-sm text-start text-token-xs font-medium text-foreground/70';
-  const tdClass = 'border-b border-border px-token-sm py-token-sm text-token-sm';
+  const resetFilters = () => {
+    setStatusFilter('');
+    setKindFilter('');
+    setFrom('');
+    setTo('');
+    setReceiver('');
+    setQ('');
+    setSelected(new Set());
+  };
 
   return (
-    <div className="space-y-token-lg">
-      <div className="flex flex-wrap items-center justify-between gap-token-md">
-        <h1 className="font-display text-token-2xl text-brand">{t('title')}</h1>
-        <div className="flex flex-wrap items-end gap-token-sm">
-          <label className="block text-token-xs">
-            {t('salesSyncFrom')}
-            <input
+    <div className="space-y-token-lg" data-testid="documents-page">
+      <PageHeader
+        breadcrumbs={
+          <Breadcrumbs
+            items={[
+              { label: tNav('home'), href: `/${locale}` },
+              { label: t('title') },
+            ]}
+          />
+        }
+        title={t('title')}
+        subtitle={`${t('listLoaded', { count: items.length })} · ${t('salesSyncRangeHint')}`}
+        actions={
+          <>
+            <Input
               type="date"
-              className="mt-1 block border border-border bg-background px-2 py-1"
+              label={t('salesSyncFrom')}
               value={syncFrom}
               onChange={(e) => setSyncFrom(e.target.value)}
               dir="ltr"
+              className="w-auto"
             />
-          </label>
-          <label className="block text-token-xs">
-            {t('salesSyncTo')}
-            <input
+            <Input
               type="date"
-              className="mt-1 block border border-border bg-background px-2 py-1"
+              label={t('salesSyncTo')}
               value={syncTo}
               onChange={(e) => setSyncTo(e.target.value)}
               dir="ltr"
+              className="w-auto"
             />
-          </label>
-          {showSalesSyncReset ? (
-            <button
-              type="button"
-              disabled={salesSyncing || busy}
-              className="rounded border border-danger/50 px-token-md py-token-sm text-token-sm text-danger disabled:opacity-50"
-              onClick={() => void runResetSalesSync()}
-            >
-              {t('salesSyncReset')}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            disabled={salesSyncing || busy}
-            className="rounded border border-brand px-token-md py-token-sm text-token-sm text-brand disabled:opacity-50"
-            onClick={() => void runSalesSync()}
-          >
-            {salesSyncing ? t('salesSyncing') : t('salesSync')}
-          </button>
-          <Link
-            href={`/${locale}/documents/new`}
-            className="rounded bg-brand px-token-md py-token-sm text-token-sm text-white"
-          >
-            {t('new')}
-          </Link>
-        </div>
-      </div>
-      <p className="text-token-xs text-foreground/60">{t('salesSyncRangeHint')}</p>
-
-      <div className="grid grid-cols-2 gap-token-sm md:grid-cols-3 lg:grid-cols-6">
-        <label className="block text-token-xs">
-          {t('filterFrom')}
-          <input
-            type="date"
-            className="mt-1 w-full border border-border bg-background px-2 py-1"
-            value={from}
-            onChange={(e) => {
-              setFrom(e.target.value);
-              setSelected(new Set());
-            }}
-            dir="ltr"
-          />
-        </label>
-        <label className="block text-token-xs">
-          {t('filterTo')}
-          <input
-            type="date"
-            className="mt-1 w-full border border-border bg-background px-2 py-1"
-            value={to}
-            onChange={(e) => {
-              setTo(e.target.value);
-              setSelected(new Set());
-            }}
-            dir="ltr"
-          />
-        </label>
-        <label className="block text-token-xs">
-          {t('filterKind')}
-          <select
-            className="mt-1 w-full border border-border bg-background px-2 py-1"
-            value={kindFilter}
-            onChange={(e) => {
-              setKindFilter(e.target.value);
-              setSelected(new Set());
-            }}
-          >
-            <option value="">{t('filterAll')}</option>
-            {(
-              [
-                'INVOICE',
-                'CREDIT_NOTE',
-                'DEBIT_NOTE',
-                'EXPORT_INVOICE',
-                'EXPORT_CREDIT_NOTE',
-                'EXPORT_DEBIT_NOTE',
-              ] as const
-            ).map((k) => (
-              <option key={k} value={k}>
-                {kindLabel(k)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block text-token-xs">
-          {t('filterStatus')}
-          <select
-            className="mt-1 w-full border border-border bg-background px-2 py-1"
-            value={statusFilter}
-            onChange={(e) => {
-              setStatusFilter(e.target.value);
-              setSelected(new Set());
-            }}
-          >
-            <option value="">{t('filterAll')}</option>
-            {(
-              [
-                'DRAFT',
-                'READY',
-                'PENDING_SIGNATURE',
-                'SIGNED',
-                'SUBMITTED',
-                'VALID',
-                'INVALID',
-                'CANCELLED',
-                'REJECTED',
-              ] as const
-            ).map((s) => (
-              <option key={s} value={s}>
-                {statusLabel(s)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block text-token-xs">
-          {t('filterReceiver')}
-          <input
-            className="mt-1 w-full border border-border bg-background px-2 py-1"
-            value={receiver}
-            onChange={(e) => {
-              setReceiver(e.target.value);
-              setSelected(new Set());
-            }}
-            placeholder={t('filterReceiver')}
-          />
-        </label>
-        <label className="block text-token-xs">
-          {t('filterSearch')}
-          <input
-            className="mt-1 w-full border border-border bg-background px-2 py-1"
-            value={q}
-            onChange={(e) => {
-              setQ(e.target.value);
-              setSelected(new Set());
-            }}
-            placeholder={t('filterSearch')}
-          />
-        </label>
-      </div>
-
-      {items.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-token-sm rounded border border-border bg-background/60 px-token-md py-token-sm">
-          <label className="inline-flex items-center gap-token-xs text-token-sm">
-            <input
-              type="checkbox"
-              checked={allSelected}
-              onChange={toggleAll}
-              aria-label={t('selectAllMatching')}
-            />
-            {t('selectAllMatching')}
-            {selectedCount ? (
-              <span className="text-foreground/60">
-                ({t('selectedCount', { count: selectedCount })})
-              </span>
+            {showSalesSyncReset ? (
+              <Button
+                variant="danger"
+                disabled={salesSyncing || busy}
+                onClick={() => void runResetSalesSync()}
+              >
+                {t('salesSyncReset')}
+              </Button>
             ) : null}
-          </label>
+            <Button
+              variant="secondary"
+              disabled={salesSyncing || busy}
+              loading={salesSyncing}
+              onClick={() => void runSalesSync()}
+            >
+              {salesSyncing ? t('salesSyncing') : t('salesSync')}
+            </Button>
+            <Button
+              onClick={() => router.push(`/${locale}/documents/new`)}
+              data-testid="documents-new"
+            >
+              {t('new')}
+            </Button>
+          </>
+        }
+      />
+
+      <FilterBar
+        search={q}
+        onSearchChange={(value) => {
+          setQ(value);
+          setSelected(new Set());
+        }}
+        searchPlaceholder={t('filterSearch')}
+        onReset={resetFilters}
+        chips={[
+          {
+            id: 'all',
+            label: t('filterAll'),
+            active: statusFilter === '',
+            onClick: () => {
+              setStatusFilter('');
+              setSelected(new Set());
+            },
+          },
+          ...STATUS_FILTERS.map((s) => ({
+            id: s,
+            label: statusLabel(s),
+            active: statusFilter === s,
+            onClick: () => {
+              setStatusFilter(s);
+              setSelected(new Set());
+            },
+          })),
+        ]}
+      >
+        <Input
+          type="date"
+          label={t('filterFrom')}
+          value={from}
+          onChange={(e) => {
+            setFrom(e.target.value);
+            setSelected(new Set());
+          }}
+          dir="ltr"
+          className="w-auto"
+        />
+        <Input
+          type="date"
+          label={t('filterTo')}
+          value={to}
+          onChange={(e) => {
+            setTo(e.target.value);
+            setSelected(new Set());
+          }}
+          dir="ltr"
+          className="w-auto"
+        />
+        <Select
+          label={t('filterKind')}
+          value={kindFilter}
+          onChange={(e) => {
+            setKindFilter(e.target.value);
+            setSelected(new Set());
+          }}
+          className="w-auto"
+        >
+          <option value="">{t('filterAll')}</option>
+          {KIND_FILTERS.map((k) => (
+            <option key={k} value={k}>
+              {kindLabel(k)}
+            </option>
+          ))}
+        </Select>
+        <Input
+          label={t('filterReceiver')}
+          value={receiver}
+          onChange={(e) => {
+            setReceiver(e.target.value);
+            setSelected(new Set());
+          }}
+          placeholder={t('filterReceiver')}
+          className="min-w-[var(--size-search-min)]"
+        />
+      </FilterBar>
+
+      {selectedCount > 0 ? (
+        <section
+          className="flex flex-wrap items-center gap-token-sm rounded-lg bg-navy px-token-md py-token-sm text-on-dark shadow-sm"
+          data-testid="documents-bulk-bar"
+        >
+          <span className="text-token-sm font-medium">
+            {t('selectedCount', { count: selectedCount })}
+          </span>
           <div className="ms-auto flex flex-wrap gap-token-xs">
-            <button
-              type="button"
+            <Button
+              size="sm"
               disabled={busy || selectedCount === 0}
-              className="rounded bg-brand px-token-md py-token-xs text-token-sm text-white disabled:opacity-50"
+              loading={busy}
               onClick={() => void runSendSelected()}
             >
               {busy ? t('submitting') : t('sendSelected')}
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
               disabled={busy || selectedCount === 0}
-              className="rounded border border-border px-token-md py-token-xs text-token-sm disabled:opacity-50"
               onClick={() => void runRefreshSelected()}
             >
               {t('refreshSelected')}
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              className="rounded border border-border px-token-md py-token-xs text-token-sm disabled:opacity-50"
-              onClick={() => void runRefreshPending()}
-            >
-              {t('refreshAllPending')}
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              size="sm"
+              variant="danger"
               disabled={
                 busy ||
                 !selectedRows.some((d) => canCancel(d.status, d.etaUuid))
               }
-              className="rounded border border-danger/40 px-token-md py-token-xs text-token-sm text-danger disabled:opacity-50"
               onClick={() => void runCancelSelected()}
             >
               {t('cancelSelected')}
-            </button>
+            </Button>
           </div>
-        </div>
+        </section>
       ) : null}
 
-      {toast ? (
-        <p
-          className={
-            toastTone === 'ok'
-              ? 'rounded border-2 border-green-600 bg-green-50 px-token-md py-token-md text-token-sm font-medium text-green-900'
-              : toastTone === 'err'
-                ? 'rounded border-2 border-danger bg-danger/10 px-token-md py-token-md text-token-sm font-medium text-danger'
-                : 'rounded border-2 border-brand bg-brand/10 px-token-md py-token-md text-token-sm font-medium'
-          }
-          role="status"
+      <div className="flex flex-wrap items-center gap-token-sm">
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={busy}
+          onClick={() => void runRefreshPending()}
         >
-          {toast}
-        </p>
-      ) : null}
+          {t('refreshAllPending')}
+        </Button>
+      </div>
+
       {error ? (
-        <p
-          className="rounded border-2 border-danger bg-danger/10 px-token-md py-token-md text-token-sm font-medium text-danger"
-          role="alert"
-        >
-          {error}
-        </p>
+        <Card className="border-danger" data-testid="documents-error" role="alert">
+          <p className="m-0 text-token-sm font-medium text-danger">{error}</p>
+          <Button className="mt-token-sm" size="sm" variant="secondary" onClick={() => void reload()}>
+            {t('retryLoad')}
+          </Button>
+        </Card>
       ) : null}
 
       {lastBatch ? (
-        <details className="rounded border border-border px-token-md py-token-sm text-token-sm">
+        <details className="rounded-lg border border-border bg-surface px-token-md py-token-sm text-token-sm shadow-sm">
           <summary>
             {t('batchSendDetails', {
               sent: lastBatch.sent,
@@ -879,7 +816,7 @@ export default function DocumentsPage() {
             })}
           </summary>
           {lastBatch.lateWarnings?.length ? (
-            <p className="mt-token-sm text-amber-800">
+            <p className="mt-token-sm text-warning">
               {t('lateWarningsInBatch', {
                 count: lastBatch.lateWarnings.length,
               })}
@@ -898,7 +835,7 @@ export default function DocumentsPage() {
       ) : null}
 
       {lastRefresh ? (
-        <details className="rounded border border-border px-token-md py-token-sm text-token-sm">
+        <details className="rounded-lg border border-border bg-surface px-token-md py-token-sm text-token-sm shadow-sm">
           <summary>
             {t('batchRefreshDetails', {
               updated: lastRefresh.updated,
@@ -923,7 +860,7 @@ export default function DocumentsPage() {
       ) : null}
 
       {lastCancel ? (
-        <details className="rounded border border-border px-token-md py-token-sm text-token-sm">
+        <details className="rounded-lg border border-border bg-surface px-token-md py-token-sm text-token-sm shadow-sm">
           <summary>
             {t('batchCancelDetails', {
               cancelled: lastCancel.cancelled,
@@ -943,244 +880,301 @@ export default function DocumentsPage() {
         </details>
       ) : null}
 
-      {items.length === 0 ? (
-        <p className="text-foreground/70">{t('empty')}</p>
+      {!listReady ? (
+        <div data-testid="documents-loading" className="space-y-token-sm" aria-busy="true">
+          <Skeleton variant="rect" className="h-token-xl" />
+          <Skeleton variant="rect" className="h-[12rem]" />
+        </div>
+      ) : items.length === 0 ? (
+        <div data-testid="documents-empty">
+          <EmptyState
+            title={filtersActive ? t('emptyFiltered') : t('empty')}
+            action={{
+              label: filtersActive ? t('retryLoad') : t('new'),
+              onClick: () => {
+                if (filtersActive) resetFilters();
+                else router.push(`/${locale}/documents/new`);
+              },
+            }}
+          />
+        </div>
       ) : (
-        <div className="overflow-x-auto border border-border">
-          <table className="min-w-full border-collapse text-start">
-            <thead className="bg-background/80">
+        <TableWrap data-testid="documents-table">
+          <table className="w-full min-w-[72rem] border-collapse text-start text-token-sm">
+            <caption className="sr-only">{t('listCaption')}</caption>
+            <thead>
               <tr>
-                <th className={thClass}>
+                <Th>
                   <input
                     type="checkbox"
+                    className="h-token-sm w-token-sm rounded-sm border-border-strong text-brand focus-visible:shadow-ring focus-visible:outline-none"
                     checked={allSelected}
                     onChange={toggleAll}
                     aria-label={t('selectAllMatching')}
                   />
-                </th>
-                <th className={thClass}>
-                  <button
-                    type="button"
-                    className="hover:text-brand"
-                    onClick={() => toggleSort('internalId')}
-                  >
+                </Th>
+                <Th>
+                  <button type="button" className="hover:text-brand" onClick={() => toggleSort('internalId')}>
                     {t('colInvoice')}
                     {sortIndicator('internalId')}
                   </button>
-                </th>
-                <th className={thClass}>{t('colEtaId')}</th>
-                <th className={thClass}>{t('colType')}</th>
-                <th className={thClass}>
-                  <button
-                    type="button"
-                    className="hover:text-brand"
-                    onClick={() => toggleSort('issueDateTime')}
-                  >
+                </Th>
+                <Th>{t('colEtaId')}</Th>
+                <Th>{t('colType')}</Th>
+                <Th>
+                  <button type="button" className="hover:text-brand" onClick={() => toggleSort('issueDateTime')}>
                     {t('colIssueDate')}
                     {sortIndicator('issueDateTime')}
                   </button>
-                </th>
-                <th className={thClass}>
-                  <button
-                    type="button"
-                    className="hover:text-brand"
-                    onClick={() => toggleSort('receiverName')}
-                  >
+                </Th>
+                <Th>
+                  <button type="button" className="hover:text-brand" onClick={() => toggleSort('receiverName')}>
                     {t('colReceiver')}
                     {sortIndicator('receiverName')}
                   </button>
-                </th>
-                <th className={thClass}>{t('colReceiverTax')}</th>
-                <th className={thClass}>
-                  <button
-                    type="button"
-                    className="hover:text-brand"
-                    onClick={() => toggleSort('totalAmount')}
-                  >
+                </Th>
+                <Th>{t('colReceiverTax')}</Th>
+                <Th align="end">
+                  <button type="button" className="hover:text-brand" onClick={() => toggleSort('totalAmount')}>
                     {t('colAmount')}
                     {sortIndicator('totalAmount')}
                   </button>
-                </th>
-                <th className={thClass}>{t('colCurrency')}</th>
-                <th className={thClass}>{t('colStatus')}</th>
-                <th className={thClass}>{t('colSource')}</th>
-                <th className={thClass}>{t('colActions')}</th>
+                </Th>
+                <Th>{t('colCurrency')}</Th>
+                <Th>{t('colStatus')}</Th>
+                <Th>{t('colSource')}</Th>
+                <Th>{t('colActions')}</Th>
               </tr>
             </thead>
             <tbody>
-              {items.map((doc) => (
-                <tr key={doc.id} className="hover:bg-brand/5">
-                  <td className={tdClass}>
-                    <input
-                      type="checkbox"
-                      checked={selected.has(doc.id)}
-                      onChange={() => toggleOne(doc.id)}
-                      aria-label={t('selectRow', {
-                        internalId: doc.internalId,
-                      })}
-                    />
-                  </td>
-                  <td className={tdClass}>
-                    <Link
-                      href={`/${locale}/documents/${doc.id}`}
-                      className="font-medium text-brand hover:underline"
-                      dir="ltr"
-                    >
-                      {doc.internalId}
-                    </Link>
-                  </td>
-                  <td className={`${tdClass} max-w-[14rem]`}>
-                    <span
-                      className="block truncate font-mono text-token-xs"
-                      dir="ltr"
-                      title={doc.etaLongId || doc.etaUuid || undefined}
-                    >
-                      {doc.etaLongId || doc.etaUuid || '—'}
-                    </span>
-                  </td>
-                  <td className={tdClass}>{kindLabel(doc.kind)}</td>
-                  <td className={tdClass}>
-                    <span dir="ltr" className="tabular-nums">
-                      {formatIssueDate(doc.issueDateTime)}
-                    </span>
-                  </td>
-                  <td className={tdClass}>{doc.receiverName || '—'}</td>
-                  <td className={tdClass}>
-                    <span dir="ltr" className="tabular-nums">
-                      {doc.receiverId || '—'}
-                    </span>
-                  </td>
-                  <td className={tdClass}>
-                    <span dir="ltr" className="tabular-nums">
-                      {formatMoneyDisplay(doc.totalAmount)}
-                    </span>
-                  </td>
-                  <td className={tdClass}>
-                    <span dir="ltr">{doc.currencyCode || '—'}</span>
-                  </td>
-                  <td className={tdClass}>
-                    <span
-                      className={`inline-block rounded px-token-xs text-token-xs ${statusBadgeClass(resolveDocumentStatus(doc.status, doc.etaStatus))}`}
-                    >
-                      {statusLabel(resolveDocumentStatus(doc.status, doc.etaStatus))}
-                    </span>
-                    {doc.needsAttention ? (
-                      <span className="ms-token-xs text-token-xs text-amber-800">
-                        {t('needsAttention')}
+              {items.map((doc) => {
+                const displayStatus = resolveDocumentStatus(doc.status, doc.etaStatus);
+                const late =
+                  isSigned(doc.status) &&
+                  doc.origin !== 'ETA_SYNC' &&
+                  Boolean(doc.issueDateTime) &&
+                  checkLateSubmission(doc.issueDateTime).isLate;
+                const etaId = doc.etaLongId || doc.etaUuid || '';
+                return (
+                  <tr key={doc.id} className="hover:bg-surface-alt">
+                    <Td>
+                      <input
+                        type="checkbox"
+                        className="h-token-sm w-token-sm rounded-sm border-border-strong text-brand focus-visible:shadow-ring focus-visible:outline-none"
+                        checked={selected.has(doc.id)}
+                        onChange={() => toggleOne(doc.id)}
+                        aria-label={t('selectRow', { internalId: doc.internalId })}
+                      />
+                    </Td>
+                    <Td>
+                      <Link
+                        href={`/${locale}/documents/${doc.id}`}
+                        className="font-en font-medium text-brand hover:underline"
+                        dir="ltr"
+                      >
+                        {doc.internalId}
+                      </Link>
+                    </Td>
+                    <Td className="max-w-[14rem]">
+                      {etaId ? (
+                        <span className="inline-flex max-w-full items-center gap-token-xs">
+                          <span
+                            className="block truncate font-en text-token-xs text-foreground-muted"
+                            dir="ltr"
+                            title={etaId}
+                          >
+                            {etaId}
+                          </span>
+                          <CopyButton value={etaId} className="shrink-0" />
+                        </span>
+                      ) : (
+                        <span className="text-foreground-muted">—</span>
+                      )}
+                    </Td>
+                    <Td>{kindLabel(doc.kind)}</Td>
+                    <Td>
+                      <span dir="ltr" className="font-en tabular-nums">
+                        {formatIssueDate(doc.issueDateTime)}
                       </span>
-                    ) : null}
-                  </td>
-                  <td className={tdClass}>
-                    {doc.origin === 'ETA_SYNC' ? (
-                      <span className="rounded bg-amber-100 px-token-xs text-token-xs text-amber-900">
-                        {t('importedBadge')}
+                    </Td>
+                    <Td className="font-medium">{doc.receiverName || '—'}</Td>
+                    <Td>
+                      <span dir="ltr" className="font-en tabular-nums">
+                        {doc.receiverId || '—'}
                       </span>
-                    ) : (
-                      '—'
-                    )}
-                  </td>
-                  <td className={tdClass}>
-                    <select
-                      className="max-w-[10rem] border border-border bg-background px-token-xs py-token-xs text-token-xs"
-                      disabled={busy}
-                      defaultValue=""
-                      aria-label={t('actionsMenu')}
-                      onChange={(e) => {
-                        const action = e.target.value;
-                        e.target.value = '';
-                        if (!action) return;
-                        if (action === 'view') {
-                          router.push(`/${locale}/documents/${doc.id}`);
-                          return;
-                        }
-                        if (action === 'preview') {
-                          setPreviewId(doc.id);
-                          return;
-                        }
-                        if (action === 'submit') {
-                          void runSubmitOne(doc.id);
-                          return;
-                        }
-                        if (action === 'refresh') {
-                          void runRefreshOne(doc.id);
-                          return;
-                        }
-                        if (action === 'printout') {
-                          void runDownloadPrintout(doc.id);
-                          return;
-                        }
-                        if (action === 'return') {
-                          void runReturnOne(doc.id);
-                          return;
-                        }
-                        if (action === 'cancel') {
-                          void runCancelOne(doc.id);
-                          return;
-                        }
-                        if (action === 'delete') {
-                          void (async () => {
-                            await deleteDocument(doc.id);
-                            setSelected((prev) => {
-                              const next = new Set(prev);
-                              next.delete(doc.id);
-                              return next;
-                            });
-                            await reload();
-                          })();
-                        }
-                      }}
-                    >
-                      <option value="">{t('actionsMenu')}</option>
-                      <option value="view">{t('view')}</option>
-                      <option value="preview">{t('previewPrint')}</option>
-                      {isSigned(doc.status) && doc.origin !== 'ETA_SYNC' ? (
-                        <option value="submit">{t('submitOne')}</option>
-                      ) : null}
-                      {isPendingEta(doc.status, doc.etaUuid) ||
-                      doc.status === 'VALID' ||
-                      doc.status === 'INVALID' ? (
-                        <option value="refresh">{t('refreshStatus')}</option>
-                      ) : null}
-                      {canDownloadEta(doc.status, doc.etaUuid) ? (
-                        <option value="printout">{t('downloadPrintout')}</option>
-                      ) : null}
-                      {canCreateReturnCreditNote(
-                        doc.kind,
-                        resolveDocumentStatus(doc.status, doc.etaStatus),
-                        doc.etaUuid,
-                      ) ? (
-                        <option value="return">{t('returnCreditNote')}</option>
-                      ) : null}
-                      {canCancel(doc.status, doc.etaUuid) ? (
-                        <option value="cancel">{t('cancelDocument')}</option>
-                      ) : null}
-                      {canEditDocument(
-                        doc.origin,
-                        resolveDocumentStatus(doc.status, doc.etaStatus),
-                      ) ? (
-                        <option value="delete">{t('delete')}</option>
-                      ) : null}
-                    </select>
-                  </td>
-                </tr>
-              ))}
+                    </Td>
+                    <Td align="end">
+                      <span dir="ltr" className="font-en tabular-nums">
+                        {formatMoneyDisplay(doc.totalAmount)}
+                      </span>
+                    </Td>
+                    <Td>
+                      <span dir="ltr" className="font-en">
+                        {doc.currencyCode || '—'}
+                      </span>
+                    </Td>
+                    <Td>
+                      <span className="inline-flex flex-wrap items-center gap-token-xs">
+                        <DocumentStatusBadge status={displayStatus} label={statusLabel(displayStatus)} />
+                        {late ? (
+                          <Badge variant="warning">{t('lateBadge')}</Badge>
+                        ) : null}
+                        {doc.needsAttention ? (
+                          <span className="text-token-xs text-warning">{t('needsAttention')}</span>
+                        ) : null}
+                      </span>
+                    </Td>
+                    <Td>
+                      {doc.origin === 'ETA_SYNC' ? (
+                        <Badge variant="warning">{t('importedBadge')}</Badge>
+                      ) : (
+                        '—'
+                      )}
+                    </Td>
+                    <Td>
+                      <DropdownMenu
+                        label={t('actionsMenu')}
+                        items={[
+                          {
+                            id: 'view',
+                            label: t('view'),
+                            onSelect: () => router.push(`/${locale}/documents/${doc.id}`),
+                          },
+                          {
+                            id: 'preview',
+                            label: t('previewPrint'),
+                            onSelect: () => setPreviewId(doc.id),
+                          },
+                          ...(isSigned(doc.status) && doc.origin !== 'ETA_SYNC'
+                            ? [
+                                {
+                                  id: 'submit',
+                                  label: t('submitOne'),
+                                  onSelect: () => void runSubmitOne(doc.id),
+                                },
+                              ]
+                            : []),
+                          ...(isPendingEta(doc.status, doc.etaUuid) ||
+                          doc.status === 'VALID' ||
+                          doc.status === 'INVALID'
+                            ? [
+                                {
+                                  id: 'refresh',
+                                  label: t('refreshStatus'),
+                                  onSelect: () => void runRefreshOne(doc.id),
+                                },
+                              ]
+                            : []),
+                          ...(canDownloadEta(doc.status, doc.etaUuid)
+                            ? [
+                                {
+                                  id: 'printout',
+                                  label: t('downloadPrintout'),
+                                  onSelect: () => void runDownloadPrintout(doc.id),
+                                },
+                              ]
+                            : []),
+                          ...(canCreateReturnCreditNote(
+                            doc.kind,
+                            resolveDocumentStatus(doc.status, doc.etaStatus),
+                            doc.etaUuid,
+                          )
+                            ? [
+                                {
+                                  id: 'return',
+                                  label: t('returnCreditNote'),
+                                  onSelect: () => void runReturnOne(doc.id),
+                                },
+                              ]
+                            : []),
+                          ...(canCancel(doc.status, doc.etaUuid)
+                            ? [
+                                {
+                                  id: 'cancel',
+                                  label: t('cancelDocument'),
+                                  danger: true,
+                                  onSelect: () => void runCancelOne(doc.id),
+                                },
+                              ]
+                            : []),
+                          ...(canEditDocument(
+                            doc.origin,
+                            resolveDocumentStatus(doc.status, doc.etaStatus),
+                          )
+                            ? [
+                                {
+                                  id: 'delete',
+                                  label: t('delete'),
+                                  danger: true,
+                                  onSelect: () => {
+                                    void (async () => {
+                                      await deleteDocument(doc.id);
+                                      setSelected((prev) => {
+                                        const next = new Set(prev);
+                                        next.delete(doc.id);
+                                        return next;
+                                      });
+                                      await reload();
+                                    })();
+                                  },
+                                },
+                              ]
+                            : []),
+                        ]}
+                      />
+                    </Td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
-        </div>
+        </TableWrap>
       )}
 
       {nextCursor ? (
         <div className="flex justify-center">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
             disabled={loadingMore}
+            loading={loadingMore}
             onClick={() => void loadMore()}
-            className="rounded border border-border px-token-md py-token-sm text-token-sm disabled:opacity-50"
           >
             {loadingMore ? t('loading') : t('loadMore')}
-          </button>
+          </Button>
         </div>
       ) : null}
+
+      <ConfirmDialog
+        open={Boolean(lateConfirm)}
+        title={t('title')}
+        description={
+          lateConfirm
+            ? t('lateSubmitConfirm', {
+                count: lateConfirm.count,
+                days: lateConfirm.days,
+              })
+            : undefined
+        }
+        onClose={() => {
+          lateConfirm?.resolve(false);
+          setLateConfirm(null);
+        }}
+        onConfirm={() => {
+          lateConfirm?.resolve(true);
+          setLateConfirm(null);
+        }}
+      />
+
+      <CancelReasonDialog
+        open={Boolean(cancelTarget)}
+        loading={busy}
+        onClose={() => setCancelTarget(null)}
+        onConfirm={(reason) => {
+          const target = cancelTarget;
+          setCancelTarget(null);
+          if (target) void executeCancel(target.ids, reason, target.batch);
+        }}
+      />
 
       <LocalPdfPreviewModal
         open={Boolean(previewId)}

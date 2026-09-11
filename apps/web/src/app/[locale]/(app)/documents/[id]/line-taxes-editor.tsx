@@ -33,7 +33,7 @@ function codeLabel(entry: EtaCodeEntry, locale: UiLocale): string {
 }
 
 function fieldClass() {
-  return 'mt-token-xs w-full rounded border border-border bg-background px-token-sm py-token-xs';
+  return 'mt-token-xs w-full rounded-control border border-border-strong bg-surface px-input-x py-input-y text-token-sm';
 }
 
 export type LineTaxesEditorProps = {
@@ -70,7 +70,7 @@ export function LineTaxesEditor(props: LineTaxesEditorProps) {
   } = props;
 
   return (
-    <div className="space-y-token-sm">
+    <div className="space-y-token-sm" data-testid="line-taxes-editor">
       <p className="text-token-xs font-medium">{t('taxMode')}</p>
       <div className="flex flex-wrap gap-token-sm text-token-xs">
         {(
@@ -160,7 +160,7 @@ export function LineTaxesEditor(props: LineTaxesEditorProps) {
                         ))}
                       </select>
                       {subtypeMismatch ? (
-                        <span className="block text-token-xs text-red-700">
+                        <span className="block text-token-xs text-danger">
                           {t('taxSubtypeMismatch', {
                             subType: tx.subType,
                             taxType: tx.taxType,
@@ -222,7 +222,7 @@ export function LineTaxesEditor(props: LineTaxesEditorProps) {
                 );
               })}
               {dupes.length ? (
-                <p className="text-token-xs text-red-700">
+                <p className="text-token-xs text-danger">
                   {t('duplicateTaxType', { taxTypes: dupes.join(', ') })}
                 </p>
               ) : null}
