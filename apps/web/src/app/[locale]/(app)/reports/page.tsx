@@ -3,9 +3,13 @@
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { REPORT_CATALOG } from '@/lib/api/reports';
+import { PageHeader } from '@/components/ui/page-header';
+import { Breadcrumbs } from '@/components/ui/breadcrumbs';
+import { Card, CardDescription, CardTitle } from '@/components/ui/card';
 
 export default function ReportsHubPage() {
   const t = useTranslations('reports');
+  const tNav = useTranslations('nav');
   const locale = useLocale();
 
   const groups = [
@@ -21,29 +25,40 @@ export default function ReportsHubPage() {
   ];
 
   return (
-    <div className="space-y-token-lg p-token-lg">
-      <header className="space-y-token-xs">
-        <h1 className="text-2xl font-semibold tracking-tight">{t('title')}</h1>
-        <p className="max-w-2xl text-sm text-muted">{t('subtitle')}</p>
-        <p className="text-xs text-muted">{t('vsAnalytics')}</p>
-      </header>
+    <div className="space-y-token-lg">
+      <PageHeader
+        breadcrumbs={
+          <Breadcrumbs
+            items={[
+              { label: tNav('home'), href: `/${locale}` },
+              { label: t('title') },
+            ]}
+          />
+        }
+        title={t('title')}
+        subtitle={t('subtitle')}
+      />
+      <p className="m-0 text-token-xs text-foreground-muted">{t('vsAnalytics')}</p>
 
       {groups.map((g) => (
         <section key={g.key} className="space-y-token-sm">
-          <h2 className="text-lg font-medium">{t(`groups.${g.key}`)}</h2>
-          <ul className="grid gap-token-sm sm:grid-cols-2">
+          <h2 className="m-0 text-token-lg font-semibold text-foreground">
+            {t(`groups.${g.key}`)}
+          </h2>
+          <ul className="m-0 grid list-none grid-cols-1 gap-token-sm p-0 sm:grid-cols-2">
             {g.ids.map((r) => (
               <li key={r.id}>
-                <Link
-                  href={`/${locale}/reports/${r.id}`}
-                  className="block rounded-md border border-border bg-surface px-token-md py-token-md transition hover:border-foreground/30"
-                >
-                  <div className="font-medium">
-                    {r.id} — {t(`catalog.${r.id}.name`)}
-                  </div>
-                  <p className="mt-1 text-sm text-muted">
-                    {t(`catalog.${r.id}.desc`)}
-                  </p>
+                <Link href={`/${locale}/reports/${r.id}`} className="block no-underline">
+                  <Card className="h-full transition hover:border-brand">
+                    <CardTitle>
+                      <span className="font-en" dir="ltr">
+                        {r.id}
+                      </span>
+                      {' — '}
+                      {t(`catalog.${r.id}.name`)}
+                    </CardTitle>
+                    <CardDescription>{t(`catalog.${r.id}.desc`)}</CardDescription>
+                  </Card>
                 </Link>
               </li>
             ))}

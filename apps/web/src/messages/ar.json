@@ -1120,6 +1120,8 @@
     "chartDocuments": "المستندات عبر الزمن",
     "chartApi": "استدعاءات API",
     "chartStorage": "بايتات التخزين",
+    "retryLoad": "إعادة المحاولة",
+    "listCaption": "مقاييس الاستخدام",
     "meters": {
       "issued": "صادرة",
       "received": "واردة",
@@ -1191,6 +1193,9 @@
     "exportCsv": "تصدير CSV",
     "exportXlsx": "تصدير XLSX",
     "exportPdf": "تصدير PDF",
+    "retryLoad": "إعادة المحاولة",
+    "listCaption": "نتائج التقرير",
+    "emptyResults": "لا توجد صفوف لهذه الفترة.",
     "showGross": "عرض الإجمالي مقابل الصافي",
     "includeOthers": "تضمين غير الصالح / غير المقبول",
     "perBranch": "صافي الضريبة حسب الفرع",
@@ -1351,6 +1356,9 @@
     "colActions": "إجراءات",
     "viewInvoice": "عرض",
     "noInvoices": "لا توجد فواتير بعد",
+    "retryLoad": "إعادة المحاولة",
+    "listCaption": "فواتير الاشتراك",
+    "errorGeneric": "حدث خطأ. حاول مرة أخرى.",
     "status": {
       "ACTIVE": "نشطة",
       "PAST_DUE": "متأخرة السداد",

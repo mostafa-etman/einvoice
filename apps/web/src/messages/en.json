@@ -1119,6 +1119,8 @@
     "chartDocuments": "Documents over time",
     "chartApi": "API calls",
     "chartStorage": "Storage bytes",
+    "retryLoad": "Retry",
+    "listCaption": "Usage meters",
     "meters": {
       "issued": "Issued",
       "received": "Received",
@@ -1190,6 +1192,9 @@
     "exportCsv": "Export CSV",
     "exportXlsx": "Export XLSX",
     "exportPdf": "Export PDF",
+    "retryLoad": "Retry",
+    "listCaption": "Report results",
+    "emptyResults": "No rows for this period.",
     "showGross": "Show gross vs net",
     "includeOthers": "Include non-VALID / non-accepted",
     "perBranch": "Per-branch NET VAT",
@@ -1350,6 +1355,9 @@
     "colActions": "Actions",
     "viewInvoice": "View",
     "noInvoices": "No invoices yet",
+    "retryLoad": "Retry",
+    "listCaption": "Billing invoices",
+    "errorGeneric": "Something went wrong. Try again.",
     "status": {
       "ACTIVE": "Active",
       "PAST_DUE": "Past due",

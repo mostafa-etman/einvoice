@@ -73,6 +73,9 @@ jest.mock('@/lib/api/analytics', () => ({
 import AnalyticsPage from './page';
 
 const messages = {
+  nav: { home: 'Home' },
+  ui: { breadcrumb: 'Breadcrumb' },
+  common: { states: { loading: 'Loading…' } },
   analytics: {
     title: 'Usage analytics',
     subtitle: 'Organization metering from daily rollups',
@@ -90,6 +93,7 @@ const messages = {
     exportError: 'Export failed',
     exportCsv: 'Export CSV',
     exportXlsx: 'Export XLSX',
+    retryLoad: 'Retry',
     asOf: 'As of {asOf}',
     chartDocuments: 'Documents over time',
     chartApi: 'API calls',
@@ -112,7 +116,7 @@ describe('Analytics page smoke', () => {
         <AnalyticsPage />
       </NextIntlClientProvider>,
     );
-    expect(await screen.findByText('Usage analytics')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Usage analytics' })).toBeInTheDocument();
     expect(await screen.findByText('Issued')).toBeInTheDocument();
     expect(screen.getByText('Export CSV')).toBeInTheDocument();
     expect(screen.getByText('Export XLSX')).toBeInTheDocument();

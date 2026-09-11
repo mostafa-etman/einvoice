@@ -8,6 +8,8 @@ import {
   fetchInvoices,
   fetchQuotas,
   fetchSubscription,
+  type InvoiceRef,
+  type SubscriptionStatus,
 } from '@/lib/api/billing';
 import { formatQuantityDisplay } from '@/lib/format-number';
 import { CopyableTenantId } from '@/components/copyable-tenant-id';
@@ -17,6 +19,15 @@ import {
 } from '@/components/billing/whatsapp-upgrade-dialog';
 import { AddonCards, PlanCards, PromoNote } from '@/components/billing/plan-cards';
 import { useTenant } from '@/lib/tenant-provider';
+import { PageHeader } from '@/components/ui/page-header';
+import { Breadcrumbs } from '@/components/ui/breadcrumbs';
+import { Button } from '@/components/ui/button';
+import { Card, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge, type BadgeVariant } from '@/components/ui/badge';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Table, type TableColumn } from '@/components/ui/table';
+import { cn } from '@/lib/cn';
 
 function QuotaBar({
   label,
@@ -30,16 +41,23 @@ function QuotaBar({
   const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
   const danger = limit > 0 && used >= limit;
   return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between text-sm">
+    <div className="space-y-token-xs">
+      <div className="flex items-center justify-between text-token-sm">
         <span>{label}</span>
-        <span className="tabular-nums text-muted-foreground" dir="ltr">
+        <span className="font-en tabular-nums text-foreground-muted" dir="ltr">
           {formatQuantityDisplay(used)} / {formatQuantityDisplay(limit)}
         </span>
       </div>
-      <div className="h-2 w-full overflow-hidden rounded bg-muted">
+      <div
+        role="progressbar"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={limit}
+        aria-valuenow={used}
+        className="h-token-xs overflow-hidden rounded-pill bg-surface-alt"
+      >
         <div
-          className={`h-full ${danger ? 'bg-red-600' : 'bg-brand'}`}
+          className={cn('h-full rounded-pill', danger ? 'bg-danger' : 'bg-gradient-brand')}
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -47,8 +65,19 @@ function QuotaBar({
   );
 }
 
+function statusVariant(status: SubscriptionStatus): BadgeVariant {
+  if (status === 'ACTIVE') return 'success';
+  if (status === 'TRIAL') return 'warning';
+  if (status === 'PAST_DUE') return 'warning';
+  if (status === 'READ_ONLY' || status === 'SUSPENDED' || status === 'CANCELLED') {
+    return 'danger';
+  }
+  return 'neutral';
+}
+
 export default function BillingPage() {
   const t = useTranslations('billing');
+  const tNav = useTranslations('nav');
   const locale = useLocale();
   const { tenantId } = useTenant();
   const [interest, setInterest] = useState<BillingInterest | null>(null);
@@ -80,76 +109,159 @@ export default function BillingPage() {
     setInterest({ kind: 'upgrade', planCode: plan.code, planLabel: planLabel(plan) });
   };
 
-  return (
-    <div className="mx-auto max-w-5xl space-y-6 p-4">
-      <header>
-        <h1 className="text-2xl font-semibold text-brand">{t('title')}</h1>
-        <p className="text-sm text-muted-foreground">{t('subtitle')}</p>
-        <CopyableTenantId id={tenantId} className="mt-2" />
-      </header>
-
-      <section className="space-y-3 rounded border border-border bg-background p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-lg font-medium">{t('currentPlan')}</h2>
-            <p className="text-2xl font-semibold">
-              {locale === 'ar' && subscription?.plan.nameAr
-                ? subscription.plan.nameAr
-                : (subscription?.plan.name ?? '—')}
-            </p>
-          </div>
-          <span
-            className={`rounded px-3 py-1 text-sm font-medium ${
-              subscription?.status === 'ACTIVE'
-                ? 'bg-green-100 text-green-800'
-                : subscription?.status === 'READ_ONLY'
-                  ? 'bg-red-100 text-red-800'
-                  : 'bg-yellow-100 text-yellow-800'
-            }`}
+  const invoiceColumns: TableColumn<InvoiceRef>[] = [
+    {
+      id: 'date',
+      header: t('colDate'),
+      cell: (inv) => (
+        <span className="font-en text-token-xs" dir="ltr">
+          {new Date(inv.createdAt).toLocaleDateString()}
+        </span>
+      ),
+    },
+    {
+      id: 'amount',
+      header: t('colAmount'),
+      cell: (inv) => (
+        <span className="font-en tabular-nums" dir="ltr">
+          {(inv.amountCents / 100).toFixed(2)} {inv.currency.toUpperCase()}
+        </span>
+      ),
+    },
+    {
+      id: 'status',
+      header: t('colStatus'),
+      cell: (inv) => (
+        <span className="font-en" dir="ltr">
+          {inv.status}
+        </span>
+      ),
+    },
+    {
+      id: 'actions',
+      header: t('colActions'),
+      align: 'end',
+      cell: (inv) =>
+        inv.hostedInvoiceUrl ? (
+          <a
+            className="text-brand underline"
+            href={inv.hostedInvoiceUrl}
+            target="_blank"
+            rel="noreferrer"
           >
-            {subscription ? t(`status.${subscription.status}`) : '…'}
-          </span>
-        </div>
+            {t('viewInvoice')}
+          </a>
+        ) : null,
+    },
+  ];
+
+  const queryBusy =
+    catalogQuery.isLoading ||
+    subscriptionQuery.isLoading ||
+    quotasQuery.isLoading ||
+    invoicesQuery.isLoading;
+
+  return (
+    <div className="space-y-token-lg" aria-busy={queryBusy || undefined}>
+      <PageHeader
+        breadcrumbs={
+          <Breadcrumbs
+            items={[
+              { label: tNav('home'), href: `/${locale}` },
+              { label: t('title') },
+            ]}
+          />
+        }
+        title={t('title')}
+        subtitle={t('subtitle')}
+      />
+      <CopyableTenantId id={tenantId} />
+
+      {subscriptionQuery.isError ? (
+        <Card className="border-danger" role="alert">
+          <p className="m-0 text-token-sm text-danger">
+            {subscriptionQuery.error instanceof Error
+              ? subscriptionQuery.error.message
+              : t('errorGeneric')}
+          </p>
+          <Button
+            className="mt-token-sm"
+            variant="secondary"
+            size="sm"
+            onClick={() => void subscriptionQuery.refetch()}
+          >
+            {t('retryLoad')}
+          </Button>
+        </Card>
+      ) : null}
+
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>{t('currentPlan')}</CardTitle>
+            {subscriptionQuery.isLoading ? (
+              <Skeleton variant="rect" className="mt-token-sm h-token-lg w-1/3" />
+            ) : (
+              <p className="mt-token-xs text-token-xl font-semibold">
+                {locale === 'ar' && subscription?.plan.nameAr
+                  ? subscription.plan.nameAr
+                  : (subscription?.plan.name ?? '—')}
+              </p>
+            )}
+          </div>
+          {subscription ? (
+            <Badge variant={statusVariant(subscription.status)}>
+              {t(`status.${subscription.status}`)}
+            </Badge>
+          ) : null}
+        </CardHeader>
         {subscription?.accessMode === 'READ_ONLY' ? (
-          <p className="rounded bg-red-50 p-2 text-sm text-red-700" role="alert">
+          <p className="rounded-md bg-danger-muted p-token-sm text-token-sm text-danger" role="alert">
             {t('readOnlyWarning')}
           </p>
         ) : null}
         {subscription?.trialEndsAt ? (
-          <p className="text-sm text-muted-foreground">
+          <p className="text-token-sm text-foreground-muted">
             {t('trialEndsAt', {
               date: new Date(subscription.trialEndsAt).toLocaleString(),
             })}
           </p>
         ) : null}
         {subscription?.sendBlocked ? (
-          <p className="rounded bg-red-50 p-2 text-sm text-red-700" role="alert">
+          <p className="rounded-md bg-danger-muted p-token-sm text-token-sm text-danger" role="alert">
             {t('sendBlockedMessage')}
           </p>
         ) : null}
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm">
+        <div className="mt-token-md flex flex-wrap items-center justify-between gap-token-sm">
+          <p className="m-0 text-token-sm">
             {t('pointsBalance')}:{' '}
-            <span className="font-medium tabular-nums" dir="ltr">
+            <span className="font-en font-medium tabular-nums" dir="ltr">
               {subscription?.pointsBalance ?? 0}
             </span>
           </p>
-          <button
+          <Button
             type="button"
-            className="rounded border px-3 py-2 text-sm"
+            variant="secondary"
+            size="sm"
             onClick={() =>
               setInterest({ kind: 'points', planCode: 'POINTS', planLabel: t('pointsTopUp') })
             }
           >
             {t('buyPoints')}
-          </button>
+          </Button>
         </div>
-      </section>
+      </Card>
 
-      <section className="space-y-3 rounded border border-border bg-background p-4">
-        <h2 className="text-lg font-medium">{t('usage')}</h2>
-        {quotas ? (
-          <div className="grid gap-4 sm:grid-cols-3">
+      <Card>
+        <CardTitle className="mb-token-md">{t('usage')}</CardTitle>
+        {quotasQuery.isLoading ? (
+          <div className="grid gap-token-md sm:grid-cols-3">
+            <Skeleton variant="rect" className="h-token-lg" />
+            <Skeleton variant="rect" className="h-token-lg" />
+            <Skeleton variant="rect" className="h-token-lg" />
+          </div>
+        ) : quotas ? (
+          <div className="grid gap-token-md sm:grid-cols-3">
             <QuotaBar label={t('documents')} used={quotas.documents.used} limit={quotas.documents.limit} />
             <QuotaBar label={t('branches')} used={quotas.branches.used} limit={quotas.branches.limit} />
             <QuotaBar label={t('devices')} used={quotas.devices.used} limit={quotas.devices.limit} />
@@ -160,13 +272,15 @@ export default function BillingPage() {
               <QuotaBar label={t('companies')} used={quotas.companies.used} limit={quotas.companies.limit} />
             ) : null}
           </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">{t('loading')}</p>
-        )}
-      </section>
+        ) : quotasQuery.isError ? (
+          <p className="m-0 text-token-sm text-danger" role="alert">
+            {quotasQuery.error instanceof Error ? quotasQuery.error.message : t('errorGeneric')}
+          </p>
+        ) : null}
+      </Card>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-medium">{t('plans')}</h2>
+      <section className="space-y-token-sm">
+        <h2 className="m-0 text-token-lg font-semibold text-foreground">{t('plans')}</h2>
         {catalog ? <PromoNote catalog={catalog} /> : null}
         <PlanCards
           plans={(catalog?.plans ?? []).filter(
@@ -178,65 +292,53 @@ export default function BillingPage() {
         />
       </section>
 
-      <section className="space-y-3 rounded border border-border bg-background p-4">
-        <h2 className="text-lg font-medium">{t('addonsTitle')}</h2>
-        <p className="text-sm text-muted-foreground">{t('addonsSubtitle')}</p>
-        <AddonCards
-          addons={catalog?.addons ?? []}
-          onChoose={(addon) =>
-            setInterest({
-              kind: 'addon',
-              planCode: addon.code,
-              planLabel: locale === 'ar' && addon.nameAr ? addon.nameAr : addon.name,
-            })
-          }
-        />
-      </section>
-
-      <section className="space-y-3 rounded border border-border bg-background p-4">
-        <h2 className="text-lg font-medium">{t('invoices')}</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/40 text-left">
-                <th className="p-2">{t('colDate')}</th>
-                <th className="p-2">{t('colAmount')}</th>
-                <th className="p-2">{t('colStatus')}</th>
-                <th className="p-2">{t('colActions')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(invoicesQuery.data?.items ?? []).map((inv) => (
-                <tr key={inv.id} className="border-b">
-                  <td className="p-2">{new Date(inv.createdAt).toLocaleDateString()}</td>
-                  <td className="p-2">
-                    {(inv.amountCents / 100).toFixed(2)} {inv.currency.toUpperCase()}
-                  </td>
-                  <td className="p-2">{inv.status}</td>
-                  <td className="p-2">
-                    {inv.hostedInvoiceUrl ? (
-                      <a
-                        className="text-brand underline"
-                        href={inv.hostedInvoiceUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {t('viewInvoice')}
-                      </a>
-                    ) : null}
-                  </td>
-                </tr>
-              ))}
-              {!invoicesQuery.data?.items?.length ? (
-                <tr>
-                  <td className="p-4 text-muted-foreground" colSpan={4}>
-                    {t('noInvoices')}
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
+      <Card>
+        <h2 className="m-0 text-token-lg font-semibold text-foreground">{t('addonsTitle')}</h2>
+        <p className="mt-token-xs text-token-sm text-foreground-muted">{t('addonsSubtitle')}</p>
+        <div className="mt-token-md">
+          <AddonCards
+            addons={catalog?.addons ?? []}
+            onChoose={(addon) =>
+              setInterest({
+                kind: 'addon',
+                planCode: addon.code,
+                planLabel: locale === 'ar' && addon.nameAr ? addon.nameAr : addon.name,
+              })
+            }
+          />
         </div>
+      </Card>
+
+      <section>
+        <h2 className="m-0 mb-token-md text-token-lg font-semibold text-foreground">
+          {t('invoices')}
+        </h2>
+        {invoicesQuery.isError ? (
+          <Card className="border-danger" role="alert">
+            <p className="m-0 text-token-sm text-danger">
+              {invoicesQuery.error instanceof Error
+                ? invoicesQuery.error.message
+                : t('errorGeneric')}
+            </p>
+            <Button
+              className="mt-token-sm"
+              variant="secondary"
+              size="sm"
+              onClick={() => void invoicesQuery.refetch()}
+            >
+              {t('retryLoad')}
+            </Button>
+          </Card>
+        ) : (
+          <Table
+            caption={t('listCaption')}
+            columns={invoiceColumns}
+            rows={invoicesQuery.data?.items ?? []}
+            getRowId={(inv) => inv.id}
+            loading={invoicesQuery.isLoading}
+            empty={<EmptyState title={t('noInvoices')} />}
+          />
+        )}
       </section>
 
       <WhatsAppUpgradeDialog

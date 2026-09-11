@@ -221,7 +221,7 @@ export function ReportDetailDocumentsTable({
 
   return (
     <div className="space-y-token-sm">
-      <p className="text-sm text-muted">
+      <p className="text-sm text-foreground-muted">
         {t('detail.showing', {
           shown: rows.length,
           total: documentCount,
@@ -257,7 +257,7 @@ export function ReportDetailDocumentsTable({
               <tr>
                 <td
                   colSpan={headers.length}
-                  className="px-3 py-6 text-center text-muted"
+                  className="px-3 py-6 text-center text-foreground-muted"
                 >
                   {t('detail.empty')}
                 </td>
@@ -355,7 +355,7 @@ export function ReportDetailDocumentsTable({
                         colSpan={headers.length}
                         className="border-b border-border px-4 py-3"
                       >
-                        <div className="mb-2 text-xs font-medium text-muted">
+                        <div className="mb-2 text-xs font-medium text-foreground-muted">
                           {t('detail.lineItems')}
                         </div>
                         <table className="min-w-full text-xs">
@@ -392,7 +392,7 @@ export function ReportDetailDocumentsTable({
                               <tr>
                                 <td
                                   colSpan={8}
-                                  className="px-2 py-2 text-muted"
+                                  className="px-2 py-2 text-foreground-muted"
                                 >
                                   {t('detail.noLines')}
                                 </td>
@@ -449,7 +449,7 @@ export function ReportDetailDocumentsTable({
                           </tbody>
                         </table>
                         {(row.issuerName || row.receiverName) && (
-                          <div className="mt-2 grid gap-1 text-xs text-muted sm:grid-cols-2">
+                          <div className="mt-2 grid gap-1 text-xs text-foreground-muted sm:grid-cols-2">
                             {row.issuerName ? (
                               <div>
                                 {t('detail.issuer')}: {String(row.issuerName)}

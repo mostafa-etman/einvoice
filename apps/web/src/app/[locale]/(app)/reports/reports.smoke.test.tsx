@@ -56,8 +56,8 @@ jest.mock('next/link', () => ({
 describe('Reports hub smoke', () => {
   it('lists NET VAT and sales reports', async () => {
     render(<ReportsHubPage />);
-    expect(await screen.findByText('Business reports')).toBeInTheDocument();
-    expect(screen.getByText(/C1 — NET VAT position/i)).toBeInTheDocument();
-    expect(screen.getByText(/S1 — Total sales/i)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Business reports' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /C1 — NET VAT position/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /S1 — Total sales/i })).toBeInTheDocument();
   });
 });

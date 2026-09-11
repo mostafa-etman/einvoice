@@ -26,6 +26,14 @@ import {
 } from '@/lib/api/reports';
 import { useTenant } from '@/lib/tenant-provider';
 import { formatMoneyDisplay, formatQuantityDisplay } from '@/lib/format-number';
+import { PageHeader } from '@/components/ui/page-header';
+import { Breadcrumbs } from '@/components/ui/breadcrumbs';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { FilterBar } from '@/components/ui/filter-bar';
+import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
+import { REPORT_CHART_COLORS } from '../../analytics/_components/chart-colors';
 import { ReportDetailDocumentsTable } from './report-detail-table';
 
 function todayCairo(): string {
@@ -224,6 +232,7 @@ export default function ReportDetailPage() {
   const routeParams = useParams<{ reportId: string }>();
   const reportId = String(routeParams.reportId ?? '').toUpperCase() as ReportId;
   const t = useTranslations('reports');
+  const tNav = useTranslations('nav');
   const locale = useLocale();
   const { tenantId } = useTenant();
 
@@ -254,7 +263,7 @@ export default function ReportDetailPage() {
   );
   const [data, setData] = useState<ReportPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
 
   const isDetail = DETAIL_REPORT_IDS.has(reportId);
@@ -384,7 +393,11 @@ export default function ReportDetailPage() {
   };
 
   useEffect(() => {
-    if (!tenantId) return;
+    if (!tenantId) {
+      setData(null);
+      setLoading(false);
+      return;
+    }
     void load();
   }, [tenantId, load]);
 
@@ -438,51 +451,66 @@ export default function ReportDetailPage() {
     FIELD_KEYS.has(col) ? t(`fields.${col}` as 'fields.net') : col;
 
   return (
-    <div className="space-y-token-lg p-token-lg">
-      <div className="flex flex-wrap items-center justify-between gap-token-sm">
-        <div>
-          <Link
-            href={`/${locale}/reports`}
-            className="text-sm text-muted hover:underline"
-          >
-            {t('back')}
-          </Link>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {reportId} — {t(`catalog.${reportId}.name`)}
-          </h1>
-          <p className="text-sm text-muted">{t(`catalog.${reportId}.desc`)}</p>
-        </div>
-        <div className="flex flex-wrap gap-token-xs">
-          <button
-            type="button"
-            className="rounded-md border border-border px-3 py-1.5 text-sm"
-            disabled={exporting}
-            onClick={() => void exportFile('CSV')}
-          >
-            {t('exportCsv')}
-          </button>
-          <button
-            type="button"
-            className="rounded-md border border-border px-3 py-1.5 text-sm"
-            disabled={exporting}
-            onClick={() => void exportFile('XLSX')}
-          >
-            {t('exportXlsx')}
-          </button>
-          {PDF_IDS.has(reportId) ? (
-            <button
+    <div className="space-y-token-lg" aria-busy={loading || exporting || undefined}>
+      <PageHeader
+        breadcrumbs={
+          <Breadcrumbs
+            items={[
+              { label: tNav('home'), href: `/${locale}` },
+              { label: t('title'), href: `/${locale}/reports` },
+              { label: `${reportId} — ${t(`catalog.${reportId}.name`)}` },
+            ]}
+          />
+        }
+        title={
+          <>
+            <span className="font-en" dir="ltr">
+              {reportId}
+            </span>
+            {' — '}
+            {t(`catalog.${reportId}.name`)}
+          </>
+        }
+        subtitle={t(`catalog.${reportId}.desc`)}
+        actions={
+          <>
+            <Button
               type="button"
-              className="rounded-md border border-border px-3 py-1.5 text-sm"
+              variant="secondary"
+              size="sm"
               disabled={exporting}
-              onClick={() => void exportFile('PDF')}
+              onClick={() => void exportFile('CSV')}
             >
-              {t('exportPdf')}
-            </button>
-          ) : null}
-        </div>
-      </div>
+              {t('exportCsv')}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={exporting}
+              onClick={() => void exportFile('XLSX')}
+            >
+              {t('exportXlsx')}
+            </Button>
+            {PDF_IDS.has(reportId) ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={exporting}
+                onClick={() => void exportFile('PDF')}
+              >
+                {t('exportPdf')}
+              </Button>
+            ) : null}
+          </>
+        }
+      />
+      <Link href={`/${locale}/reports`} className="text-token-sm text-brand underline">
+        {t('back')}
+      </Link>
 
-      <div className="flex flex-wrap gap-token-sm rounded-md border border-border bg-surface p-token-md">
+      <FilterBar>
         <label className="text-sm">
           {t('from')}
           <input
@@ -647,17 +675,36 @@ export default function ReportDetailPage() {
             </select>
           </label>
         ) : null}
-        <button
+        <Button
           type="button"
-          className="rounded-md bg-foreground px-3 py-1.5 text-sm text-background"
           onClick={() => void load()}
           disabled={loading}
+          loading={loading}
         >
           {loading ? t('loading') : t('refresh')}
-        </button>
-      </div>
+        </Button>
+      </FilterBar>
 
-      {error ? <p className="text-sm text-danger">{error}</p> : null}
+      {error ? (
+        <Card className="border-danger" role="alert">
+          <p className="m-0 text-token-sm text-danger">{error}</p>
+          <Button
+            className="mt-token-sm"
+            variant="secondary"
+            size="sm"
+            onClick={() => void load()}
+          >
+            {t('retryLoad')}
+          </Button>
+        </Card>
+      ) : null}
+
+      {loading && !data ? (
+        <div className="space-y-token-sm">
+          <Skeleton variant="rect" className="h-token-xl" />
+          <Skeleton variant="rect" className="h-72" />
+        </div>
+      ) : null}
 
       {data && isDetail ? (
         <ReportDetailDocumentsTable
@@ -675,7 +722,7 @@ export default function ReportDetailPage() {
 
       {data && reportId === 'C4' ? (
         <>
-          <p className="rounded border border-amber-300 bg-amber-50 px-token-md py-token-sm text-token-sm text-amber-950">
+          <p className="rounded-md border border-warning bg-warning-muted px-token-md py-token-sm text-token-sm text-warning">
             {t('vatReturnDisclaimer')}
           </p>
           <section className="space-y-token-sm">
@@ -695,7 +742,7 @@ export default function ReportDetailPage() {
                   key={labelKey}
                   className="rounded-md border border-border bg-surface px-token-md py-token-sm"
                 >
-                  <div className="text-xs text-muted">{t(labelKey)}</div>
+                  <div className="text-xs text-foreground-muted">{t(labelKey)}</div>
                   <div className="text-lg font-semibold tabular-nums" dir="ltr">
                     {formatMoneyDisplay(value)}
                   </div>
@@ -703,7 +750,7 @@ export default function ReportDetailPage() {
               ))}
               {data.summary.position ? (
                 <div className="rounded-md border border-border bg-surface px-token-md py-token-sm">
-                  <div className="text-xs text-muted">{t('position')}</div>
+                  <div className="text-xs text-foreground-muted">{t('position')}</div>
                   <div className="text-lg font-semibold">
                     {t(`positions.${String(data.summary.position)}`)}
                   </div>
@@ -848,7 +895,7 @@ export default function ReportDetailPage() {
                 key={k}
                 className="rounded-md border border-border bg-surface px-token-md py-token-sm"
               >
-                <div className="text-xs text-muted">{fieldLabel(k)}</div>
+                <div className="text-xs text-foreground-muted">{fieldLabel(k)}</div>
                 <div className="text-lg font-semibold tabular-nums" dir="ltr">
                   {typeof v === 'number' ||
                   (typeof v === 'string' && v !== '' && !Number.isNaN(Number(v)))
@@ -861,7 +908,7 @@ export default function ReportDetailPage() {
             ))}
             {reportId === 'C1' && data.summary?.position ? (
               <div className="rounded-md border border-border bg-surface px-token-md py-token-sm">
-                <div className="text-xs text-muted">{t('position')}</div>
+                <div className="text-xs text-foreground-muted">{t('position')}</div>
                 <div className="text-lg font-semibold">
                   {t(`positions.${String(data.summary.position)}`)}
                 </div>
@@ -881,16 +928,16 @@ export default function ReportDetailPage() {
                     <Legend />
                     {reportId === 'C2' ? (
                       <>
-                        <Line type="monotone" dataKey="sales" stroke="#0f766e" name={t('fields.sales')} />
+                        <Line type="monotone" dataKey="sales" stroke={REPORT_CHART_COLORS.teal} name={t('fields.sales')} />
                         <Line
                           type="monotone"
                           dataKey="purchases"
-                          stroke="#b45309"
+                          stroke={REPORT_CHART_COLORS.secondary}
                           name={t('fields.purchases')}
                         />
                       </>
                     ) : (
-                      <Line type="monotone" dataKey="net" stroke="#0f766e" name={t('fields.net')} />
+                      <Line type="monotone" dataKey="net" stroke={REPORT_CHART_COLORS.teal} name={t('fields.net')} />
                     )}
                   </LineChart>
                 ) : (
@@ -925,7 +972,7 @@ export default function ReportDetailPage() {
                             ? 'amount'
                             : 'net'
                       }
-                      fill="#0f766e"
+                      fill={REPORT_CHART_COLORS.teal}
                       name={t('fields.amount')}
                     />
                   </BarChart>
@@ -935,6 +982,9 @@ export default function ReportDetailPage() {
           ) : null}
 
           <section className="overflow-x-auto rounded-md border border-border">
+            {tableRows.length === 0 ? (
+              <EmptyState title={t('emptyResults')} />
+            ) : (
             <table className="min-w-full text-sm">
               <thead className="bg-surface">
                 <tr>
@@ -971,6 +1021,7 @@ export default function ReportDetailPage() {
                 ))}
               </tbody>
             </table>
+            )}
           </section>
         </>
       ) : null}
