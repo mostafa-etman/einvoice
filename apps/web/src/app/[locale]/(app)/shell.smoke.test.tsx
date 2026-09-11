@@ -13,6 +13,8 @@ import { flattenNav, isNavActive, navHref } from '@/components/shell/nav-config'
 import en from '@/messages/en.json';
 import ar from '@/messages/ar.json';
 
+const mockPlatformAuth = { isPlatformOperator: true };
+
 jest.mock('next/navigation', () => ({
   usePathname: jest.fn(() => '/en'),
   useRouter: jest.fn(() => ({ push: jest.fn(), replace: jest.fn() })),
@@ -27,7 +29,7 @@ jest.mock('@/lib/auth-provider', () => ({
       id: 'u1',
       email: 'owner@test.local',
       name: 'Owner Test',
-      isPlatformOperator: true,
+      isPlatformOperator: mockPlatformAuth.isPlatformOperator,
     },
   }),
 }));
@@ -87,6 +89,7 @@ describe('app shell smoke', () => {
     localStorage.clear();
     sessionStorage.clear();
     document.documentElement.removeAttribute('data-theme');
+    mockPlatformAuth.isPlatformOperator = true;
     (usePathname as jest.Mock).mockReturnValue('/en');
     (useRouter as jest.Mock).mockReturnValue({ push: jest.fn(), replace: jest.fn() });
   });
@@ -195,8 +198,33 @@ describe('app shell smoke', () => {
   it('exposes the user menu with platform admin and logout', async () => {
     renderShell(<AppShell>child</AppShell>);
     fireEvent.click((await screen.findAllByRole('button', { name: 'Account menu' }))[0]!);
-    expect(screen.getByRole('menuitem', { name: 'Platform admin' })).toHaveAttribute('href', '/en/admin');
+    expect(screen.getByRole('menuitem', { name: 'Platform Administration' })).toHaveAttribute(
+      'href',
+      '/en/admin',
+    );
     expect(screen.getByRole('menuitem', { name: 'Sign out' })).toBeInTheDocument();
+  });
+
+  it('shows Platform Administration in the sidebar for operators and navigates to /admin', async () => {
+    renderShell(<AppShell>child</AppShell>);
+    const link = await screen.findByRole('link', { name: 'Platform Administration' });
+    expect(link).toHaveAttribute('href', '/en/admin');
+  });
+
+  it('hides Platform Administration in the sidebar for non-operators', async () => {
+    mockPlatformAuth.isPlatformOperator = false;
+    renderShell(<AppShell>child</AppShell>);
+    expect(await screen.findByRole('navigation', { name: 'Navigation' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Platform Administration' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Account menu' })[0]!);
+    expect(screen.queryByRole('menuitem', { name: 'Platform Administration' })).not.toBeInTheDocument();
+  });
+
+  it('shows إدارة المنصة in the Arabic sidebar for operators', async () => {
+    (usePathname as jest.Mock).mockReturnValue('/ar');
+    renderShell(<AppShell>child</AppShell>, 'ar');
+    const link = await screen.findByRole('link', { name: 'إدارة المنصة' });
+    expect(link).toHaveAttribute('href', '/ar/admin');
   });
 
   it('marks home active only on the tenant home path', () => {
