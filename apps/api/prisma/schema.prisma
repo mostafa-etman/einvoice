@@ -723,6 +723,10 @@ model Document {
   currencyCode           String         @map("currency_code")
   exchangeRate           String?        @map("exchange_rate")
   issueDateTime          DateTime       @map("issue_date_time")
+  /// Invoice number (ETA internalId). Display/business number only — not identity.
+  /// ETA-synced sales identity is etaUuid; duplicate numbers across periods are
+  /// allowed for origin=ETA_SYNC. LOCAL/FILE_IMPORT uniqueness is the partial
+  /// unique index documents_tenant_internal_id_non_eta_sync_uidx in SQL.
   internalId             String         @map("internal_id")
   etaDocumentType        String         @map("eta_document_type")
   etaDocumentTypeVersion String         @map("eta_document_type_version")
@@ -751,6 +755,7 @@ model Document {
   needsAttention         Boolean        @default(false) @map("needs_attention")
   needsAttentionReason   String?        @map("needs_attention_reason")
   etaStatus              String?        @map("eta_status")
+  /// Official ETA document UUID. Immutable identity for ETA-synced sales.
   etaUuid                String?        @map("eta_uuid")
   etaLongId              String?        @map("eta_long_id")
   /// Which ETA host accepted / owns this document (stamped on submit/sync).
@@ -797,10 +802,10 @@ model Document {
   importJob       ImportJob?     @relation(fields: [importJobId], references: [id], onDelete: SetNull)
   syncConflicts   SyncConflict[]
 
-  @@unique([tenantId, internalId])
   @@unique([tenantId, clientIdempotencyKey])
   @@unique([tenantId, etaUuid])
   @@index([tenantId])
+  @@index([tenantId, internalId])
   @@index([tenantId, status])
   @@index([tenantId, importJobId])
   @@index([tenantId, etaEnvironment])

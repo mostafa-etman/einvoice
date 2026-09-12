@@ -43,6 +43,7 @@ async function ownerCtx(app: INestApplication, suffix: string) {
       clientSecret: `sign-secret-${suffix}`,
       registrationNumber: '123456789',
       activityCode: '6201',
+      taxpayerLegalName: 'Seller Co',
       isIntermediary: false,
     })
     .expect(200);
@@ -176,12 +177,14 @@ describe('Signature jobs API', () => {
     expect(job.body.status).toBe('PENDING');
     expect(job.body.documentId).toBe(doc.id);
 
-    // Sending twice while a job is pending/claimed is rejected.
-    await request(app.getHttpServer())
+    // Sending twice while PENDING is idempotent: same job, no duplicate row.
+    const again = await request(app.getHttpServer())
       .post(`/documents/${doc.id}/send-for-signature`)
       .set('Authorization', `Bearer ${ctx.token}`)
       .set('X-Tenant-Id', ctx.tenantId)
-      .expect(400);
+      .expect(202);
+    expect(again.body.id).toBe(job.body.id);
+    expect(again.body.status).toBe('PENDING');
 
     const claimed = await request(app.getHttpServer())
       .post('/agent/jobs/claim')

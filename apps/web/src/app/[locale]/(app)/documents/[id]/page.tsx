@@ -34,6 +34,12 @@ import {
 } from '@/lib/api/submissions';
 import { canCreateReturnCreditNote, canEditDocument, canPrepareDocumentForSubmit } from '@/lib/document-actions';
 import { resolveDocumentStatus } from '@/lib/document-status-display';
+import { listSigningJobs } from '@/lib/api/signing';
+import {
+  canSendForSignature,
+  pickLatestSignatureJob,
+  signatureSendPhase,
+} from '@/lib/signature-job-ui';
 import { listEtaCodes, type EtaCodeEntry } from '@/lib/api/eta-codes';
 import { listItemCodes, type ItemCode } from '@/lib/api/item-codes';
 import { apiFetch, ApiError } from '@/lib/api/client';
@@ -420,9 +426,17 @@ export default function DocumentEditorPage() {
     resolve: (ok: boolean) => void;
   } | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [signatureJob, setSignatureJob] = useState<{
+    id: string;
+    status: string;
+  } | null>(null);
+  const [sendingSignature, setSendingSignature] = useState(false);
 
   const cooldownActive = Boolean(cooldownUntil && new Date(cooldownUntil).getTime() > nowMs);
   const displayStatus = resolveDocumentStatus(docStatus, etaStatusRaw);
+  const sendPhase = signatureSendPhase(docStatus, signatureJob?.status);
+  const sendEnabled =
+    !readOnlyHistorical && canSendForSignature(sendPhase, sendingSignature);
   const canPrepareForSubmit = canPrepareDocumentForSubmit(
     documentOrigin,
     displayStatus,
@@ -637,7 +651,35 @@ export default function DocumentEditorPage() {
     setIssues([]);
     setError(null);
     setLoadError(null);
+    setSignatureJob(null);
+    setSendingSignature(false);
   }, [params.id]);
+
+  useEffect(() => {
+    if (isNew || docStatus !== 'READY') return;
+    let cancelled = false;
+    const refreshJob = async () => {
+      try {
+        const res = await listSigningJobs({ documentId: params.id });
+        if (cancelled) return;
+        const latest = pickLatestSignatureJob(res.items);
+        setSignatureJob(latest ? { id: latest.id, status: latest.status } : null);
+        if (latest?.status === 'COMPLETED') {
+          const doc = await getDocument(params.id);
+          if (cancelled) return;
+          setDocStatus(String(doc.status ?? 'READY'));
+        }
+      } catch {
+        // Keep the last known job state; send still surfaces API errors.
+      }
+    };
+    void refreshJob();
+    const handle = setInterval(() => void refreshJob(), 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(handle);
+    };
+  }, [params.id, isNew, docStatus]);
 
   useEffect(() => {
     if (isNew) return;
@@ -2358,19 +2400,34 @@ export default function DocumentEditorPage() {
               </Button>
               <Button
                 variant="secondary"
-                disabled={readOnlyHistorical}
+                disabled={!sendEnabled}
+                data-testid="send-for-signature"
                 onClick={async () => {
                   try {
                     setError(null);
-                    await sendDocumentForSignature(params.id);
+                    setSendingSignature(true);
+                    const job = await sendDocumentForSignature(params.id);
                     setDocStatus('READY');
-                    setIssues([t('sendForSignature')]);
+                    setSignatureJob({ id: String(job.id), status: String(job.status) });
+                    setIssues([
+                      job.status === 'CLAIMED'
+                        ? t('signingInProgress')
+                        : t('waitingForSigningDevice'),
+                    ]);
                   } catch (e) {
-                    setError(e instanceof Error ? e.message : t('forbidden'));
+                    setError(
+                      e instanceof Error ? e.message : t('sendForSignatureFailed'),
+                    );
+                  } finally {
+                    setSendingSignature(false);
                   }
                 }}
               >
-                {t('sendForSignature')}
+                {sendPhase === 'signing'
+                  ? t('signingInProgress')
+                  : sendPhase === 'waiting'
+                    ? t('waitingForSigningDevice')
+                    : t('sendForSignature')}
               </Button>
               </>
               ) : null}

@@ -4,7 +4,8 @@ import { NextIntlClientProvider } from 'next-intl';
 import { useParams } from 'next/navigation';
 import en from '@/messages/en.json';
 import DocumentEditorPage from './page';
-import { getDocument, submitDocumentToEta } from '@/lib/api/documents';
+import { getDocument, sendDocumentForSignature, submitDocumentToEta } from '@/lib/api/documents';
+import { listSigningJobs } from '@/lib/api/signing';
 import { cancelDocument } from '@/lib/api/submissions';
 
 jest.mock('next/navigation', () => ({
@@ -49,6 +50,10 @@ jest.mock('@/lib/api/item-codes', () => ({
 
 jest.mock('@/lib/api/invoice-numbering', () => ({
   allocateNextInternalId: jest.fn().mockResolvedValue({ internalId: 'INV-NEW' }),
+}));
+
+jest.mock('@/lib/api/signing', () => ({
+  listSigningJobs: jest.fn().mockResolvedValue({ items: [] }),
 }));
 
 jest.mock('@/lib/api/documents', () => ({
@@ -184,5 +189,130 @@ describe('document detail', () => {
     fireEvent.click(await screen.findByRole('button', { name: en.documents.cancelDocument }));
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     expect(cancelDocument).not.toHaveBeenCalled();
+  });
+
+  it('shows waiting for signing device and disables send while PENDING', async () => {
+    (useParams as jest.Mock).mockReturnValue({ id: 'doc-ready', locale: 'en' });
+    (getDocument as jest.Mock).mockResolvedValue({
+      id: 'doc-ready',
+      kind: 'INVOICE',
+      branchId: 'branch-1',
+      currencyCode: 'EGP',
+      internalId: 'INV-READY',
+      issueDateTime: new Date().toISOString(),
+      version: 1,
+      status: 'READY',
+      origin: 'LOCAL',
+      etaPayload: { invoiceLines: [] },
+      totals: {},
+      lines: [],
+    });
+    (listSigningJobs as jest.Mock).mockResolvedValue({
+      items: [
+        {
+          id: 'job-1',
+          documentId: 'doc-ready',
+          documentVersion: 1,
+          status: 'PENDING',
+          claimedByDeviceId: null,
+          failureCode: null,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    });
+    renderDetail();
+    await waitFor(() => {
+      expect(screen.getByTestId('send-for-signature')).toHaveTextContent(
+        en.documents.waitingForSigningDevice,
+      );
+    });
+    expect(screen.getByTestId('send-for-signature')).toBeDisabled();
+  });
+
+  it('shows signing in progress while CLAIMED', async () => {
+    (useParams as jest.Mock).mockReturnValue({ id: 'doc-ready', locale: 'en' });
+    (getDocument as jest.Mock).mockResolvedValue({
+      id: 'doc-ready',
+      kind: 'INVOICE',
+      branchId: 'branch-1',
+      currencyCode: 'EGP',
+      internalId: 'INV-CLAIMED',
+      issueDateTime: new Date().toISOString(),
+      version: 1,
+      status: 'READY',
+      origin: 'LOCAL',
+      etaPayload: { invoiceLines: [] },
+      totals: {},
+      lines: [],
+    });
+    (listSigningJobs as jest.Mock).mockResolvedValue({
+      items: [
+        {
+          id: 'job-2',
+          documentId: 'doc-ready',
+          documentVersion: 1,
+          status: 'CLAIMED',
+          claimedByDeviceId: 'dev-1',
+          failureCode: null,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    });
+    renderDetail();
+    await waitFor(() => {
+      expect(screen.getByTestId('send-for-signature')).toHaveTextContent(
+        en.documents.signingInProgress,
+      );
+    });
+    expect(screen.getByTestId('send-for-signature')).toBeDisabled();
+  });
+
+  it('allows send after FAILED or CANCELLED and after a successful first send shows waiting', async () => {
+    (useParams as jest.Mock).mockReturnValue({ id: 'doc-ready', locale: 'en' });
+    (getDocument as jest.Mock).mockResolvedValue({
+      id: 'doc-ready',
+      kind: 'INVOICE',
+      branchId: 'branch-1',
+      currencyCode: 'EGP',
+      internalId: 'INV-RETRY',
+      issueDateTime: new Date().toISOString(),
+      version: 1,
+      status: 'READY',
+      origin: 'LOCAL',
+      etaPayload: { invoiceLines: [] },
+      totals: {},
+      lines: [],
+    });
+    (listSigningJobs as jest.Mock).mockResolvedValue({
+      items: [
+        {
+          id: 'job-old',
+          documentId: 'doc-ready',
+          documentVersion: 1,
+          status: 'FAILED',
+          claimedByDeviceId: 'dev-1',
+          failureCode: 'SIGN_FAILED',
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    });
+    (sendDocumentForSignature as jest.Mock).mockResolvedValue({
+      id: 'job-new',
+      documentId: 'doc-ready',
+      documentVersion: 1,
+      status: 'PENDING',
+      claimedByDeviceId: null,
+      failureCode: null,
+      createdAt: new Date().toISOString(),
+    });
+    renderDetail();
+    await waitFor(() => {
+      expect(screen.getByTestId('send-for-signature')).toBeEnabled();
+    });
+    const send = screen.getByTestId('send-for-signature');
+    expect(send).toHaveTextContent(en.documents.sendForSignature);
+    fireEvent.click(send);
+    expect(await screen.findByText(en.documents.waitingForSigningDevice)).toBeInTheDocument();
+    expect(sendDocumentForSignature).toHaveBeenCalledWith('doc-ready');
   });
 });

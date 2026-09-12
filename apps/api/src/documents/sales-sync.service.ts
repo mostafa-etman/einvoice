@@ -59,6 +59,42 @@ export function etaSyncIssuedNeedsBackfill(existing: {
   return false;
 }
 
+export function etaSearchRowIssueDate(
+  row: Record<string, unknown>,
+): Date | null {
+  const raw =
+    row.dateTimeIssued ??
+    row.DateTimeIssued ??
+    row.issueDate ??
+    row.IssueDate;
+  if (raw == null || raw === '') return null;
+  const d = raw instanceof Date ? raw : new Date(String(raw));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+export function etaSearchRowInternalId(row: Record<string, unknown>): string {
+  return String(
+    row.internalId ?? row.InternalId ?? row.internalID ?? '',
+  ).trim();
+}
+
+/**
+ * Detects a stolen/mismatched ETA_SYNC row: same uuid, but stored issue
+ * month/year disagrees with the current ETA search row. Invoice number is
+ * never used as identity.
+ */
+export function etaSyncIssuedPeriodDiffers(
+  storedIssueDateTime: Date,
+  searchRow: Record<string, unknown>,
+): boolean {
+  const search = etaSearchRowIssueDate(searchRow);
+  if (!search) return false;
+  return (
+    storedIssueDateTime.getUTCFullYear() !== search.getUTCFullYear() ||
+    storedIssueDateTime.getUTCMonth() !== search.getUTCMonth()
+  );
+}
+
 @Injectable()
 export class SalesSyncService {
   private readonly logger = new Logger(SalesSyncService.name);
@@ -521,6 +557,7 @@ export class SalesSyncService {
           origin: true,
           internalId: true,
           status: true,
+          issueDateTime: true,
           taxTotalsJson: true,
           _count: { select: { lines: true } },
           lines: {
@@ -545,7 +582,9 @@ export class SalesSyncService {
         taxTotalsJson: existing.taxTotalsJson,
         lineCount: existing._count.lines,
         hasLineTax: existing.lines.some((l) => l.taxes.length > 0),
-      });
+      }) ||
+      (existing.origin === 'ETA_SYNC' &&
+        etaSyncIssuedPeriodDiffers(existing.issueDateTime, row));
 
     // Already imported complete — status-only refresh (resume-friendly).
     if (existing && !needsBackfill) {
@@ -573,30 +612,8 @@ export class SalesSyncService {
       return 'updated';
     }
 
-    // Match by internalId for docs created here before UUID was known.
-    const byInternal = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.document.findFirst({
-        where: { tenantId, internalId: mapped.internalId },
-        select: { id: true, origin: true },
-      }),
-    );
-    if (byInternal) {
-      await this.tenantPrisma.withTenant(tenantId, (tx) =>
-        tx.document.update({
-          where: { id: byInternal.id },
-          data: {
-            etaUuid: mapped.etaUuid,
-            etaLongId: mapped.etaLongId,
-            etaStatus: mapped.etaStatus,
-            status: mapped.status,
-            etaStatusUpdatedAt: new Date(),
-            etaEnvironment,
-          },
-        }),
-      );
-      return 'updated';
-    }
-
+    // Identity is ETA uuid only. Same invoice number in another period is a
+    // different document and must be created, never merged.
     const branch = await this.tenantPrisma.withTenant(tenantId, (tx) =>
       tx.branch.findFirst({
         where: { tenantId, isActive: true },
@@ -606,17 +623,6 @@ export class SalesSyncService {
     );
     if (!branch) {
       throw new Error('No active branch to attach imported sales document');
-    }
-
-    let internalId = mapped.internalId;
-    const clash = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.document.findFirst({
-        where: { tenantId, internalId },
-        select: { id: true },
-      }),
-    );
-    if (clash) {
-      internalId = `ETA-${mapped.etaUuid.slice(0, 12)}`;
     }
 
     await this.tenantPrisma.withTenant(tenantId, async (tx) => {
@@ -629,7 +635,7 @@ export class SalesSyncService {
           branchId: branch.id,
           currencyCode: mapped.currencyCode,
           issueDateTime: mapped.issueDateTime,
-          internalId,
+          internalId: mapped.internalId,
           etaDocumentType: mapped.etaDocumentType,
           etaDocumentTypeVersion: mapped.etaDocumentTypeVersion,
           typeVersionFetchedAt: new Date(),
@@ -714,6 +720,7 @@ export class SalesSyncService {
           status: mapped.status,
           currencyCode: mapped.currencyCode,
           issueDateTime: mapped.issueDateTime,
+          internalId: mapped.internalId,
           etaDocumentType: mapped.etaDocumentType,
           etaDocumentTypeVersion: mapped.etaDocumentTypeVersion,
           typeVersionFetchedAt: new Date(),
@@ -752,18 +759,23 @@ export class SalesSyncService {
     const longId = String(
       row.longId ?? row.LongId ?? row.longID ?? '',
     ).trim();
+    const searchInternalId = etaSearchRowInternalId(row);
     const etaStatusRaw = extractEtaDocumentStatus(row) ?? '';
     const mapped = mapEtaStatusToLocal(etaStatusRaw);
 
     await this.tenantPrisma.withTenant(tenantId, async (tx) => {
       const current = await tx.document.findFirst({
         where: { id: documentId, tenantId },
-        select: { status: true },
+        select: { status: true, origin: true, internalId: true },
       });
       const applyStatus =
         mapped &&
         current &&
         shouldApplyMappedEtaStatus(current.status, mapped);
+      const restoreInternalId =
+        current?.origin === 'ETA_SYNC' &&
+        searchInternalId.length > 0 &&
+        searchInternalId !== current.internalId;
       await tx.document.update({
         where: { id: documentId },
         data: {
@@ -771,6 +783,7 @@ export class SalesSyncService {
           ...(longId ? { etaLongId: longId } : {}),
           ...(etaStatusRaw ? { etaStatus: etaStatusRaw } : {}),
           ...(applyStatus ? { status: mapped } : {}),
+          ...(restoreInternalId ? { internalId: searchInternalId } : {}),
           etaStatusUpdatedAt: new Date(),
         },
       });

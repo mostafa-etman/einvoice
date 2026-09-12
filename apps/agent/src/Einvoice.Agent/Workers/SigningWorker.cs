@@ -99,6 +99,9 @@ public sealed class SigningWorker : BackgroundService
         await ProcessPendingUploadAsync(ct).ConfigureAwait(false);
     }
 
+    /// <summary>Test hook for a single poll/sign/upload cycle.</summary>
+    internal Task TickForTestsAsync(CancellationToken ct = default) => TickAsync(ct);
+
     private async Task HeartbeatSafeAsync(CancellationToken ct)
     {
         try
@@ -150,7 +153,7 @@ public sealed class SigningWorker : BackgroundService
         }
     }
 
-    private Task ProcessPendingSignAsync(CancellationToken ct)
+    private async Task ProcessPendingSignAsync(CancellationToken ct)
     {
         foreach (var item in _queue.ListByState(SqliteOfflineQueue.StatePendingSign))
         {
@@ -184,7 +187,12 @@ public sealed class SigningWorker : BackgroundService
                 _queue.MarkAttemptFailed(item.Id, safeMessage, dead: false);
                 try
                 {
-                    _ = _api.FailAsync(item.JobId, "SIGN_FAILED", safeMessage, ct);
+                    await _api.FailAsync(item.JobId, "SIGN_FAILED", safeMessage, ct)
+                        .ConfigureAwait(false);
+                }
+                catch (DeviceUnauthorizedException)
+                {
+                    throw;
                 }
                 catch (Exception failEx)
                 {
@@ -192,8 +200,6 @@ public sealed class SigningWorker : BackgroundService
                 }
             }
         }
-
-        return Task.CompletedTask;
     }
 
     private async Task ProcessPendingUploadAsync(CancellationToken ct)

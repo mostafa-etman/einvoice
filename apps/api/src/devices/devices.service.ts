@@ -89,6 +89,12 @@ export class DevicesService {
           tokenHash: unusableTokenHash(),
         },
       });
+      // Revoked devices cannot submit. Release their live claims so another
+      // paired agent can pick the work up — do not delete or duplicate jobs.
+      await tx.signatureJob.updateMany({
+        where: { tenantId, claimedByDeviceId: id, status: 'CLAIMED' },
+        data: { status: 'PENDING', claimedByDeviceId: null, claimExpiresAt: null },
+      });
     });
 
     await this.audit.write({

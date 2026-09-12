@@ -37,8 +37,13 @@ export class SigningController {
   async listJobs(
     @Headers('x-tenant-id') tenantHeader: string | undefined,
     @Query('status') status?: SignatureJobStatus,
+    @Query('documentId') documentId?: string,
   ) {
-    const items = await this.signing.listJobs(requireTenant(tenantHeader), status);
+    const items = await this.signing.listJobs(
+      requireTenant(tenantHeader),
+      status,
+      documentId,
+    );
     return { items };
   }
 }

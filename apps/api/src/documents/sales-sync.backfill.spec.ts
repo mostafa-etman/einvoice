@@ -1,4 +1,7 @@
-import { etaSyncIssuedNeedsBackfill } from './sales-sync.service';
+import {
+  etaSyncIssuedNeedsBackfill,
+  etaSyncIssuedPeriodDiffers,
+} from './sales-sync.service';
 
 describe('etaSyncIssuedNeedsBackfill', () => {
   it('rewrites ETA_SYNC drafts even when lines already exist', () => {
@@ -45,6 +48,32 @@ describe('etaSyncIssuedNeedsBackfill', () => {
         taxTotalsJson: [],
         lineCount: 1,
         hasLineTax: true,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('etaSyncIssuedPeriodDiffers', () => {
+  it('is true when stored June disagrees with September search row', () => {
+    expect(
+      etaSyncIssuedPeriodDiffers(new Date('2026-06-15T10:00:00.000Z'), {
+        dateTimeIssued: '2026-09-12T12:00:00.000+03:00',
+      }),
+    ).toBe(true);
+  });
+
+  it('is false when stored and search row share the same UTC month', () => {
+    expect(
+      etaSyncIssuedPeriodDiffers(new Date('2026-09-12T09:00:00.000Z'), {
+        dateTimeIssued: '2026-09-12T12:00:00.000+03:00',
+      }),
+    ).toBe(false);
+  });
+
+  it('is false when the search row has no issue date', () => {
+    expect(
+      etaSyncIssuedPeriodDiffers(new Date('2026-06-15T10:00:00.000Z'), {
+        uuid: 'aaaaaaaa-bbbb-4ccc-8ddd-000000000001',
       }),
     ).toBe(false);
   });

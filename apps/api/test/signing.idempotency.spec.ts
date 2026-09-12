@@ -43,6 +43,7 @@ async function ownerCtx(app: INestApplication, suffix: string) {
       clientSecret: `idem-secret-${suffix}`,
       registrationNumber: '123456789',
       activityCode: '6201',
+      taxpayerLegalName: 'Seller Co',
       isIntermediary: false,
     })
     .expect(200);

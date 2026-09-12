@@ -5,14 +5,36 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { Prisma, SignatureJob, SignatureJobStatus, SigningDevice } from '@prisma/client';
+import { Prisma, type SignatureJob, type SignatureJobStatus, type SigningDevice } from '@prisma/client';
 import { parseEtaDocument } from '@einvoice/eta-core';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { SubmissionsService } from '../submissions/submissions.service';
 import { assertDocumentCanMutate } from '../documents/documents-mutability';
 
-const CLAIM_LEASE_MINUTES = 5;
+export const CLAIM_LEASE_MINUTES = 5;
+/** PENDING with no progress for this long may be cancelled so the document can be re-queued. */
+export const PENDING_STALE_MINUTES = 30;
+export const PENDING_STALE_MS = PENDING_STALE_MINUTES * 60_000;
+
+export function isClaimLeaseActive(
+  claimExpiresAt: Date | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  return Boolean(claimExpiresAt && claimExpiresAt.getTime() > now.getTime());
+}
+
+export function isPendingJobStale(
+  updatedAt: Date,
+  now: Date = new Date(),
+  staleMs: number = PENDING_STALE_MS,
+): boolean {
+  return now.getTime() - updatedAt.getTime() >= staleMs;
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
+}
 
 export type SignatureJobSummary = {
   id: string;
@@ -45,7 +67,42 @@ export class SigningService {
   ) {}
 
   async sendForSignature(tenantId: string, actorUserId: string, documentId: string) {
-    const job = await this.tenantPrisma.withTenant(tenantId, async (tx) => {
+    let result: { job: SignatureJob; created: boolean; recovered: boolean } | undefined;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        result = await this.enqueueOrReuseJob(tenantId, documentId);
+        break;
+      } catch (err) {
+        if (!isUniqueViolation(err) || attempt === 2) throw err;
+      }
+    }
+    if (!result) throw new ConflictException('Could not enqueue signature job');
+
+    if (result.created) {
+      await this.audit.write({
+        action: 'documents.send_for_signature',
+        outcome: 'success',
+        actorUserId,
+        tenantId,
+        resourceType: 'signature_job',
+        resourceId: result.job.id,
+        metadata: {
+          documentId,
+          documentVersion: result.job.documentVersion,
+          recovered: result.recovered,
+        },
+      });
+    }
+
+    return toSummary(result.job);
+  }
+
+  /**
+   * Idempotent enqueue: at most one PENDING/CLAIMED job per document.
+   * Serializes on the document row so concurrent clicks cannot insert two actives.
+   */
+  private async enqueueOrReuseJob(tenantId: string, documentId: string) {
+    return this.tenantPrisma.withTenant(tenantId, async (tx) => {
       const doc = await tx.document.findFirst({ where: { id: documentId, tenantId } });
       if (!doc) throw new NotFoundException('Document not found');
       assertDocumentCanMutate(doc.origin, doc.status);
@@ -59,13 +116,64 @@ export class SigningService {
           'Document payload predates exact-bytes storage. Open the document, save it again, then send for signature.',
         );
       }
+
+      await tx.$queryRaw`
+        SELECT id FROM documents WHERE id = ${documentId}::uuid FOR UPDATE
+      `;
+
+      const now = new Date();
       const active = await tx.signatureJob.findFirst({
         where: { tenantId, documentId, status: { in: ['PENDING', 'CLAIMED'] } },
       });
-      if (active) {
-        throw new BadRequestException('A signature job is already pending for this document');
+
+      if (active?.status === 'CLAIMED') {
+        if (isClaimLeaseActive(active.claimExpiresAt, now)) {
+          return { job: active, created: false, recovered: false };
+        }
+        const released = await tx.signatureJob.updateMany({
+          where: {
+            id: active.id,
+            status: 'CLAIMED',
+            OR: [{ claimExpiresAt: { lt: now } }, { claimExpiresAt: null }],
+          },
+          data: { status: 'PENDING', claimedByDeviceId: null, claimExpiresAt: null },
+        });
+        const afterRelease = await tx.signatureJob.findFirst({
+          where: { id: active.id },
+        });
+        if (released.count === 1 && afterRelease) {
+          return { job: afterRelease, created: false, recovered: true };
+        }
+        if (afterRelease && afterRelease.status !== 'CLAIMED') {
+          return { job: afterRelease, created: false, recovered: false };
+        }
+        const again = await tx.signatureJob.findFirst({
+          where: { tenantId, documentId, status: { in: ['PENDING', 'CLAIMED'] } },
+        });
+        if (again) return { job: again, created: false, recovered: false };
       }
-      return tx.signatureJob.create({
+
+      if (active?.status === 'PENDING') {
+        if (!isPendingJobStale(active.updatedAt, now)) {
+          return { job: active, created: false, recovered: false };
+        }
+        const cancelled = await tx.signatureJob.updateMany({
+          where: { id: active.id, status: 'PENDING' },
+          data: {
+            status: 'CANCELLED',
+            failureCode: 'STALE_PENDING',
+            completedAt: now,
+          },
+        });
+        if (cancelled.count !== 1) {
+          const again = await tx.signatureJob.findFirst({
+            where: { tenantId, documentId, status: { in: ['PENDING', 'CLAIMED'] } },
+          });
+          if (again) return { job: again, created: false, recovered: false };
+        }
+      }
+
+      const created = await tx.signatureJob.create({
         data: {
           tenantId,
           documentId,
@@ -73,25 +181,18 @@ export class SigningService {
           status: 'PENDING',
         },
       });
+      return { job: created, created: true, recovered: active?.status === 'PENDING' };
     });
-
-    await this.audit.write({
-      action: 'documents.send_for_signature',
-      outcome: 'success',
-      actorUserId,
-      tenantId,
-      resourceType: 'signature_job',
-      resourceId: job.id,
-      metadata: { documentId, documentVersion: job.documentVersion },
-    });
-
-    return toSummary(job);
   }
 
-  async listJobs(tenantId: string, status?: SignatureJobStatus) {
+  async listJobs(tenantId: string, status?: SignatureJobStatus, documentId?: string) {
     const rows = await this.tenantPrisma.withTenant(tenantId, (tx) =>
       tx.signatureJob.findMany({
-        where: { tenantId, ...(status ? { status } : {}) },
+        where: {
+          tenantId,
+          ...(status ? { status } : {}),
+          ...(documentId ? { documentId } : {}),
+        },
         orderBy: { createdAt: 'desc' },
         take: 200,
       }),
@@ -290,6 +391,10 @@ export class SigningService {
         where: { id: jobId, tenantId: device.tenantId },
       });
       if (!job) throw new NotFoundException('Signature job not found');
+      if (job.status === 'FAILED') return;
+      if (job.status !== 'CLAIMED') {
+        throw new BadRequestException(`Job is not claimed (status: ${job.status})`);
+      }
       if (job.claimedByDeviceId !== device.id) {
         throw new ForbiddenException('Job claimed by a different device');
       }

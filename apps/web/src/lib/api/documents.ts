@@ -272,10 +272,13 @@ export function markDocumentReady(id: string) {
 }
 
 export function sendDocumentForSignature(id: string) {
-  return apiFetch<Record<string, unknown>>(`/documents/${id}/send-for-signature`, {
-    method: 'POST',
-    tenantScoped: true,
-  });
+  return apiFetch<import('./signing').SignatureJobSummary>(
+    `/documents/${id}/send-for-signature`,
+    {
+      method: 'POST',
+      tenantScoped: true,
+    },
+  );
 }
 
 export function submitDocumentToEta(id: string, idempotencyKey?: string) {
