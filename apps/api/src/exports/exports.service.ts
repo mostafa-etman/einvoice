@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import type { Prisma } from '@prisma/client';
+import type { DocumentKind, Prisma, ReceivedDocumentKind } from '@prisma/client';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { EtaService } from '../eta/eta.service';
@@ -37,6 +37,7 @@ import {
 import type { ArtifactStorage } from '../storage/storage.module';
 import { loadEnv } from '../config/env';
 import { tenantArtifactKey } from '../storage/minio-artifact.store';
+import { splitLocalExportDocumentTypes } from './local-export-scope';
 
 export type LocalExportFilters = {
   from?: string;
@@ -490,9 +491,39 @@ export class ExportsService {
   }
 
   async processLocalExport(tenantId: string, exportJobId: string) {
+    try {
+      await this.runLocalExport(tenantId, exportJobId);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Local export failed';
+      await this.tenantPrisma
+        .withTenant(tenantId, (tx) =>
+          tx.exportJob.update({
+            where: { id: exportJobId },
+            data: {
+              status: 'FAILED',
+              errorSummary: message.slice(0, 500),
+              finishedAt: new Date(),
+            },
+          }),
+        )
+        .catch(() => undefined);
+      throw err;
+    }
+  }
+
+  private async runLocalExport(tenantId: string, exportJobId: string) {
     const job = await this.getJob(tenantId, exportJobId);
     const filters = (job.filtersJson ?? {}) as LocalExportFilters;
     const formats = (job.formatsJson ?? []) as string[];
+    const scope = splitLocalExportDocumentTypes(filters.documentTypes);
+    const issueRange =
+      filters.from || filters.to
+        ? {
+            ...(filters.from ? { gte: new Date(filters.from) } : {}),
+            ...(filters.to ? { lte: new Date(filters.to) } : {}),
+          }
+        : undefined;
 
     await this.tenantPrisma.withTenant(tenantId, (tx) =>
       tx.exportJob.update({
@@ -501,57 +532,83 @@ export class ExportsService {
       }),
     );
 
-    const docs = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.document.findMany({
-        where: {
-          tenantId,
-          ...(filters.branchId ? { branchId: filters.branchId } : {}),
-          ...(filters.statuses?.length
-            ? { status: { in: filters.statuses as never[] } }
-            : {}),
-          ...(filters.documentTypes?.length
-            ? { kind: { in: filters.documentTypes as never[] } }
-            : {}),
-          ...(filters.from || filters.to
-            ? {
-                issueDateTime: {
-                  ...(filters.from ? { gte: new Date(filters.from) } : {}),
-                  ...(filters.to ? { lte: new Date(filters.to) } : {}),
-                },
-              }
-            : {}),
-        },
-        orderBy: { issueDateTime: 'desc' },
-        take: 5000,
-      }),
-    );
+    const issued =
+      scope.issuedKinds === 'none'
+        ? []
+        : await this.tenantPrisma.withTenant(tenantId, (tx) =>
+            tx.document.findMany({
+              where: {
+                tenantId,
+                ...(filters.branchId ? { branchId: filters.branchId } : {}),
+                ...(filters.statuses?.length
+                  ? { status: { in: filters.statuses as never[] } }
+                  : {}),
+                ...(scope.issuedKinds !== 'all'
+                  ? {
+                      kind: {
+                        in: scope.issuedKinds as DocumentKind[],
+                      },
+                    }
+                  : {}),
+                ...(issueRange ? { issueDateTime: issueRange } : {}),
+              },
+              orderBy: { issueDateTime: 'desc' },
+              take: 5000,
+            }),
+          );
 
-    if (docs.length === 0) {
-      await this.tenantPrisma.withTenant(tenantId, (tx) =>
-        tx.exportJob.update({
-          where: { id: exportJobId },
-          data: {
-            status: 'FAILED',
-            errorSummary: 'No documents matched filters',
-            finishedAt: new Date(),
-          },
-        }),
-      );
-      return;
-    }
+    const received =
+      scope.receivedKinds === 'none'
+        ? []
+        : await this.tenantPrisma.withTenant(tenantId, (tx) =>
+            tx.receivedDocument.findMany({
+              where: {
+                tenantId,
+                ...(filters.branchId ? { branchId: filters.branchId } : {}),
+                ...(scope.receivedKinds !== 'all'
+                  ? {
+                      kind: {
+                        in: scope.receivedKinds as ReceivedDocumentKind[],
+                      },
+                    }
+                  : {}),
+                ...(issueRange ? { dateTimeIssued: issueRange } : {}),
+              },
+              orderBy: { dateTimeIssued: 'desc' },
+              take: 5000,
+            }),
+          );
 
-    const rows: ExportDocRow[] = docs.map((d) => ({
-      id: d.id,
-      internalId: d.internalId,
-      kind: d.kind,
-      status: d.status,
-      issueDateTime: d.issueDateTime.toISOString(),
-      currencyCode: d.currencyCode,
-      totalAmount: d.totalAmount,
-      netAmount: d.netAmount,
-      receiverName: d.receiverName,
-      etaUuid: d.etaUuid,
-    }));
+    const rows: ExportDocRow[] = [
+      ...issued.map((d) => ({
+        id: d.id,
+        internalId: d.internalId,
+        kind: d.kind,
+        status: d.status,
+        issueDateTime: d.issueDateTime.toISOString(),
+        currencyCode: d.currencyCode,
+        totalAmount: d.totalAmount,
+        netAmount: d.netAmount,
+        receiverName: d.receiverName,
+        etaUuid: d.etaUuid,
+        side: 'sales' as const,
+      })),
+      ...received.map((d) => ({
+        id: d.id,
+        internalId: d.internalId || d.documentUuid,
+        kind: d.kind,
+        status: d.etaStatus || d.buyerDecision || '',
+        issueDateTime: (d.dateTimeIssued ?? d.createdAt).toISOString(),
+        currencyCode: d.currency || '',
+        totalAmount: d.totalAmount || '0',
+        netAmount: d.netAmount || '0',
+        receiverName: d.issuerName,
+        etaUuid: d.documentUuid,
+        side: 'purchases' as const,
+      })),
+    ]
+      .sort((a, b) => b.issueDateTime.localeCompare(a.issueDateTime))
+      .slice(0, 5000);
 
     const artifactKeys: Record<string, string> = {};
     for (const fmt of formats) {
@@ -596,6 +653,7 @@ export class ExportsService {
         data: {
           status: 'READY',
           artifactObjectKeysJson: artifactKeys as Prisma.InputJsonValue,
+          errorSummary: null,
           finishedAt: new Date(),
         },
       }),

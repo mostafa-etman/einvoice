@@ -16,11 +16,29 @@ import { Button } from '@/components/ui/button';
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { Radio } from '@/components/ui/radio';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Table, type TableColumn } from '@/components/ui/table';
 import { JobStatusBadge } from '../imports/_components/job-status-badge';
 import { PackageProgress } from './_components/package-progress';
 import { useMutationToast } from '@/components/ui/use-mutation-toast';
+import { KIND_FILTERS as SALES_DOCUMENT_TYPES } from '../documents/_components/document-list-utils';
+import { KIND_FILTERS as PURCHASE_DOCUMENT_TYPES } from '../purchases/_components/purchase-list-utils';
+
+type DocumentTypeScope = 'all' | 'sales' | 'purchases';
+
+function documentTypesForScope(scope: DocumentTypeScope): string[] {
+  if (scope === 'sales') return [...SALES_DOCUMENT_TYPES];
+  if (scope === 'purchases') return [...PURCHASE_DOCUMENT_TYPES];
+  return [...SALES_DOCUMENT_TYPES, ...PURCHASE_DOCUMENT_TYPES];
+}
+
+function localDownloadFormats(job: ExportJob): string[] {
+  const requested = (job.formatsJson ?? []).map((f) => String(f).toLowerCase());
+  const known = ['csv', 'xlsx', 'pdf', 'json'] as const;
+  if (!requested.length) return [...known];
+  return known.filter((f) => requested.includes(f));
+}
 
 export default function ExportsPage() {
   const t = useTranslations('exports');
@@ -40,6 +58,7 @@ export default function ExportsPage() {
   ]);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [documentType, setDocumentType] = useState<DocumentTypeScope>('all');
 
   const reload = useCallback(() => {
     return listExportJobs()
@@ -81,12 +100,21 @@ export default function ExportsPage() {
         formats,
         filters: {
           from: from ? new Date(from).toISOString() : undefined,
-          to: to ? new Date(to).toISOString() : undefined,
+          to: to ? new Date(`${to}T23:59:59`).toISOString() : undefined,
+          documentTypes: documentTypesForScope(documentType),
         },
       });
-      await pollUntilReady(job.id);
-      reload();
-      toast.created();
+      const finished = await pollUntilReady(job.id);
+      await reload();
+      if (finished.status === 'FAILED') {
+        setError(finished.errorSummary || t('exportFailed'));
+        toast.error(undefined, finished.errorSummary || t('exportFailed'));
+      } else if (finished.status !== 'READY') {
+        setError(t('exportFailed'));
+        toast.error(undefined, t('exportFailed'));
+      } else {
+        toast.created();
+      }
     } catch (e) {
       setListFailed(false);
       setError(e instanceof Error ? e.message : t('exportFailed'));
@@ -184,7 +212,7 @@ export default function ExportsPage() {
       cell: (j) => (
         <span className="flex flex-wrap justify-end gap-token-sm">
           {j.status === 'READY' && j.kind === 'LOCAL'
-            ? (['csv', 'xlsx', 'pdf', 'json'] as const).map((f) => (
+            ? localDownloadFormats(j).map((f) => (
                 <Button
                   key={f}
                   type="button"
@@ -270,9 +298,35 @@ export default function ExportsPage() {
       <section id="export-create" className="grid gap-token-lg md:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>{t('local')}</CardTitle>
+            <div>
+              <CardTitle>{t('exportData')}</CardTitle>
+              <CardDescription>{t('local')}</CardDescription>
+            </div>
           </CardHeader>
           <fieldset className="m-0 border-0 p-0">
+            <legend className="mb-token-sm text-token-sm font-medium text-foreground">
+              {t('documentType')}
+            </legend>
+            <div className="flex flex-wrap gap-token-md">
+              {(
+                [
+                  ['all', t('documentTypeAll')],
+                  ['sales', t('documentTypeSales')],
+                  ['purchases', t('documentTypePurchases')],
+                ] as const
+              ).map(([value, label]) => (
+                <Radio
+                  key={value}
+                  name="export-document-type"
+                  value={value}
+                  checked={documentType === value}
+                  onChange={() => setDocumentType(value)}
+                  label={label}
+                />
+              ))}
+            </div>
+          </fieldset>
+          <fieldset className="m-0 mt-token-md border-0 p-0">
             <legend className="mb-token-sm text-token-sm font-medium text-foreground">
               {t('formats')}
             </legend>

@@ -36,6 +36,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { useMutationToast } from '@/components/ui/use-mutation-toast';
 import { REPORT_CHART_COLORS } from '../../analytics/_components/chart-colors';
 import { ReportDetailDocumentsTable } from './report-detail-table';
+import { localizedTaxTypeLabel, taxTypeLabelFromRows } from './c4-tax-label';
 
 function todayCairo(): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -437,6 +438,16 @@ export default function ReportDetailPage() {
     [data, locale],
   );
 
+  const c4TaxRows = useMemo(() => {
+    if (!data) return [] as Array<Record<string, unknown>>;
+    return [
+      ...((data.rows ?? []) as Array<Record<string, unknown>>),
+      ...((data.sections?.output ?? []) as Array<Record<string, unknown>>),
+      ...((data.sections?.input ?? []) as Array<Record<string, unknown>>),
+      ...((data.sections?.withholding ?? []) as Array<Record<string, unknown>>),
+    ];
+  }, [data]);
+
   const branchLabels = useMemo(
     () => ({
       total: t('fields.total'),
@@ -674,7 +685,7 @@ export default function ReportDetailPage() {
               <option value="">{t('taxTypeAll')}</option>
               {(data?.taxTypes ?? ['T1', 'T2', 'T3', 'T4']).map((code) => (
                 <option key={code} value={code}>
-                  {code}
+                  {taxTypeLabelFromRows(locale, code, c4TaxRows)}
                 </option>
               ))}
             </select>
@@ -814,48 +825,29 @@ export default function ReportDetailPage() {
                   </thead>
                   <tbody>
                     {rows.map((row, i) => {
-                      const taxLabel = pickLocaleName(
+                      const taxLabel = localizedTaxTypeLabel(
                         locale,
+                        row.taxType,
                         row.taxTypeNameEn,
                         row.taxTypeNameAr,
-                        row.taxType,
                       );
-                      const subLabel = pickLocaleName(
+                      const subLabel = localizedTaxTypeLabel(
                         locale,
+                        row.subType,
                         row.subTypeNameEn,
                         row.subTypeNameAr,
-                        row.subType,
                       );
-                      const taxCode = String(row.taxType ?? '');
-                      const subCode = String(row.subType ?? '');
+                      const subCode = String(row.subType ?? '').trim();
                       return (
                       <tr
                         key={`${sectionKey}-${i}`}
                         className="odd:bg-background even:bg-surface/40"
                       >
                         <td className="border-b border-border px-3 py-2">
-                          {taxLabel && taxCode && taxLabel !== taxCode
-                            ? `${taxLabel} `
-                            : null}
-                          <span dir="ltr">
-                            {taxLabel !== taxCode ? `(${taxCode})` : taxCode}
-                          </span>
+                          {taxLabel}
                         </td>
                         <td className="border-b border-border px-3 py-2">
-                          {subCode ? (
-                            <>
-                              {subLabel && subLabel !== subCode
-                                ? `${subLabel} `
-                                : null}
-                              <span dir="ltr">
-                                {subLabel !== subCode
-                                  ? `(${subCode})`
-                                  : subCode}
-                              </span>
-                            </>
-                          ) : (
-                            '—'
-                          )}
+                          {subCode ? subLabel : '—'}
                         </td>
                         <td
                           className="border-b border-border px-3 py-2 tabular-nums"

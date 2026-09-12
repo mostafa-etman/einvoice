@@ -98,7 +98,7 @@ describe('exports page', () => {
     expect(listExportJobs).toHaveBeenCalledWith();
   });
 
-  it('creates a local export with formats and ISO date filters', async () => {
+  it('creates a local export with formats, ISO date filters, and All document types', async () => {
     (getExportJob as jest.Mock).mockResolvedValue(job({ status: 'READY' }));
     renderPage();
     await screen.findByText(en.exports.noJobs);
@@ -114,7 +114,18 @@ describe('exports page', () => {
         formats: ['CSV', 'JSON'],
         filters: {
           from: new Date('2026-01-01').toISOString(),
-          to: new Date('2026-01-31').toISOString(),
+          to: new Date('2026-01-31T23:59:59').toISOString(),
+          documentTypes: [
+            'INVOICE',
+            'CREDIT_NOTE',
+            'DEBIT_NOTE',
+            'EXPORT_INVOICE',
+            'EXPORT_CREDIT_NOTE',
+            'EXPORT_DEBIT_NOTE',
+            'PURCHASE_INVOICE',
+            'PURCHASE_RETURN',
+            'OTHER_RECEIVED',
+          ],
         },
       });
     });
@@ -123,6 +134,54 @@ describe('exports page', () => {
     });
     await waitFor(() => {
       expect(getExportJob).toHaveBeenCalledWith('exp-1');
+    });
+  });
+
+  it('exports sales or purchases using existing documentTypes kinds', async () => {
+    (getExportJob as jest.Mock).mockResolvedValue(job({ status: 'READY' }));
+    renderPage();
+    await screen.findByText(en.exports.noJobs);
+    expect(screen.getByRole('radio', { name: en.exports.documentTypeAll })).toBeChecked();
+    fireEvent.click(screen.getByRole('radio', { name: en.exports.documentTypeSales }));
+    fireEvent.click(screen.getByRole('button', { name: en.exports.createLocal }));
+    await waitFor(() => {
+      expect(createLocalExport).toHaveBeenCalledWith({
+        formats: ['CSV', 'JSON'],
+        filters: {
+          from: undefined,
+          to: undefined,
+          documentTypes: [
+            'INVOICE',
+            'CREDIT_NOTE',
+            'DEBIT_NOTE',
+            'EXPORT_INVOICE',
+            'EXPORT_CREDIT_NOTE',
+            'EXPORT_DEBIT_NOTE',
+          ],
+        },
+      });
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 1000));
+    });
+    fireEvent.click(screen.getByRole('radio', { name: en.exports.documentTypePurchases }));
+    fireEvent.click(screen.getByRole('button', { name: en.exports.createLocal }));
+    await waitFor(() => {
+      expect(createLocalExport).toHaveBeenLastCalledWith({
+        formats: ['CSV', 'JSON'],
+        filters: {
+          from: undefined,
+          to: undefined,
+          documentTypes: [
+            'PURCHASE_INVOICE',
+            'PURCHASE_RETURN',
+            'OTHER_RECEIVED',
+          ],
+        },
+      });
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 1000));
     });
   });
 

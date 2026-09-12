@@ -210,7 +210,11 @@ export class ReportExportService {
         const keys = [
           'side',
           'taxType',
+          'taxTypeNameEn',
+          'taxTypeNameAr',
           'subType',
+          'subTypeNameEn',
+          'subTypeNameAr',
           'rate',
           'category',
           'taxableValue',
@@ -361,10 +365,20 @@ export class ReportExportService {
         doc.fontSize(12).text('Detail by tax type / rate', { underline: true });
         const rows = this.flattenRows(data).slice(0, 80);
         for (const row of rows) {
+          const taxLabel = this.c4CatalogLabel(
+            row.taxTypeNameEn,
+            row.taxTypeNameAr,
+            row.taxType,
+          );
+          const subLabel = this.c4CatalogLabel(
+            row.subTypeNameEn,
+            row.subTypeNameAr,
+            row.subType,
+          );
           doc
             .fontSize(9)
             .text(
-              `${row.side} | ${row.taxType}/${row.subType} @ ${row.rate}% | taxable ${row.taxableValue} | tax ${row.taxAmount}`,
+              `${row.side} | ${taxLabel}${subLabel ? ` / ${subLabel}` : ''} @ ${row.rate}% | taxable ${row.taxableValue} | tax ${row.taxAmount}`,
             );
         }
         doc.moveDown();
@@ -464,5 +478,18 @@ export class ReportExportService {
       }
       doc.end();
     });
+  }
+
+  /** Prefer catalog names; keep the stored code only as a last-resort fallback. */
+  private c4CatalogLabel(
+    nameEn: unknown,
+    nameAr: unknown,
+    code: unknown,
+  ): string {
+    const en = String(nameEn ?? '').trim();
+    const ar = String(nameAr ?? '').trim();
+    const stored = String(code ?? '').trim();
+    if (en && ar && en !== ar) return `${en} / ${ar}`;
+    return en || ar || stored || '—';
   }
 }

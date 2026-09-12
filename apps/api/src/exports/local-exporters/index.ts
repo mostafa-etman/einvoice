@@ -11,12 +11,15 @@ export type ExportDocRow = {
   netAmount: string;
   receiverName: string | null;
   etaUuid: string | null;
+  /** sales = issued documents; purchases = received documents */
+  side?: 'sales' | 'purchases';
 };
 
 export function exportDocsToCsv(rows: ExportDocRow[]): Buffer {
   const headers = [
     'id',
     'internalId',
+    'side',
     'kind',
     'status',
     'issueDateTime',
@@ -32,6 +35,7 @@ export function exportDocsToCsv(rows: ExportDocRow[]): Buffer {
       [
         r.id,
         csv(r.internalId),
+        r.side ?? '',
         r.kind,
         r.status,
         r.issueDateTime,
@@ -50,6 +54,7 @@ export function exportDocsToXlsx(rows: ExportDocRow[]): Buffer {
   const sheetRows = rows.map((r) => ({
     id: r.id,
     internalId: r.internalId,
+    side: r.side ?? '',
     kind: r.kind,
     status: r.status,
     issueDateTime: r.issueDateTime,

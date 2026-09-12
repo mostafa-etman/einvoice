@@ -25,6 +25,13 @@ describe('local exporters (T036)', () => {
     const csv = exportDocsToCsv(rows).toString('utf8');
     expect(csv).toContain('internalId');
     expect(csv).toContain('INV-1');
+    expect(csv).toContain('side');
+  });
+
+  it('emits an empty CSV with headers when nothing matched', () => {
+    const csv = exportDocsToCsv([]).toString('utf8');
+    expect(csv).toContain('internalId');
+    expect(csv.split('\n').filter(Boolean)).toHaveLength(1);
   });
 
   it('emits XLSX buffer', () => {
