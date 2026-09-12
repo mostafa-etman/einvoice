@@ -42,6 +42,21 @@ describe('splitLocalExportDocumentTypes', () => {
     });
   });
 
+  it('maps All / Sales / Purchases aliases so a scope label cannot match zero rows', () => {
+    expect(splitLocalExportDocumentTypes(['all'])).toEqual({
+      issuedKinds: 'all',
+      receivedKinds: 'all',
+    });
+    expect(splitLocalExportDocumentTypes(['SALES'])).toEqual({
+      issuedKinds: 'all',
+      receivedKinds: 'none',
+    });
+    expect(splitLocalExportDocumentTypes(['purchases'])).toEqual({
+      issuedKinds: 'none',
+      receivedKinds: 'all',
+    });
+  });
+
   it('ignores unknown type names so they cannot widen the scope', () => {
     expect(splitLocalExportDocumentTypes(['NOT_A_KIND', 'INVOICE'])).toEqual({
       issuedKinds: ['INVOICE'],

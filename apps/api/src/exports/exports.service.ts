@@ -38,6 +38,7 @@ import type { ArtifactStorage } from '../storage/storage.module';
 import { loadEnv } from '../config/env';
 import { tenantArtifactKey } from '../storage/minio-artifact.store';
 import { splitLocalExportDocumentTypes } from './local-export-scope';
+import { localExportIssueRange } from './local-export-range';
 
 export type LocalExportFilters = {
   from?: string;
@@ -517,13 +518,7 @@ export class ExportsService {
     const filters = (job.filtersJson ?? {}) as LocalExportFilters;
     const formats = (job.formatsJson ?? []) as string[];
     const scope = splitLocalExportDocumentTypes(filters.documentTypes);
-    const issueRange =
-      filters.from || filters.to
-        ? {
-            ...(filters.from ? { gte: new Date(filters.from) } : {}),
-            ...(filters.to ? { lte: new Date(filters.to) } : {}),
-          }
-        : undefined;
+    const issueRange = localExportIssueRange(filters.from, filters.to);
 
     await this.tenantPrisma.withTenant(tenantId, (tx) =>
       tx.exportJob.update({

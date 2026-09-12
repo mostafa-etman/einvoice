@@ -148,6 +148,32 @@ describe('devices page', () => {
     });
   });
 
+  it('clears a consumed pairing code after unpair so a new pair can start', async () => {
+    (listDevices as jest.Mock)
+      .mockResolvedValueOnce({ items: [device()] })
+      .mockResolvedValue({ items: [device({ status: 'REVOKED', revokedAt: '2026-01-04T00:00:00.000Z' })] });
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: en.devices.createPairingCode }));
+    expect(await screen.findByText('PAIR-1234')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: en.devices.unpair }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: en.devices.unpair }));
+    await waitFor(() => {
+      expect(unpairDevice).toHaveBeenCalledWith('dev-1');
+    });
+    await waitFor(() => {
+      expect(screen.queryByText('PAIR-1234')).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: en.devices.createPairingCode })).toBeEnabled();
+    (createPairingCode as jest.Mock).mockResolvedValueOnce({
+      id: 'code-2',
+      code: 'PAIR-9999',
+      expiresAt: '2026-01-05T00:00:00.000Z',
+    });
+    fireEvent.click(screen.getByRole('button', { name: en.devices.createPairingCode }));
+    expect(await screen.findByText('PAIR-9999')).toBeInTheDocument();
+  });
+
   it('hides unpair for revoked devices', async () => {
     (listDevices as jest.Mock).mockResolvedValue({
       items: [device({ status: 'REVOKED', revokedAt: '2026-01-04T00:00:00.000Z' })],

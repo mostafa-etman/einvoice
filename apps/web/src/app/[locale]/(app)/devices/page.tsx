@@ -67,6 +67,8 @@ export default function DevicesPage() {
   const unpair = useMutation({
     mutationFn: (id: string) => unpairDevice(id),
     onSuccess: async () => {
+      setFreshCode(null);
+      setUnpairId(null);
       await qc.invalidateQueries({ queryKey: ['devices', tenantId] });
       toast.saved();
     },

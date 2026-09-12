@@ -24,6 +24,7 @@ import { PackageProgress } from './_components/package-progress';
 import { useMutationToast } from '@/components/ui/use-mutation-toast';
 import { KIND_FILTERS as SALES_DOCUMENT_TYPES } from '../documents/_components/document-list-utils';
 import { KIND_FILTERS as PURCHASE_DOCUMENT_TYPES } from '../purchases/_components/purchase-list-utils';
+import { cairoExportRangeIso } from './export-date-range';
 
 type DocumentTypeScope = 'all' | 'sales' | 'purchases';
 
@@ -99,8 +100,8 @@ export default function ExportsPage() {
       const job = await createLocalExport({
         formats,
         filters: {
-          from: from ? new Date(from).toISOString() : undefined,
-          to: to ? new Date(`${to}T23:59:59`).toISOString() : undefined,
+          from: from ? cairoExportRangeIso(from, false) : undefined,
+          to: to ? cairoExportRangeIso(to, true) : undefined,
           documentTypes: documentTypesForScope(documentType),
         },
       });

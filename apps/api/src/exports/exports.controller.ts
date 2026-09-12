@@ -105,6 +105,7 @@ export class ExportsController {
       'Content-Disposition',
       `attachment; filename="${file.fileName}"`,
     );
-    return res.send(file.buffer);
+    res.setHeader('Content-Length', String(file.buffer.byteLength));
+    res.end(file.buffer);
   }
 }

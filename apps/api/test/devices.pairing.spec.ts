@@ -319,6 +319,161 @@ describe('Devices pairing API', () => {
       .send({})
       .expect(401);
   });
+
+  it('pair → unpair → pair again reactivates the same PC with a new token (Free quota)', async () => {
+    if (!dbAvailable) return;
+    const suffix = `repair${Date.now()}`;
+    const email = `dev_${suffix}@example.com`;
+    const reg = await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({ email, password: 'Password123!', name: 'Repair Owner' })
+      .expect(201);
+    const tenant = await request(app.getHttpServer())
+      .post('/tenants')
+      .set('Authorization', `Bearer ${reg.body.accessToken}`)
+      .send({ name: `Repair Tenant ${suffix}` })
+      .expect(201);
+    const token = reg.body.accessToken as string;
+    const tenantId = tenant.body.id as string;
+    const fingerprint = `repair-pc-${Date.now()}`;
+
+    const firstCode = await request(app.getHttpServer())
+      .post('/devices/pairing-codes')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Tenant-Id', tenantId)
+      .send({})
+      .expect(201);
+
+    const first = await request(app.getHttpServer())
+      .post('/agent/pair')
+      .send({
+        pairingCode: firstCode.body.code,
+        label: 'Accounts PC',
+        machineFingerprint: fingerprint,
+      })
+      .expect(201);
+    expect(first.body.resumed).toBe(false);
+
+    await request(app.getHttpServer())
+      .post(`/devices/${first.body.deviceId}/unpair`)
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Tenant-Id', tenantId)
+      .expect(204);
+
+    await request(app.getHttpServer())
+      .post(`/devices/${first.body.deviceId}/unpair`)
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Tenant-Id', tenantId)
+      .expect(204);
+
+    const afterUnpair = await request(app.getHttpServer())
+      .get('/devices')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Tenant-Id', tenantId)
+      .expect(200);
+    const revoked = afterUnpair.body.items.find((d: { id: string }) => d.id === first.body.deviceId);
+    expect(revoked.status).toBe('REVOKED');
+
+    await request(app.getHttpServer())
+      .post('/agent/pair')
+      .send({ pairingCode: firstCode.body.code, label: 'Reuse consumed', machineFingerprint: fingerprint })
+      .expect(400);
+
+    const secondCode = await request(app.getHttpServer())
+      .post('/devices/pairing-codes')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Tenant-Id', tenantId)
+      .send({})
+      .expect(201);
+    expect(secondCode.body.code).not.toBe(firstCode.body.code);
+
+    const second = await request(app.getHttpServer())
+      .post('/agent/pair')
+      .send({
+        pairingCode: secondCode.body.code,
+        label: 'Accounts PC again',
+        machineFingerprint: fingerprint,
+      })
+      .expect(201);
+
+    expect(second.body.deviceId).toBe(first.body.deviceId);
+    expect(second.body.resumed).toBe(false);
+    expect(second.body.deviceToken).not.toBe(first.body.deviceToken);
+    expect(second.body.expiresAt).toBeNull();
+
+    await request(app.getHttpServer())
+      .post('/agent/heartbeat')
+      .set('Authorization', `Bearer ${second.body.deviceToken}`)
+      .send({})
+      .expect(200);
+    await request(app.getHttpServer())
+      .post('/agent/heartbeat')
+      .set('Authorization', `Bearer ${first.body.deviceToken}`)
+      .send({})
+      .expect(401);
+
+    const devices = await request(app.getHttpServer())
+      .get('/devices')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Tenant-Id', tenantId)
+      .expect(200);
+    const repaired = devices.body.items.find((d: { id: string }) => d.id === first.body.deviceId);
+    expect(repaired.status).toBe('PAIRED');
+    expect(devices.body.items.filter((d: { status: string }) => d.status === 'PAIRED')).toHaveLength(1);
+  });
+
+  it('another tenant cannot unpair or consume this tenant pairing cycle', async () => {
+    if (!dbAvailable) return;
+    const owner = await ownerCtx(app, `iso${Date.now()}`);
+    const other = await ownerCtx(app, `iso-other${Date.now()}`);
+
+    const code = await request(app.getHttpServer())
+      .post('/devices/pairing-codes')
+      .set('Authorization', `Bearer ${owner.token}`)
+      .set('X-Tenant-Id', owner.tenantId)
+      .send({})
+      .expect(201);
+
+    const paired = await request(app.getHttpServer())
+      .post('/agent/pair')
+      .send({
+        pairingCode: code.body.code,
+        label: 'Owner PC',
+        machineFingerprint: `iso-${Date.now()}`,
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/devices/${paired.body.deviceId}/unpair`)
+      .set('Authorization', `Bearer ${other.token}`)
+      .set('X-Tenant-Id', other.tenantId)
+      .expect(404);
+
+    await request(app.getHttpServer())
+      .post('/agent/heartbeat')
+      .set('Authorization', `Bearer ${paired.body.deviceToken}`)
+      .send({})
+      .expect(200);
+
+    const otherCode = await request(app.getHttpServer())
+      .post('/devices/pairing-codes')
+      .set('Authorization', `Bearer ${other.token}`)
+      .set('X-Tenant-Id', other.tenantId)
+      .send({})
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/agent/pair')
+      .send({ pairingCode: otherCode.body.code, label: 'Other PC' })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/devices/pairing-codes')
+      .set('Authorization', `Bearer ${other.token}`)
+      .set('X-Tenant-Id', owner.tenantId)
+      .send({})
+      .expect(403);
+  });
 });
 
 describe('Devices pairing gate', () => {

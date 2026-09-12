@@ -113,8 +113,8 @@ describe('exports page', () => {
       expect(createLocalExport).toHaveBeenCalledWith({
         formats: ['CSV', 'JSON'],
         filters: {
-          from: new Date('2026-01-01').toISOString(),
-          to: new Date('2026-01-31T23:59:59').toISOString(),
+          from: '2026-01-01T00:00:00.000+02:00',
+          to: '2026-01-31T23:59:59.999+02:00',
           documentTypes: [
             'INVOICE',
             'CREDIT_NOTE',

@@ -51,6 +51,19 @@ export function exportDocsToCsv(rows: ExportDocRow[]): Buffer {
 }
 
 export function exportDocsToXlsx(rows: ExportDocRow[]): Buffer {
+  const headers = [
+    'id',
+    'internalId',
+    'side',
+    'kind',
+    'status',
+    'issueDateTime',
+    'currencyCode',
+    'totalAmount',
+    'netAmount',
+    'receiverName',
+    'etaUuid',
+  ];
   const sheetRows = rows.map((r) => ({
     id: r.id,
     internalId: r.internalId,
@@ -65,7 +78,9 @@ export function exportDocsToXlsx(rows: ExportDocRow[]): Buffer {
     etaUuid: r.etaUuid,
   }));
   const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(sheetRows);
+  const ws = rows.length
+    ? XLSX.utils.json_to_sheet(sheetRows)
+    : XLSX.utils.aoa_to_sheet([headers]);
   XLSX.utils.book_append_sheet(wb, ws, 'Documents');
   return Buffer.from(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
 }
@@ -88,7 +103,7 @@ export function exportDocsToPdfInventory(rows: ExportDocRow[]): {
     `Documents: ${rows.length}`,
     ...rows.map(
       (r) =>
-        `- ${r.internalId} | ${r.kind} | ${r.status} | ${r.totalAmount} ${r.currencyCode}`,
+        `- ${r.side ?? ''} | ${r.internalId} | ${r.kind} | ${r.status} | ${r.totalAmount} ${r.currencyCode}`,
     ),
   ].join('\n');
   const pdf = minimalPdf(text);

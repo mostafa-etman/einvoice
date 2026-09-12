@@ -39,6 +39,11 @@ describe('local exporters (T036)', () => {
     expect(buf.byteLength).toBeGreaterThan(100);
   });
 
+  it('emits XLSX headers when nothing matched', () => {
+    const buf = exportDocsToXlsx([]);
+    expect(buf.byteLength).toBeGreaterThan(100);
+  });
+
   it('emits JSON documents array', () => {
     const json = JSON.parse(exportDocsToJson(rows).toString('utf8'));
     expect(json.documents).toHaveLength(1);
@@ -48,5 +53,6 @@ describe('local exporters (T036)', () => {
     const pdf = exportDocsToPdfInventory(rows);
     expect(pdf.buffer.subarray(0, 4).toString()).toBe('%PDF');
     expect(pdf.inventory.included).toEqual(['INV-1']);
+    expect(pdf.buffer.toString('utf8')).toContain('INV-1');
   });
 });

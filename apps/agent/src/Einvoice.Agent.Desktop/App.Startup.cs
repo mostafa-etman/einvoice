@@ -84,7 +84,7 @@ public partial class App
 
         _api = _host.Services.GetRequiredService<AgentApiClient>();
         _worker = _host.Services.GetRequiredService<SigningWorker>();
-        _worker.StateChanged += RefreshTrayText;
+        _worker.StateChanged += OnWorkerStateChanged;
 
         BuildTray();
         await _host.StartAsync();
@@ -108,7 +108,32 @@ public partial class App
     }
 
     private bool HasPersistedPairing() =>
-        _settings is not null && !string.IsNullOrWhiteSpace(_settings.DeviceToken);
+        _settings is not null
+        && !string.IsNullOrWhiteSpace(_settings.DeviceToken)
+        && (_api is null || !_api.IsUnpaired);
+
+    private void OnWorkerStateChanged()
+    {
+        DropLocalPairingIfServerRejected();
+        RefreshTrayText();
+    }
+
+    /// <summary>
+    /// Web/admin unpair revokes the cloud token. The worker then sees 401.
+    /// Clear the saved pairing so "Pair device" is available again.
+    /// </summary>
+    private void DropLocalPairingIfServerRejected()
+    {
+        if (_settings is null || _api is null) return;
+        if (!PairingLifecycle.MustDropLocalPairing(
+                _api.IsUnpaired,
+                !string.IsNullOrWhiteSpace(_settings.DeviceToken)))
+            return;
+
+        DeviceTokenStore.Clear(_settings.PairingStorePath, _settings.TokenStorePath);
+        _settings.DeviceToken = null;
+        _api.ClearDeviceToken();
+    }
 
     /// <summary>
     /// One-time install UX: pair → auto-detect token → PIN only when signing.
@@ -442,6 +467,7 @@ public partial class App
         DeviceTokenStore.Clear(_settings.PairingStorePath, _settings.TokenStorePath);
         _settings.DeviceToken = null;
         _api?.ClearDeviceToken();
+        RefreshPairingMenu();
         RefreshTrayText();
 
         await PairDeviceAsync(force: true);

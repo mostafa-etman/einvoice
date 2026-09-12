@@ -28,16 +28,27 @@ export type LocalExportKindScope = {
   receivedKinds: 'all' | 'none' | string[];
 };
 
+const SCOPE_ALIASES: Record<string, LocalExportKindScope> = {
+  ALL: { issuedKinds: 'all', receivedKinds: 'all' },
+  SALES: { issuedKinds: 'all', receivedKinds: 'none' },
+  PURCHASES: { issuedKinds: 'none', receivedKinds: 'all' },
+};
+
 /**
  * Existing contract: omitting documentTypes means every issued/sales document.
  * Passing purchase kinds (or a mix) is how the UI selects Purchases / All
- * without a new API field.
+ * without a new API field. A single All/Sales/Purchases alias is accepted so a
+ * mis-sent scope label cannot silently match zero rows.
  */
 export function splitLocalExportDocumentTypes(
   documentTypes?: string[] | null,
 ): LocalExportKindScope {
-  if (!documentTypes?.length) {
+  if (!Array.isArray(documentTypes) || !documentTypes.length) {
     return { issuedKinds: 'all', receivedKinds: 'none' };
+  }
+  if (documentTypes.length === 1) {
+    const alias = SCOPE_ALIASES[String(documentTypes[0]).trim().toUpperCase()];
+    if (alias) return alias;
   }
   const issued = [
     ...new Set(documentTypes.filter((k) => ISSUED.has(String(k)))),

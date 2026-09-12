@@ -105,8 +105,9 @@ export class DevicesService {
   /**
    * Consumes a pairing code and registers a device. The issued device token is
    * long-lived (expiresAt / tokenExpiresAt stay null) until explicit unpair.
-   * The same machineFingerprint on an already-PAIRED row reuses that device
-   * instead of creating a second seat.
+   * The same machineFingerprint reuses the device row: a still-PAIRED PC
+   * rotates its token without consuming a quota seat; a REVOKED PC is
+   * reactivated (new pairing session/token) after the quota check.
    */
   async pairAgent(input: {
     pairingCode: string;
@@ -122,7 +123,7 @@ export class DevicesService {
     await this.quota.checkTenantWritable(tenantId!);
 
     const fingerprint = input.machineFingerprint?.trim() || undefined;
-    const existing = fingerprint
+    const existingPaired = fingerprint
       ? await this.tenantPrisma.withTenant(tenantId!, (tx) =>
           tx.signingDevice.findFirst({
             where: { tenantId, machineFingerprint: fingerprint, status: 'PAIRED' },
@@ -130,8 +131,9 @@ export class DevicesService {
         )
       : null;
 
-    // Returning the same PC reuses the long-lived device row (no extra quota seat).
-    if (!existing) {
+    // Still-PAIRED fingerprint = reinstall, not a new seat. Unpair → pair again
+    // reactivates REVOKED (or creates) and therefore needs a free PAIRED slot.
+    if (!existingPaired) {
       await this.quota.assertWithinLimits(tenantId!, 'devices');
     }
 
@@ -151,12 +153,28 @@ export class DevicesService {
         throw new BadRequestException('Pairing code expired');
       }
 
-      const deviceId = existing?.id ?? randomUUID();
-      const { token, hash } = buildDeviceToken(tenantId!, deviceId);
+      const paired =
+        fingerprint
+          ? await tx.signingDevice.findFirst({
+              where: { tenantId, machineFingerprint: fingerprint, status: 'PAIRED' },
+            })
+          : null;
+      const revoked =
+        !paired && fingerprint
+          ? await tx.signingDevice.findFirst({
+              where: { tenantId, machineFingerprint: fingerprint, status: 'REVOKED' },
+              orderBy: [{ revokedAt: 'desc' }, { pairedAt: 'desc' }],
+            })
+          : null;
+      const reuse = paired ?? revoked;
 
-      const device = existing
+      const deviceId = reuse?.id ?? randomUUID();
+      const { token, hash } = buildDeviceToken(tenantId!, deviceId);
+      const now = new Date();
+
+      const device = reuse
         ? await tx.signingDevice.update({
-            where: { id: existing.id },
+            where: { id: reuse.id },
             data: {
               label: input.label,
               machineFingerprint: fingerprint,
@@ -164,7 +182,8 @@ export class DevicesService {
               tokenHash: hash,
               tokenExpiresAt: null,
               revokedAt: null,
-              lastSeenAt: new Date(),
+              lastSeenAt: now,
+              ...(revoked ? { pairedAt: now } : {}),
             },
           })
         : await tx.signingDevice.create({
@@ -176,16 +195,16 @@ export class DevicesService {
               status: 'PAIRED',
               tokenHash: hash,
               tokenExpiresAt: null,
-              pairedAt: new Date(),
+              pairedAt: now,
             },
           });
 
       await tx.pairingCode.update({
         where: { id: code.id },
-        data: { status: 'CONSUMED', consumedAt: new Date(), consumedByDeviceId: device.id },
+        data: { status: 'CONSUMED', consumedAt: now, consumedByDeviceId: device.id },
       });
 
-      return { device, token, resumed: Boolean(existing) };
+      return { device, token, resumed: Boolean(paired) };
     });
 
     await this.audit.write({
