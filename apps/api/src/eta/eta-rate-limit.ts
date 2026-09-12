@@ -84,3 +84,24 @@ export async function paceEtaSyncRequest(): Promise<void> {
   const ms = syncRequestDelayMs();
   if (ms > 0) await sleep(ms);
 }
+
+/**
+ * Space request *starts* by `delayMs` while allowing in-flight overlap.
+ * Unlike sleeping in every worker (which bursts after a shared wait), this
+ * avoids a stampede when details concurrency is > 1.
+ */
+export function createRequestStartPacer(
+  delayMs: () => number = syncRequestDelayMs,
+): () => Promise<void> {
+  let nextAllowed = 0;
+  let chain = Promise.resolve();
+  return () => {
+    const run = chain.then(async () => {
+      const wait = nextAllowed - Date.now();
+      if (wait > 0) await sleep(wait);
+      nextAllowed = Date.now() + delayMs();
+    });
+    chain = run.catch(() => undefined);
+    return run;
+  };
+}

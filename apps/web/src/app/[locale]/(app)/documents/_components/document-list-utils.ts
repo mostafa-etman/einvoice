@@ -3,6 +3,10 @@ import type { BadgeVariant } from '@/components/ui/badge';
 export const AUTO_POLL_MS = 5_000;
 export const PAGE_SIZE = 50;
 
+/** Previous UI wait: 90 × 1s. Large ETA pulls stay RUNNING longer than 90s. */
+export const SALES_SYNC_POLL_INTERVAL_MS = 2_000;
+export const SALES_SYNC_POLL_ATTEMPTS = 300;
+
 export type SortBy =
   | 'issueDateTime'
   | 'totalAmount'

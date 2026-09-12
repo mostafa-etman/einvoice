@@ -1,5 +1,6 @@
 import {
   computeBackoffMs,
+  createRequestStartPacer,
   ETA_RATE_LIMIT_MAX_RETRIES,
   isEtaRateLimitError,
   parseRetryAfterMs,
@@ -49,5 +50,19 @@ describe('eta-rate-limit', () => {
   it('exposes retry budget', () => {
     expect(ETA_RATE_LIMIT_MAX_RETRIES).toBeGreaterThanOrEqual(3);
     expect(syncRequestDelayMs()).toBeGreaterThanOrEqual(0);
+  });
+
+  it('createRequestStartPacer spaces starts without requiring callers to finish first', async () => {
+    const pace = createRequestStartPacer(() => 20);
+    const started: number[] = [];
+    const t0 = Date.now();
+    await Promise.all(
+      [0, 1, 2].map(async () => {
+        await pace();
+        started.push(Date.now() - t0);
+      }),
+    );
+    expect(started).toHaveLength(3);
+    expect(Math.max(...started) - Math.min(...started)).toBeGreaterThanOrEqual(30);
   });
 });

@@ -3,8 +3,13 @@
  * A crashed process can leave PENDING/RUNNING rows forever; age them out.
  */
 
-/** Default: 30 minutes — long enough for large ETA windows, short enough to unblock. */
-export const SYNC_STALE_MS = 30 * 60 * 1000;
+/**
+ * Default: 60 minutes.
+ * Previous: 30 minutes — first-time sync of thousands of invoices (sequential
+ * details + 250ms pacing) exceeded that and the lock was released as "timed out"
+ * while work was still running. Speed-up is the primary fix; this is a margin.
+ */
+export const SYNC_STALE_MS = 60 * 60 * 1000;
 
 export const SYNC_STALE_ERROR =
   'Sync timed out or was interrupted — lock released automatically';

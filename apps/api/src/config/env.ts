@@ -58,6 +58,13 @@ const envSchema = z.object({
   SYNC_BACKOFF_MAX_MS: z.coerce.number().int().positive().default(60_000),
   /** Delay between sequential ETA calls during sales/purchases sync (ms). */
   ETA_SYNC_REQUEST_DELAY_MS: z.coerce.number().int().nonnegative().default(250),
+  /**
+   * Per-request ETA HTTP timeout (ms). 0 disables.
+   * Previous: none (Node fetch could hang until undici defaults).
+   */
+  ETA_HTTP_TIMEOUT_MS: z.coerce.number().int().nonnegative().default(45_000),
+  /** Bounded in-flight ETA document-details calls during sales sync (clamped 1–10). */
+  ETA_SYNC_DETAILS_CONCURRENCY: z.coerce.number().int().positive().default(6),
   USAGE_METERING_TIMEZONE: z.string().default('Africa/Cairo'),
   USAGE_EXPORT_TTL_DAYS: z.coerce.number().int().positive().default(14),
   USAGE_ROLLUP_INTERVAL_MS: z.coerce

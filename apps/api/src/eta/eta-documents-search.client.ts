@@ -24,6 +24,12 @@ export type EtaSearchDateWindow = {
 export type EtaDocumentDirection = 'Received' | 'Sent';
 
 /**
+ * ETA documents/search rejects pageSize > 100 (`must be <= 100`).
+ * Do not raise this without a new ETA contract.
+ */
+export const ETA_DOCUMENTS_SEARCH_PAGE_SIZE = 100;
+
+/**
  * GET /api/v1.0/documents/search
  * ETA requires submissionDateFrom/To OR issueDateFrom/To (max 30-day span).
  */
@@ -78,7 +84,7 @@ export class EtaDocumentsSearchClient {
     const params =
       opts.direction === 'Received'
         ? receivedDirectionQuery({
-            pageSize: opts.pageSize ?? 100,
+            pageSize: opts.pageSize ?? ETA_DOCUMENTS_SEARCH_PAGE_SIZE,
             continuationToken: opts.continuationToken,
             documentType: opts.documentType,
             status: opts.status,
@@ -86,7 +92,7 @@ export class EtaDocumentsSearchClient {
           })
         : {
             direction: 'Sent',
-            pageSize: String(opts.pageSize ?? 100),
+            pageSize: String(opts.pageSize ?? ETA_DOCUMENTS_SEARCH_PAGE_SIZE),
             ...(opts.continuationToken
               ? { continuationToken: opts.continuationToken }
               : {}),

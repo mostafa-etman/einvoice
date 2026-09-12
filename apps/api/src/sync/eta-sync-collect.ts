@@ -44,6 +44,9 @@ export async function retryOnEtaRateLimit<T>(
   opts?: {
     maxRetries?: number;
     sleepFn?: (ms: number) => Promise<void>;
+    /** When the caller already paced (e.g. a worker pool). */
+    skipInitialPace?: boolean;
+    onRetry?: (attempt: number) => void;
   },
 ): Promise<T> {
   const max = opts?.maxRetries ?? ETA_SYNC_PAGE_MAX_RETRIES;
@@ -51,11 +54,12 @@ export async function retryOnEtaRateLimit<T>(
   let last: unknown;
   for (let attempt = 0; attempt <= max; attempt++) {
     try {
-      if (attempt === 0) await paceEtaSyncRequest();
+      if (attempt === 0 && !opts?.skipInitialPace) await paceEtaSyncRequest();
       return await fn();
     } catch (err) {
       last = err;
       if (!isEtaRateLimitError(err) || attempt >= max) throw err;
+      opts?.onRetry?.(attempt);
       await wait(
         computeBackoffMs(attempt, { initialMs: 1500, maxMs: 30_000 }),
       );
@@ -75,21 +79,34 @@ export async function collectEtaSearchRows(opts: {
   }>;
   uuidOf?: (row: Record<string, unknown>) => string;
   sleepFn?: (ms: number) => Promise<void>;
+  onRetry?: (attempt: number) => void;
+  /** Persist incrementally after each search page (UUID-deduped new rows only). */
+  onPage?: (info: {
+    window: { from: Date; to: Date };
+    pageNumber: number;
+    newRows: Array<[string, Record<string, unknown>]>;
+  }) => Promise<void>;
 }): Promise<{
   byUuid: Map<string, Record<string, unknown>>;
   skippedCount: number;
   searchIncomplete: boolean;
   errors: string[];
+  pagesProcessed: number;
+  windowsProcessed: number;
 }> {
   const uuidOf = opts.uuidOf ?? etaSearchRowUuid;
   const byUuid = new Map<string, Record<string, unknown>>();
   let skippedCount = 0;
   const errors: string[] = [];
   let searchIncomplete = false;
+  let pagesProcessed = 0;
+  let windowsProcessed = 0;
 
   for (const win of opts.windows) {
     let token: string | null | undefined;
     let previousToken: string | undefined;
+    let windowPage = 0;
+    let windowComplete = false;
     try {
       do {
         const page = await retryOnEtaRateLimit(
@@ -98,15 +115,27 @@ export async function collectEtaSearchRows(opts: {
               continuationToken: token || undefined,
               window: win,
             }),
-          { sleepFn: opts.sleepFn },
+          { sleepFn: opts.sleepFn, onRetry: opts.onRetry },
         );
+        pagesProcessed += 1;
+        windowPage += 1;
+        const newRows: Array<[string, Record<string, unknown>]> = [];
         for (const row of page.result) {
           const uuid = uuidOf(row);
           if (!uuid) {
             skippedCount += 1;
             continue;
           }
+          if (byUuid.has(uuid)) continue;
           byUuid.set(uuid, row);
+          newRows.push([uuid, row]);
+        }
+        if (opts.onPage && newRows.length > 0) {
+          await opts.onPage({
+            window: win,
+            pageNumber: windowPage,
+            newRows,
+          });
         }
         previousToken = token || undefined;
         token = page.continuationToken;
@@ -116,6 +145,7 @@ export async function collectEtaSearchRows(opts: {
           break;
         }
       } while (token);
+      windowComplete = !searchIncomplete;
     } catch (err) {
       if (isEtaRateLimitError(err)) {
         searchIncomplete = true;
@@ -124,7 +154,16 @@ export async function collectEtaSearchRows(opts: {
       }
       throw err;
     }
+    if (windowComplete) windowsProcessed += 1;
+    if (searchIncomplete) break;
   }
 
-  return { byUuid, skippedCount, searchIncomplete, errors };
+  return {
+    byUuid,
+    skippedCount,
+    searchIncomplete,
+    errors,
+    pagesProcessed,
+    windowsProcessed,
+  };
 }

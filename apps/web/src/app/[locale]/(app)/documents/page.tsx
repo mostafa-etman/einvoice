@@ -52,6 +52,8 @@ import {
   AUTO_POLL_MS,
   KIND_FILTERS,
   PAGE_SIZE,
+  SALES_SYNC_POLL_ATTEMPTS,
+  SALES_SYNC_POLL_INTERVAL_MS,
   STATUS_FILTERS,
   canCancel,
   canDownloadEta,
@@ -248,8 +250,8 @@ export default function DocumentsPage() {
         to: syncTo ? cairoExportRangeIso(syncTo, true) : undefined,
       });
       setShowSalesSyncReset(true);
-      for (let i = 0; i < 90; i++) {
-        await new Promise((r) => setTimeout(r, 1000));
+      for (let i = 0; i < SALES_SYNC_POLL_ATTEMPTS; i++) {
+        await new Promise((r) => setTimeout(r, SALES_SYNC_POLL_INTERVAL_MS));
         const run = await latestSalesSync();
         if (run.status === 'SUCCEEDED') {
           setShowSalesSyncReset(false);

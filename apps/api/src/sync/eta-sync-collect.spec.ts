@@ -87,7 +87,8 @@ describe('eta-sync-collect', () => {
       dateTimeIssued: '2026-09-12T12:00:00Z',
     }));
     const tokensSeen: Array<string | undefined> = [];
-    const { byUuid, searchIncomplete } = await collectEtaSearchRows({
+    const { byUuid, searchIncomplete, pagesProcessed, windowsProcessed } =
+      await collectEtaSearchRows({
       sleepFn: async () => undefined,
       windows: [
         {
@@ -108,6 +109,47 @@ describe('eta-sync-collect', () => {
     expect(searchIncomplete).toBe(false);
     expect(tokensSeen).toEqual([undefined, 'p2', 'p3']);
     expect(byUuid.size).toBe(TOTAL);
+    expect(pagesProcessed).toBe(3);
+    expect(windowsProcessed).toBe(1);
     expect([...byUuid.keys()]).toEqual(all.map((r) => r.uuid));
+  });
+
+  it('invokes onPage after each search page and stops later windows when a token stalls', async () => {
+    const pageCalls: number[] = [];
+    const searchWindows: string[] = [];
+    const { searchIncomplete, pagesProcessed, windowsProcessed, byUuid } =
+      await collectEtaSearchRows({
+        sleepFn: async () => undefined,
+        windows: [
+          {
+            from: new Date('2026-06-01T00:00:00.000Z'),
+            to: new Date('2026-06-30T00:00:00.000Z'),
+          },
+          {
+            from: new Date('2026-07-01T00:00:00.000Z'),
+            to: new Date('2026-07-31T00:00:00.000Z'),
+          },
+        ],
+        searchPage: async ({ window, continuationToken }) => {
+          searchWindows.push(window.from.toISOString().slice(0, 7));
+          if (window.from.toISOString().startsWith('2026-06')) {
+            return {
+              result: [{ uuid: `june-${continuationToken || 'p1'}` }],
+              continuationToken: continuationToken ? continuationToken : 'stuck',
+            };
+          }
+          return { result: [{ uuid: 'july-should-not' }], continuationToken: null };
+        },
+        onPage: async ({ pageNumber, newRows }) => {
+          pageCalls.push(newRows.length);
+          expect(pageNumber).toBeGreaterThan(0);
+        },
+      });
+    expect(searchIncomplete).toBe(true);
+    expect(searchWindows).toEqual(['2026-06', '2026-06']);
+    expect(pagesProcessed).toBe(2);
+    expect(windowsProcessed).toBe(0);
+    expect(byUuid.has('july-should-not')).toBe(false);
+    expect(pageCalls.length).toBeGreaterThanOrEqual(1);
   });
 });

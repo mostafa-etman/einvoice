@@ -41,4 +41,22 @@ describe('etaFetch rate-limit retries', () => {
     expect(res.status).toBe(429);
     expect(calls).toBeGreaterThan(1);
   });
+
+  it('attaches a per-request abort signal (ETA_HTTP_TIMEOUT_MS)', async () => {
+    const orig = process.env.ETA_HTTP_TIMEOUT_MS;
+    process.env.ETA_HTTP_TIMEOUT_MS = '45000';
+    try {
+      let seen: AbortSignal | undefined;
+      const fetchImpl = (async (_url: unknown, init?: RequestInit) => {
+        seen = init?.signal ?? undefined;
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }) as typeof fetch;
+      await etaFetch('https://eta.test/x', { method: 'GET' }, fetchImpl);
+      expect(seen).toBeDefined();
+      expect(seen?.aborted).toBe(false);
+    } finally {
+      if (orig === undefined) delete process.env.ETA_HTTP_TIMEOUT_MS;
+      else process.env.ETA_HTTP_TIMEOUT_MS = orig;
+    }
+  });
 });

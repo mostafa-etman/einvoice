@@ -33,10 +33,15 @@ import {
   syncSearchWindows,
 } from '../sync/eta-sync-collect';
 import {
+  createRequestStartPacer,
   ETA_RATE_LIMIT_MESSAGE,
   isEtaRateLimitError,
-  paceEtaSyncRequest,
 } from '../eta/eta-rate-limit';
+import { ETA_DOCUMENTS_SEARCH_PAGE_SIZE } from '../eta/eta-documents-search.client';
+import {
+  etaSyncDetailsConcurrency,
+  mapPool,
+} from '../sync/async-pool';
 
 function taxTotalsStored(json: unknown): boolean {
   return Array.isArray(json) && json.length > 0;
@@ -57,6 +62,59 @@ export function etaSyncIssuedNeedsBackfill(existing: {
     return true;
   }
   return false;
+}
+
+type IssuedExistingPeek = {
+  id: string;
+  etaUuid: string | null;
+  origin: string;
+  internalId: string;
+  status: string;
+  issueDateTime: Date;
+  taxTotalsJson: unknown;
+  _count: { lines: number };
+  lines: Array<{ taxes: Array<{ id: string }> }>;
+};
+
+const ISSUED_EXISTING_SELECT = {
+  id: true,
+  etaUuid: true,
+  origin: true,
+  internalId: true,
+  status: true,
+  issueDateTime: true,
+  taxTotalsJson: true,
+  _count: { select: { lines: true } },
+  lines: {
+    take: 1,
+    select: { taxes: { take: 1, select: { id: true } } },
+  },
+} as const;
+
+function issuedNeedsEtaDetails(
+  existing: IssuedExistingPeek | null | undefined,
+  row: Record<string, unknown>,
+): boolean {
+  if (!existing) return true;
+  if (existing.origin !== 'ETA_SYNC') return false;
+  return (
+    etaSyncIssuedNeedsBackfill({
+      origin: existing.origin,
+      status: existing.status,
+      taxTotalsJson: existing.taxTotalsJson,
+      lineCount: existing._count.lines,
+      hasLineTax: existing.lines.some((l) => l.taxes.length > 0),
+    }) || etaSyncIssuedPeriodDiffers(existing.issueDateTime, row)
+  );
+}
+
+function formatSalesSyncElapsed(ms: number): string {
+  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}m ${s}s`;
 }
 
 export function etaSearchRowIssueDate(
@@ -352,6 +410,11 @@ export class SalesSyncService {
     };
     const errors: string[] = [];
     let rateLimited = false;
+    let searchIncomplete = false;
+    const startedMs = Date.now();
+    let pagesProcessed = 0;
+    let detailsFetched = 0;
+    let retryCount = 0;
 
     await this.tenantPrisma.withTenant(tenantId, (tx) =>
       tx.issuedDocumentSyncRun.update({
@@ -365,85 +428,163 @@ export class SalesSyncService {
       let accessToken = await this.eta.getAccessToken(tenantId);
       const clients = await this.clientsFor(tenantId);
       const etaEnvironment = await this.eta.getActiveEnvironment(tenantId);
-      const byUuid = new Map<string, Record<string, unknown>>();
 
       const range =
         rangeOverride ?? (await this.resolveSyncRange(tenantId));
       const windows = syncSearchWindows(range.from, range.to);
+      const detailsConcurrency = etaSyncDetailsConcurrency();
+      const pacer = createRequestStartPacer();
+      const branch = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+        tx.branch.findFirst({
+          where: { tenantId, isActive: true },
+          orderBy: { createdAt: 'asc' },
+          select: { id: true },
+        }),
+      );
+      if (!branch) {
+        throw new Error('No active branch to attach imported sales document');
+      }
+
       this.logger.log(
-        `Sales sync ${tenantId} windows=${windows.length} from=${range.from.toISOString()} to=${range.to.toISOString()} dateField=${ETA_SYNC_DATE_FIELD}`,
+        `Sales sync start tenant=${tenantId} range=${range.from.toISOString()}..${range.to.toISOString()} windows=${windows.length} pageSize=${ETA_DOCUMENTS_SEARCH_PAGE_SIZE} detailsConcurrency=${detailsConcurrency}`,
       );
 
-      const collected = await collectEtaSearchRows({
-        windows,
-        searchPage: async ({ continuationToken, window }) => {
-          accessToken = await this.eta.getAccessToken(tenantId);
-          return clients.search.searchSent(accessToken, {
-            pageSize: 100,
-            continuationToken,
-            window: {
-              from: window.from,
-              to: window.to,
-              dateField: ETA_SYNC_DATE_FIELD,
-            },
-          });
-        },
-      });
-      for (const [uuid, row] of collected.byUuid) byUuid.set(uuid, row);
-      counters.skippedCount += collected.skippedCount;
-      if (collected.searchIncomplete) {
-        rateLimited = true;
-        errors.push(...collected.errors);
-      }
-
-      counters.fetchedCount = byUuid.size;
-
+      const discoveredUuids = new Set<string>();
       let detailIndex = 0;
-      for (const [uuid, row] of byUuid) {
-        try {
-          detailIndex += 1;
-          if (detailIndex % 25 === 0) {
+      const onRetry = () => {
+        retryCount += 1;
+      };
+
+      for (let w = 0; w < windows.length; w++) {
+        const win = windows[w]!;
+        const windowStartedMs = Date.now();
+        let windowDetails = 0;
+        let windowPersisted = 0;
+
+        const collected = await collectEtaSearchRows({
+          windows: [win],
+          onRetry,
+          searchPage: async ({ continuationToken, window }) => {
             accessToken = await this.eta.getAccessToken(tenantId);
-          }
-          const outcome = await retryOnEtaRateLimit(() =>
-            this.upsertIssued(
+            return clients.search.searchSent(accessToken, {
+              pageSize: ETA_DOCUMENTS_SEARCH_PAGE_SIZE,
+              continuationToken,
+              window: {
+                from: window.from,
+                to: window.to,
+                dateField: ETA_SYNC_DATE_FIELD,
+              },
+            });
+          },
+          onPage: async ({ newRows, pageNumber }) => {
+            const existingByUuid = await this.loadExistingIssued(
               tenantId,
-              accessToken,
-              row,
-              clients.details,
-              etaEnvironment,
-            ),
-          );
-          if (outcome === 'new') counters.newCount += 1;
-          else if (outcome === 'updated') counters.updatedCount += 1;
-          else counters.skippedCount += 1;
-        } catch (err) {
-          counters.failedCount += 1;
-          if (isEtaRateLimitError(err)) {
-            rateLimited = true;
-            errors.push(`${uuid}: ${ETA_RATE_LIMIT_MESSAGE}`);
-            continue;
-          }
-          const msg = err instanceof Error ? err.message : String(err);
-          errors.push(`${uuid}: ${msg}`);
+              newRows.map(([uuid]) => uuid),
+            );
+            await mapPool(newRows, detailsConcurrency, async ([uuid, row]) => {
+              try {
+                detailIndex += 1;
+                if (detailIndex % 25 === 0) {
+                  accessToken = await this.eta.getAccessToken(tenantId);
+                }
+                const existing = existingByUuid.get(uuid) ?? null;
+                if (issuedNeedsEtaDetails(existing, row)) {
+                  await pacer();
+                  detailsFetched += 1;
+                  windowDetails += 1;
+                }
+                const outcome = await retryOnEtaRateLimit(
+                  () =>
+                    this.upsertIssued(
+                      tenantId,
+                      accessToken,
+                      row,
+                      clients.details,
+                      etaEnvironment,
+                      { existing, branchId: branch.id },
+                    ),
+                  { skipInitialPace: true, onRetry },
+                );
+                windowPersisted += 1;
+                if (outcome === 'new') counters.newCount += 1;
+                else if (outcome === 'updated') counters.updatedCount += 1;
+                else counters.skippedCount += 1;
+              } catch (err) {
+                counters.failedCount += 1;
+                if (isEtaRateLimitError(err)) {
+                  rateLimited = true;
+                  errors.push(`${uuid}: ${ETA_RATE_LIMIT_MESSAGE}`);
+                  return;
+                }
+                const msg = err instanceof Error ? err.message : String(err);
+                errors.push(`${uuid}: ${msg}`);
+              }
+            });
+            if (rateLimited) {
+              const err = new Error(ETA_RATE_LIMIT_MESSAGE) as Error & {
+                status?: number;
+              };
+              err.status = 429;
+              throw err;
+            }
+            this.logger.log(
+              `Sales sync: Window ${w + 1}/${windows.length} page ${pageNumber} ` +
+                `Discovered: ${newRows.length} Persisted: ${windowPersisted} ` +
+                `Elapsed: ${formatSalesSyncElapsed(Date.now() - windowStartedMs)}`,
+            );
+          },
+        });
+
+        pagesProcessed += collected.pagesProcessed;
+        counters.skippedCount += collected.skippedCount;
+        for (const uuid of collected.byUuid.keys()) discoveredUuids.add(uuid);
+        counters.fetchedCount = discoveredUuids.size;
+        if (collected.searchIncomplete) {
+          searchIncomplete = true;
+          rateLimited =
+            rateLimited ||
+            collected.errors.some((e) => /rate limit/i.test(e));
+          errors.push(...collected.errors);
         }
+
+        this.logger.log(
+          `Sales sync: Window ${w + 1}/${windows.length} ` +
+            `Pages: ${collected.pagesProcessed} ` +
+            `Discovered: ${collected.byUuid.size} ` +
+            `Persisted: ${windowPersisted} ` +
+            `Details: ${windowDetails} ` +
+            `Elapsed: ${formatSalesSyncElapsed(Date.now() - windowStartedMs)}`,
+        );
+
+        if (searchIncomplete || rateLimited) break;
       }
 
+      counters.fetchedCount = discoveredUuids.size;
       const imported = counters.newCount + counters.updatedCount;
       const incomplete =
-        collected.searchIncomplete || counters.failedCount > 0;
+        searchIncomplete || counters.failedCount > 0 || rateLimited;
       const summaryParts = [
         ...errors.slice(0, 15),
         incomplete && imported > 0
           ? `Incomplete sync (partial: ${imported} saved; retry to resume)`
           : null,
       ].filter(Boolean) as string[];
+      const elapsed = formatSalesSyncElapsed(Date.now() - startedMs);
+      const finalStatus = incomplete ? 'FAILED' : 'SUCCEEDED';
+
+      this.logger.log(
+        `Sales sync ${incomplete ? 'failed' : 'completed'} tenant=${tenantId} ` +
+          `Windows: ${windows.length} Pages: ${pagesProcessed} ` +
+          `Discovered: ${counters.fetchedCount} Persisted: ${imported} ` +
+          `Details: ${detailsFetched} Retries: ${retryCount} ` +
+          `Elapsed: ${elapsed} Status: ${finalStatus}`,
+      );
 
       await this.tenantPrisma.withTenant(tenantId, (tx) =>
         tx.issuedDocumentSyncRun.update({
           where: { id: runId },
           data: {
-            status: incomplete ? 'FAILED' : 'SUCCEEDED',
+            status: finalStatus,
             finishedAt: new Date(),
             ...counters,
             errorSummary: summaryParts.length
@@ -465,7 +606,12 @@ export class SalesSyncService {
         metadata: {
           ...counters,
           rateLimited,
-          searchIncomplete: collected.searchIncomplete,
+          searchIncomplete,
+          pagesProcessed,
+          detailsFetched,
+          retryCount,
+          windowCount: windows.length,
+          detailsConcurrency,
           rangeFrom: range.from.toISOString(),
           rangeTo: range.to.toISOString(),
         },
@@ -491,6 +637,11 @@ export class SalesSyncService {
             ).slice(0, 1000),
           },
         }),
+      );
+      this.logger.warn(
+        `Sales sync failed tenant=${tenantId} Discovered: ${counters.fetchedCount} ` +
+          `Persisted: ${imported} Elapsed: ${formatSalesSyncElapsed(Date.now() - startedMs)} ` +
+          `Retries: ${retryCount} Status: FAILED`,
       );
       await this.audit.write({
         action: 'sales.sync.failure',
@@ -537,36 +688,53 @@ export class SalesSyncService {
     return fallback;
   }
 
+  private async loadExistingIssued(
+    tenantId: string,
+    uuids: string[],
+  ): Promise<Map<string, IssuedExistingPeek>> {
+    const out = new Map<string, IssuedExistingPeek>();
+    if (uuids.length === 0) return out;
+    const chunkSize = ETA_DOCUMENTS_SEARCH_PAGE_SIZE;
+    for (let i = 0; i < uuids.length; i += chunkSize) {
+      const slice = uuids.slice(i, i + chunkSize);
+      const rows = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+        tx.document.findMany({
+          where: { tenantId, etaUuid: { in: slice } },
+          select: ISSUED_EXISTING_SELECT,
+        }),
+      );
+      for (const row of rows) {
+        if (row.etaUuid) out.set(row.etaUuid, row);
+      }
+    }
+    return out;
+  }
+
   private async upsertIssued(
     tenantId: string,
     accessToken: string,
     row: Record<string, unknown>,
     detailsClient: EtaDocumentDetailsClient,
     etaEnvironment: 'SANDBOX' | 'PRODUCTION',
+    opts?: {
+      existing?: IssuedExistingPeek | null;
+      branchId?: string;
+    },
   ): Promise<'new' | 'updated' | 'skipped'> {
     const uuid = String(
       row.uuid ?? row.UUID ?? row.documentUUID ?? row.documentUuid ?? '',
     ).trim();
     if (!uuid) return 'skipped';
 
-    const existing = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.document.findFirst({
-        where: { tenantId, etaUuid: uuid },
-        select: {
-          id: true,
-          origin: true,
-          internalId: true,
-          status: true,
-          issueDateTime: true,
-          taxTotalsJson: true,
-          _count: { select: { lines: true } },
-          lines: {
-            take: 1,
-            select: { taxes: { take: 1, select: { id: true } } },
-          },
-        },
-      }),
-    );
+    const existing =
+      opts && 'existing' in opts
+        ? (opts.existing ?? null)
+        : await this.tenantPrisma.withTenant(tenantId, (tx) =>
+            tx.document.findUnique({
+              where: { tenantId_etaUuid: { tenantId, etaUuid: uuid } },
+              select: ISSUED_EXISTING_SELECT,
+            }),
+          );
 
     // Local / file-imported docs that already have this ETA uuid: refresh status only.
     if (existing && existing.origin !== 'ETA_SYNC') {
@@ -574,17 +742,7 @@ export class SalesSyncService {
       return 'updated';
     }
 
-    const needsBackfill =
-      !existing ||
-      etaSyncIssuedNeedsBackfill({
-        origin: existing.origin,
-        status: existing.status,
-        taxTotalsJson: existing.taxTotalsJson,
-        lineCount: existing._count.lines,
-        hasLineTax: existing.lines.some((l) => l.taxes.length > 0),
-      }) ||
-      (existing.origin === 'ETA_SYNC' &&
-        etaSyncIssuedPeriodDiffers(existing.issueDateTime, row));
+    const needsBackfill = issuedNeedsEtaDetails(existing, row);
 
     // Already imported complete — status-only refresh (resume-friendly).
     if (existing && !needsBackfill) {
@@ -594,7 +752,6 @@ export class SalesSyncService {
 
     let details: Record<string, unknown>;
     try {
-      await paceEtaSyncRequest();
       details = await detailsClient.getDetails(accessToken, uuid);
     } catch (err) {
       if (existing) {
@@ -614,14 +771,18 @@ export class SalesSyncService {
 
     // Identity is ETA uuid only. Same invoice number in another period is a
     // different document and must be created, never merged.
-    const branch = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.branch.findFirst({
-        where: { tenantId, isActive: true },
-        orderBy: { createdAt: 'asc' },
-        select: { id: true },
-      }),
-    );
-    if (!branch) {
+    const branchId =
+      opts?.branchId ??
+      (
+        await this.tenantPrisma.withTenant(tenantId, (tx) =>
+          tx.branch.findFirst({
+            where: { tenantId, isActive: true },
+            orderBy: { createdAt: 'asc' },
+            select: { id: true },
+          }),
+        )
+      )?.id;
+    if (!branchId) {
       throw new Error('No active branch to attach imported sales document');
     }
 
@@ -632,7 +793,7 @@ export class SalesSyncService {
           kind: mapped.kind,
           status: mapped.status,
           origin: 'ETA_SYNC',
-          branchId: branch.id,
+          branchId,
           currencyCode: mapped.currencyCode,
           issueDateTime: mapped.issueDateTime,
           internalId: mapped.internalId,
