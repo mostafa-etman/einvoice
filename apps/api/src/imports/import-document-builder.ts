@@ -6,6 +6,10 @@ import {
   IMPORT_TAX_SLOTS,
 } from './import-schema';
 import { normalizeMappedImportValues } from './import-value-aliases';
+import {
+  invalidImportDateMessage,
+  normalizeImportDate,
+} from './import-excel-date';
 
 export type MappedImportRow = {
   rowNumber: number;
@@ -136,6 +140,34 @@ function buildLine(
   };
 }
 
+function requiredIsoDate(
+  raw: string,
+  rowNumber: number,
+  columnLabel: string,
+): string {
+  const parsed = normalizeImportDate(raw);
+  if (parsed.status === 'ok') return parsed.iso;
+  const original =
+    parsed.status === 'invalid' ? parsed.original : raw || '(empty)';
+  throw new Error(invalidImportDateMessage(rowNumber, columnLabel, original));
+}
+
+function optionalDate(
+  raw: string,
+  rowNumber: number,
+  columnLabel: string,
+  kind: 'iso' | 'ymd',
+): string | undefined {
+  const parsed = normalizeImportDate(raw);
+  if (parsed.status === 'empty') return undefined;
+  if (parsed.status !== 'ok') {
+    throw new Error(
+      invalidImportDateMessage(rowNumber, columnLabel, parsed.original),
+    );
+  }
+  return kind === 'ymd' ? parsed.ymd : parsed.iso;
+}
+
 function buildPayment(
   head: Record<string, string>,
 ): DocumentUpsertDto['payment'] {
@@ -153,11 +185,12 @@ function buildPayment(
 
 function buildDelivery(
   head: Record<string, string>,
+  dateValidity: string | undefined,
 ): DocumentUpsertDto['delivery'] {
   const delivery = {
     approach: cell(head, 'deliveryApproach') || undefined,
     packaging: cell(head, 'deliveryPackaging') || undefined,
-    dateValidity: cell(head, 'deliveryDateValidity') || undefined,
+    dateValidity: dateValidity || undefined,
     exportPort: cell(head, 'deliveryExportPort') || undefined,
     countryOfOrigin: cell(head, 'deliveryCountryOfOrigin') || undefined,
     grossWeight: cell(head, 'deliveryGrossWeight') || undefined,
@@ -193,8 +226,24 @@ export function buildDocumentUpsert(
   const branchId = resolvedBranch || ctx.defaultBranchId;
 
   const activity = firstNonEmpty(rows, 'taxpayerActivityCode');
-  const issueDateTime =
-    firstNonEmpty(rows, 'dateTimeIssued') || new Date().toISOString();
+  const firstRow = group.rows[0]!.rowNumber;
+  const issueDateTime = requiredIsoDate(
+    firstNonEmpty(rows, 'dateTimeIssued'),
+    firstRow,
+    'تاريخ الإصدار',
+  );
+  const serviceDeliveryDate = optionalDate(
+    firstNonEmpty(rows, 'serviceDeliveryDate'),
+    firstRow,
+    'تاريخ تسليم الخدمة',
+    'ymd',
+  );
+  const deliveryDateValidity = optionalDate(
+    cell(head, 'deliveryDateValidity'),
+    firstRow,
+    'صلاحية التسليم',
+    'iso',
+  );
 
   return {
     kind,
@@ -214,8 +263,7 @@ export function buildDocumentUpsert(
       firstNonEmpty(rows, 'salesOrderDescription') || undefined,
     proformaInvoiceNumber:
       firstNonEmpty(rows, 'proformaInvoiceNumber') || undefined,
-    serviceDeliveryDate:
-      firstNonEmpty(rows, 'serviceDeliveryDate') || undefined,
+    ...(serviceDeliveryDate ? { serviceDeliveryDate } : {}),
     extraDiscountAmount:
       firstNonEmpty(rows, 'extraDiscountAmount') || '0.00',
     receiver: {
@@ -241,7 +289,7 @@ export function buildDocumentUpsert(
       },
     },
     payment: buildPayment(head),
-    delivery: buildDelivery(head),
+    delivery: buildDelivery(head, deliveryDateValidity),
     references: parseReferences(firstNonEmpty(rows, 'references')),
     lines: rows.map((r) => buildLine(r.mapped, currencyCode)),
   };

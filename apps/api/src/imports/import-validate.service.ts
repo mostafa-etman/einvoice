@@ -13,6 +13,11 @@ import {
   type MappedImportRow,
 } from './import-document-builder';
 import { isFixedAmountTaxType } from '@einvoice/eta-core';
+import {
+  IMPORT_DATE_FIELDS,
+  invalidImportDateMessage,
+  normalizeImportDate,
+} from './import-excel-date';
 
 export type FieldError = {
   field: string;
@@ -132,6 +137,21 @@ export function validateMappedRow(
       field: 'documentType',
       code: 'INVALID_VALUE',
       message: `${ar('documentType')} يجب أن يكون أحد: ${Object.keys(DOC_TYPE_TO_KIND).join(', ')} أو فاتورة/مرتجع من ورقة القوائم`,
+    });
+  }
+
+  for (const field of IMPORT_DATE_FIELDS) {
+    const raw = cell(mapped, field);
+    if (!raw) continue;
+    const parsed = normalizeImportDate(raw);
+    if (parsed.status === 'ok') {
+      mapped[field] = field === 'serviceDeliveryDate' ? parsed.ymd : parsed.iso;
+      continue;
+    }
+    errors.push({
+      field,
+      code: 'INVALID_DATE',
+      message: invalidImportDateMessage(rowNumber, ar(field), raw),
     });
   }
 

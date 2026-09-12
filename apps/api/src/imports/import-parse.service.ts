@@ -1,6 +1,7 @@
 import { Readable } from 'node:stream';
 import * as Papa from 'papaparse';
 import * as XLSX from 'xlsx';
+import { excelCellToImportString } from './import-excel-date';
 
 export type ImportRow = {
   rowNumber: number;
@@ -131,6 +132,7 @@ export async function parseXlsxBuffer(
   }
   const maxRows = options.maxRows ?? 5000;
   const wb = XLSX.read(buf, { type: 'buffer', cellDates: false, dense: false });
+  const date1904 = Boolean(wb.Workbook?.WBProps?.date1904);
   const sheetName = pickImportSheetName(wb.SheetNames);
   if (!sheetName) return { totalRows: 0 };
   const sheet = wb.Sheets[sheetName]!;
@@ -154,7 +156,7 @@ export async function parseXlsxBuffer(
       if (!header) continue;
       const addr = XLSX.utils.encode_cell({ r, c });
       const cell = sheet[addr];
-      const val = cell == null ? '' : String(cell.v ?? '').trim();
+      const val = excelCellToImportString(cell, date1904);
       if (val) empty = false;
       cells[header] = val;
     }

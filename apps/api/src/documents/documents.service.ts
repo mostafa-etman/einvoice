@@ -724,7 +724,7 @@ export class DocumentsService {
 
     try {
     const created = await this.tenantPrisma.withTenant(tenantId, async (tx) => {
-      const issueDateTime = new Date(dto.issueDateTime);
+      const issueDateTime = this.parseIssueDateTime(dto.issueDateTime);
       const binding = await this.resolveBinding(
         tx,
         tenantId,
@@ -807,6 +807,18 @@ export class DocumentsService {
     }
   }
 
+  private parseIssueDateTime(raw: string): Date {
+    const d = new Date(raw);
+    const year = d.getUTCFullYear();
+    if (Number.isNaN(d.getTime()) || year < 1 || year > 9999) {
+      throw new BadRequestException({
+        code: 'INVALID_ISSUE_DATE',
+        message: 'issueDateTime must be a valid calendar date',
+      });
+    }
+    return d;
+  }
+
   private assertInternalId(internalId: string) {
     if (!isValidEtaInternalId(internalId)) {
       throw new BadRequestException({
@@ -845,7 +857,7 @@ export class DocumentsService {
         throw new ConflictException('Stale version');
       }
 
-      const issueDateTime = new Date(dto.issueDateTime);
+      const issueDateTime = this.parseIssueDateTime(dto.issueDateTime);
       const binding = await this.resolveBinding(
         tx,
         tenantId,
@@ -949,7 +961,7 @@ export class DocumentsService {
 
   async preview(tenantId: string, dto: DocumentUpsertDto) {
     return this.tenantPrisma.withTenant(tenantId, async (tx) => {
-      const issueDateTime = new Date(dto.issueDateTime);
+      const issueDateTime = this.parseIssueDateTime(dto.issueDateTime);
       const binding = await this.resolveBinding(
         tx,
         tenantId,
@@ -1215,7 +1227,7 @@ export class DocumentsService {
         dto.kind,
         dto.branchId,
         dto.currencyCode,
-        new Date(dto.issueDateTime),
+        this.parseIssueDateTime(dto.issueDateTime),
         dto,
       );
       const built = this.buildFromDto(

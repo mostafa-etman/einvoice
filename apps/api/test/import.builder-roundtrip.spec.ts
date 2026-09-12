@@ -212,4 +212,52 @@ describe('import builder produces markReady-valid invoices', () => {
 
     expect(detail.body.status).toBe('READY');
   });
+
+  it('Excel serial dateTimeIssued 46277 creates a 2026-09-12 document', async () => {
+    const ctx = await ownerCtx(app, `serial_${Date.now()}`);
+    const internalId = `IMP-SERIAL-${Date.now()}`;
+    const groups = groupRowsByInternalId([
+      {
+        rowNumber: 1,
+        mapped: {
+          internalID: internalId,
+          dateTimeIssued: '46277',
+          documentType: 'I',
+          currencyCode: 'EGP',
+          receiverType: 'B',
+          receiverId: '111111111',
+          receiverName: 'Buyer Co',
+          receiverCountry: 'EG',
+          receiverGovernate: 'Giza',
+          receiverRegionCity: 'Dokki',
+          receiverStreet: 'Tahrir',
+          receiverBuildingNumber: '5',
+          description: 'Consulting',
+          itemType: 'EGS',
+          itemCode: 'EGS-1',
+          unitType: 'EA',
+          quantity: '1',
+          unitPrice: '100.00',
+          taxType1: 'T1',
+          taxSubType1: 'V009',
+          taxRate1: '14',
+        },
+      },
+    ]);
+    const dto = buildDocumentUpsert(groups[0]!, {
+      defaultBranchId: ctx.branchId,
+      jobDocumentType: 'I',
+    });
+    expect(dto.issueDateTime).toBe('2026-09-12T00:00:00.000Z');
+
+    const created = await request(app.getHttpServer())
+      .post('/documents')
+      .set('Authorization', `Bearer ${ctx.token}`)
+      .set('X-Tenant-Id', ctx.tenantId)
+      .send(dto)
+      .expect(201);
+
+    expect(created.body.issueDateTime).toBe('2026-09-12T00:00:00.000Z');
+    expect(created.body.etaPayload.dateTimeIssued).toBe('2026-09-12T00:00:00Z');
+  });
 });

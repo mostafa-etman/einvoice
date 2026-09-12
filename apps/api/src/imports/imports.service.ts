@@ -28,6 +28,9 @@ import {
   arabicSampleImportRows,
 } from './import-schema';
 import { proposeColumnMapping } from './import-header-map';
+import {
+  isPrismaDateTimeError,
+} from './import-excel-date';
 import { buildImportTemplateXlsx } from './import-template-xlsx';
 import {
   buildDocumentUpsert,
@@ -432,6 +435,15 @@ export class ImportsService {
   }
 
   private extractErrors(err: unknown): FieldError[] {
+    if (isPrismaDateTimeError(err)) {
+      return [
+        {
+          field: 'dateTimeIssued',
+          code: 'INVALID_DATE',
+          message: 'تاريخ غير صالح في عمود تاريخ الإصدار — لم يتم إنشاء المستند',
+        },
+      ];
+    }
     if (
       err &&
       typeof err === 'object' &&
