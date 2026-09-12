@@ -22,4 +22,22 @@ public class PairingLifecycleTests
     {
         Assert.False(PairingLifecycle.MustDropLocalPairing(tokenRejectedByServer: true, hasLocalDeviceToken: false));
     }
+
+    [Fact]
+    public void Skips_authenticated_calls_while_pairing_is_in_progress()
+    {
+        Assert.True(PairingLifecycle.ShouldSkipAuthenticatedCalls(pairingInProgress: true, hasUsableDeviceToken: true));
+    }
+
+    [Fact]
+    public void Skips_authenticated_calls_without_a_usable_device_token()
+    {
+        Assert.True(PairingLifecycle.ShouldSkipAuthenticatedCalls(pairingInProgress: false, hasUsableDeviceToken: false));
+    }
+
+    [Fact]
+    public void Allows_authenticated_calls_when_paired_and_idle()
+    {
+        Assert.False(PairingLifecycle.ShouldSkipAuthenticatedCalls(pairingInProgress: false, hasUsableDeviceToken: true));
+    }
 }

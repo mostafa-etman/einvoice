@@ -15,12 +15,38 @@ describe('sync-range', () => {
     );
   });
 
-  it('accepts explicit from/to', () => {
+  it('accepts explicit from/to as Africa/Cairo calendar days', () => {
     const r = parseSyncDateRange(
       { from: '2026-01-01', to: '2026-02-01' },
       defaultLookbackRange(90),
     );
-    expect(r.from.toISOString().startsWith('2026-01-01')).toBe(true);
+    expect(r.from.toISOString()).toBe('2025-12-31T22:00:00.000Z');
+    expect(r.to.toISOString()).toBe('2026-02-01T21:59:59.999Z');
+  });
+
+  it('treats UTC-midnight / UTC-end-of-day ISO as Cairo day bounds', () => {
+    const r = parseSyncDateRange(
+      {
+        from: '2026-09-12T00:00:00.000Z',
+        to: '2026-09-12T23:59:59.999Z',
+      },
+      defaultLookbackRange(90),
+    );
+    expect(r.from.toISOString()).toBe('2026-09-11T22:00:00.000Z');
+    expect(r.to.toISOString()).toBe('2026-09-12T21:59:59.999Z');
+  });
+
+  it('includes Cairo midnight and 23:59 instants for a selected day', () => {
+    const r = parseSyncDateRange(
+      { from: '2026-09-12', to: '2026-09-12' },
+      defaultLookbackRange(90),
+    );
+    const nearMidnight = new Date('2026-09-11T22:00:00.000Z');
+    const nearEnd = new Date('2026-09-12T21:59:59.000Z');
+    expect(nearMidnight.getTime()).toBeGreaterThanOrEqual(r.from.getTime());
+    expect(nearMidnight.getTime()).toBeLessThanOrEqual(r.to.getTime());
+    expect(nearEnd.getTime()).toBeGreaterThanOrEqual(r.from.getTime());
+    expect(nearEnd.getTime()).toBeLessThanOrEqual(r.to.getTime());
   });
 
   it('rejects oversized ranges', () => {

@@ -56,6 +56,7 @@ export type LocalInvoicePdfInput = {
 type Labels = {
   title: string;
   localNote: string;
+  emptyExport: string;
   issuer: string;
   receiver: string;
   taxId: string;
@@ -85,6 +86,7 @@ type Labels = {
 const EN: Labels = {
   title: 'Invoice preview',
   localNote: 'Local preview — not the official ETA printout',
+  emptyExport: 'No documents in this period',
   issuer: 'Issuer',
   receiver: 'Receiver',
   taxId: 'Tax Registration Number',
@@ -114,6 +116,7 @@ const EN: Labels = {
 const AR: Labels = {
   title: 'معاينة الفاتورة',
   localNote: 'معاينة محلية — ليست الطبعة الرسمية لمصلحة الضرائب',
+  emptyExport: 'لا توجد مستندات في هذه الفترة',
   issuer: 'البائع',
   receiver: 'المشتري',
   taxId: 'رقم التسجيل الضريبي',
@@ -337,36 +340,15 @@ function formatLineTaxes(taxes: LocalInvoicePdfTax[] | undefined): string {
     .join('; ');
 }
 
-/**
- * Display-only local invoice PDF. Never used for signing / ETA submission.
- */
-export async function renderLocalInvoicePdf(
+function paintLocalInvoiceOnDoc(
+  doc: PDFKit.PDFDocument,
   input: LocalInvoicePdfInput,
-): Promise<Buffer> {
+): void {
   const rtl = input.locale === 'ar';
   const L = rtl ? AR : EN;
-  const fonts = resolveFontPaths();
   const margin = 40;
   const pageWidth = 595.28;
   const contentWidth = pageWidth - margin * 2;
-
-  const doc = new PDFDocument({
-    size: 'A4',
-    margin,
-    info: {
-      Title: `${input.internalId} — local preview`,
-      Author: 'eInvoice local preview',
-    },
-  });
-  doc.registerFont('Latin', fonts.latin);
-  doc.registerFont('Arabic', fonts.arabic);
-
-  const chunks: Buffer[] = [];
-  doc.on('data', (c: Buffer) => chunks.push(c));
-  const done = new Promise<Buffer>((resolve, reject) => {
-    doc.on('end', () => resolve(Buffer.concat(chunks)));
-    doc.on('error', reject);
-  });
 
   /**
    * Draw mixed Arabic + LTR without reversing numbers/dates/IDs.
@@ -649,6 +631,142 @@ export async function renderLocalInvoicePdf(
     size: 8,
   });
 
+  try {
+    doc.outline.addItem(String(input.internalId || input.kind));
+  } catch {
+    /* outline is optional */
+  }
+}
+
+function paintEmptyExportPage(
+  doc: PDFKit.PDFDocument,
+  locale: LocalInvoicePdfLocale,
+): void {
+  const rtl = locale === 'ar';
+  const L = rtl ? AR : EN;
+  const margin = 40;
+  const text = rtl ? ArabicShaper.convertArabic(L.emptyExport) : L.emptyExport;
+  doc
+    .font(rtl ? 'Arabic' : 'Latin')
+    .fontSize(12)
+    .text(text, margin, margin, {
+      width: 595.28 - margin * 2,
+      align: rtl ? 'right' : 'left',
+    });
+}
+
+function createLocalPdfDocument(opts: {
+  title: string;
+  author?: string;
+}): {
+  doc: PDFKit.PDFDocument;
+  done: Promise<Buffer>;
+} {
+  const margin = 40;
+  const fonts = resolveFontPaths();
+  const doc = new PDFDocument({
+    size: 'A4',
+    margin,
+    autoFirstPage: true,
+    info: {
+      Title: opts.title,
+      Author: opts.author ?? 'eInvoice local preview',
+    },
+  });
+  doc.registerFont('Latin', fonts.latin);
+  doc.registerFont('Arabic', fonts.arabic);
+  const chunks: Buffer[] = [];
+  doc.on('data', (c: Buffer) => chunks.push(c));
+  const done = new Promise<Buffer>((resolve, reject) => {
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+  });
+  return { doc, done };
+}
+
+/**
+ * Display-only local invoice PDF. Never used for signing / ETA submission.
+ */
+export async function renderLocalInvoicePdf(
+  input: LocalInvoicePdfInput,
+): Promise<Buffer> {
+  return renderLocalInvoicesPdf([input], { locale: input.locale });
+}
+
+/**
+ * One PDF containing invoices sequentially (page break between documents).
+ * Callers should stream inputs in batches so line items are not all held in RAM.
+ */
+export async function renderLocalInvoicesPdf(
+  inputs: LocalInvoicePdfInput[],
+  opts?: { locale?: LocalInvoicePdfLocale },
+): Promise<Buffer> {
+  const locale =
+    opts?.locale ?? inputs[0]?.locale ?? ('en' as LocalInvoicePdfLocale);
+  const L = locale === 'ar' ? AR : EN;
+  const title =
+    inputs.length === 0
+      ? L.emptyExport
+      : inputs.length === 1
+        ? `${inputs[0]!.internalId} — local preview`
+        : `eInvoice export (${inputs.length})`;
+  const { doc, done } = createLocalPdfDocument({ title });
+  if (!inputs.length) {
+    paintEmptyExportPage(doc, locale);
+    doc.end();
+    return done;
+  }
+  const keywords = inputs
+    .map((i) => i.internalId)
+    .filter(Boolean)
+    .slice(0, 200)
+    .join(' ');
+  if (keywords) {
+    try {
+      doc.info.Keywords = keywords;
+    } catch {
+      /* optional */
+    }
+  }
+  inputs.forEach((input, index) => {
+    if (index > 0) doc.addPage();
+    paintLocalInvoiceOnDoc(doc, { ...input, locale });
+  });
   doc.end();
   return done;
+}
+
+/** Stream invoices into one PDF without collecting every input first. */
+export async function renderLocalInvoicesPdfFromSource(
+  locale: LocalInvoicePdfLocale,
+  source: AsyncIterable<LocalInvoicePdfInput>,
+): Promise<{ buffer: Buffer; count: number; ids: string[] }> {
+  const { doc, done } = createLocalPdfDocument({
+    title: 'eInvoice export',
+  });
+  let count = 0;
+  const ids: string[] = [];
+  for await (const input of source) {
+    if (count > 0) doc.addPage();
+    paintLocalInvoiceOnDoc(doc, { ...input, locale });
+    count += 1;
+    if (input.internalId) ids.push(input.internalId);
+  }
+  if (count === 0) {
+    const L = locale === 'ar' ? AR : EN;
+    paintEmptyExportPage(doc, locale);
+    try {
+      doc.info.Title = L.emptyExport;
+    } catch {
+      /* optional */
+    }
+  } else if (ids.length) {
+    try {
+      doc.info.Keywords = ids.slice(0, 200).join(' ');
+    } catch {
+      /* optional */
+    }
+  }
+  doc.end();
+  return { buffer: await done, count, ids };
 }

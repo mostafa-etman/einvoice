@@ -72,6 +72,8 @@ export async function createLocalExport(body: {
     statuses?: string[];
     branchId?: string;
   };
+  locale?: 'ar' | 'en';
+  pdfMode?: 'single' | 'zip';
 }) {
   return apiFetch<ExportJob>('/exports/local', {
     method: 'POST',

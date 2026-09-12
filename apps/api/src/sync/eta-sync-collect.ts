@@ -89,6 +89,7 @@ export async function collectEtaSearchRows(opts: {
 
   for (const win of opts.windows) {
     let token: string | null | undefined;
+    let previousToken: string | undefined;
     try {
       do {
         const page = await retryOnEtaRateLimit(
@@ -107,7 +108,13 @@ export async function collectEtaSearchRows(opts: {
           }
           byUuid.set(uuid, row);
         }
+        previousToken = token || undefined;
         token = page.continuationToken;
+        if (token && token === previousToken) {
+          searchIncomplete = true;
+          errors.push('ETA search continuation token did not advance');
+          break;
+        }
       } while (token);
     } catch (err) {
       if (isEtaRateLimitError(err)) {

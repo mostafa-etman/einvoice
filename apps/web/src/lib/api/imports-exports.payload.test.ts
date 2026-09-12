@@ -84,6 +84,7 @@ describe('imports/exports API payloads', () => {
     });
     await createLocalExport({
       formats: ['CSV', 'JSON'],
+      locale: 'ar',
       filters: { from: '2026-01-01T00:00:00.000Z', to: '2026-01-31T00:00:00.000Z' },
     });
     expect(fetchMock).toHaveBeenCalledWith(
@@ -92,6 +93,7 @@ describe('imports/exports API payloads', () => {
         method: 'POST',
         body: JSON.stringify({
           formats: ['CSV', 'JSON'],
+          locale: 'ar',
           filters: { from: '2026-01-01T00:00:00.000Z', to: '2026-01-31T00:00:00.000Z' },
         }),
       }),

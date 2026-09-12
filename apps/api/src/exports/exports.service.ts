@@ -24,10 +24,21 @@ import {
 import {
   exportDocsToCsv,
   exportDocsToJson,
-  exportDocsToPdfInventory,
   exportDocsToXlsx,
   type ExportDocRow,
 } from './local-exporters';
+import { normalizeExportLocale } from './export-column-labels';
+import {
+  renderLocalInvoicePdf,
+  renderLocalInvoicesPdfFromSource,
+  type LocalInvoicePdfInput,
+  type LocalInvoicePdfLocale,
+} from '../documents/local-invoice-pdf';
+import {
+  mapIssuedRowToPdfInput,
+  mapReceivedRowToPdfInput,
+} from './local-export-pdf-map';
+import { buildZipStore, safeInvoicePdfFilename } from './zip-store';
 import {
   QUEUE_EXPORT,
   QUEUE_PACKAGE_POLL,
@@ -37,8 +48,8 @@ import {
 import type { ArtifactStorage } from '../storage/storage.module';
 import { loadEnv } from '../config/env';
 import { tenantArtifactKey } from '../storage/minio-artifact.store';
-import { splitLocalExportDocumentTypes } from './local-export-scope';
-import { localExportIssueRange } from './local-export-range';
+import { splitLocalExportDocumentTypes, type LocalExportKindScope } from './local-export-scope';
+import { localExportIssueRange, type LocalExportIssueRange } from './local-export-range';
 
 export type LocalExportFilters = {
   from?: string;
@@ -46,7 +57,22 @@ export type LocalExportFilters = {
   documentTypes?: string[];
   statuses?: string[];
   branchId?: string;
+  /** Optional UI locale (`ar` / `en`). Omitted = legacy field-name headers. */
+  locale?: string;
+  /** PDF packaging. Default `single` (one file, all invoices). */
+  pdfMode?: 'single' | 'zip';
 };
+
+export type LocalExportPdfMode = 'single' | 'zip';
+
+const PDF_EXPORT_BATCH = 25;
+const PDF_REF_PAGE = 200;
+
+export function normalizeExportPdfMode(
+  raw?: string | null,
+): LocalExportPdfMode {
+  return String(raw ?? '').toLowerCase() === 'zip' ? 'zip' : 'single';
+}
 
 export const EMPTY_RANGE_SUMMARY =
   'No documents were accepted by ETA in the selected date range, so there is nothing to package.';
@@ -120,6 +146,8 @@ export class ExportsService {
     userId: string;
     formats: Array<'CSV' | 'XLSX' | 'PDF' | 'JSON'>;
     filters: LocalExportFilters;
+    locale?: string;
+    pdfMode?: LocalExportPdfMode;
   }) {
     if (!args.formats?.length) {
       throw new BadRequestException('At least one format required');
@@ -128,6 +156,12 @@ export class ExportsService {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + env.EXPORT_ARTIFACT_TTL_DAYS);
 
+    const filters: LocalExportFilters = {
+      ...args.filters,
+      ...(args.locale ? { locale: args.locale } : {}),
+      ...(args.pdfMode ? { pdfMode: args.pdfMode } : {}),
+    };
+
     const job = await this.tenantPrisma.withTenant(args.tenantId, (tx) =>
       tx.exportJob.create({
         data: {
@@ -135,7 +169,7 @@ export class ExportsService {
           createdByUserId: args.userId,
           kind: 'LOCAL',
           status: 'QUEUED',
-          filtersJson: args.filters as Prisma.InputJsonValue,
+          filtersJson: filters as Prisma.InputJsonValue,
           formatsJson: args.formats as Prisma.InputJsonValue,
           expiresAt,
         },
@@ -466,16 +500,21 @@ export class ExportsService {
       const key = keys[fmt] || keys[fmt.toUpperCase()];
       if (!key) throw new NotFoundException(`Format ${fmt} not available`);
       const buffer = await this.artifacts.getByKey(key);
+      const isZip = buffer.subarray(0, 2).toString('latin1') === 'PK';
       const contentTypes: Record<string, string> = {
-        csv: 'text/csv',
+        csv: 'text/csv; charset=utf-8',
         xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         json: 'application/json',
-        pdf: 'application/pdf',
+        pdf: isZip ? 'application/zip' : 'application/pdf',
       };
+      const fileName =
+        fmt === 'pdf' && isZip
+          ? `export-${jobId}-invoices.zip`
+          : `export-${jobId}.${fmt}`;
       result = {
         buffer,
         contentType: contentTypes[fmt] || 'application/octet-stream',
-        fileName: `export-${jobId}.${fmt}`,
+        fileName,
       };
     }
 
@@ -527,26 +566,88 @@ export class ExportsService {
       }),
     );
 
+    const headerLocale = normalizeExportLocale(filters.locale);
+    const pdfLocale: LocalInvoicePdfLocale = headerLocale ?? 'en';
+    const pdfMode = normalizeExportPdfMode(filters.pdfMode);
+
+    const artifactKeys: Record<string, string> = {};
+    const needsSummary = formats.some((f) =>
+      ['CSV', 'XLSX', 'JSON'].includes(String(f).toUpperCase()),
+    );
+    const rows: ExportDocRow[] = needsSummary
+      ? await this.loadSummaryExportRows(tenantId, filters, scope, issueRange)
+      : [];
+
+    for (const fmt of formats) {
+      const upper = String(fmt).toUpperCase();
+      let buf: Buffer;
+      let contentType: string;
+      let objectId: string;
+      if (upper === 'CSV') {
+        buf = exportDocsToCsv(rows, headerLocale);
+        contentType = 'text/csv; charset=utf-8';
+        objectId = `${exportJobId}.csv`;
+      } else if (upper === 'XLSX') {
+        buf = exportDocsToXlsx(rows, headerLocale);
+        contentType =
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+        objectId = `${exportJobId}.xlsx`;
+      } else if (upper === 'JSON') {
+        buf = exportDocsToJson(rows);
+        contentType = 'application/json';
+        objectId = `${exportJobId}.json`;
+      } else if (upper === 'PDF') {
+        const pdf = await this.buildInvoicePdfExport({
+          tenantId,
+          filters,
+          scope,
+          issueRange,
+          locale: pdfLocale,
+          mode: pdfMode,
+        });
+        buf = pdf.buffer;
+        contentType = pdf.contentType;
+        objectId = pdf.fileName.endsWith('.zip')
+          ? `${exportJobId}-invoices.zip`
+          : `${exportJobId}.pdf`;
+      } else {
+        continue;
+      }
+      const put = await this.artifacts.put({
+        tenantId,
+        kind: 'exports',
+        objectId,
+        contentType,
+        body: buf,
+      });
+      artifactKeys[upper.toLowerCase()] = put.key;
+    }
+
+    await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.exportJob.update({
+        where: { id: exportJobId },
+        data: {
+          status: 'READY',
+          artifactObjectKeysJson: artifactKeys as Prisma.InputJsonValue,
+          errorSummary: null,
+          finishedAt: new Date(),
+        },
+      }),
+    );
+  }
+
+  private async loadSummaryExportRows(
+    tenantId: string,
+    filters: LocalExportFilters,
+    scope: LocalExportKindScope,
+    issueRange: LocalExportIssueRange | undefined,
+  ): Promise<ExportDocRow[]> {
     const issued =
       scope.issuedKinds === 'none'
         ? []
         : await this.tenantPrisma.withTenant(tenantId, (tx) =>
             tx.document.findMany({
-              where: {
-                tenantId,
-                ...(filters.branchId ? { branchId: filters.branchId } : {}),
-                ...(filters.statuses?.length
-                  ? { status: { in: filters.statuses as never[] } }
-                  : {}),
-                ...(scope.issuedKinds !== 'all'
-                  ? {
-                      kind: {
-                        in: scope.issuedKinds as DocumentKind[],
-                      },
-                    }
-                  : {}),
-                ...(issueRange ? { issueDateTime: issueRange } : {}),
-              },
+              where: this.issuedWhere(tenantId, filters, scope, issueRange),
               orderBy: { issueDateTime: 'desc' },
               take: 5000,
             }),
@@ -557,24 +658,13 @@ export class ExportsService {
         ? []
         : await this.tenantPrisma.withTenant(tenantId, (tx) =>
             tx.receivedDocument.findMany({
-              where: {
-                tenantId,
-                ...(filters.branchId ? { branchId: filters.branchId } : {}),
-                ...(scope.receivedKinds !== 'all'
-                  ? {
-                      kind: {
-                        in: scope.receivedKinds as ReceivedDocumentKind[],
-                      },
-                    }
-                  : {}),
-                ...(issueRange ? { dateTimeIssued: issueRange } : {}),
-              },
+              where: this.receivedWhere(tenantId, filters, scope, issueRange),
               orderBy: { dateTimeIssued: 'desc' },
               take: 5000,
             }),
           );
 
-    const rows: ExportDocRow[] = [
+    return [
       ...issued.map((d) => ({
         id: d.id,
         internalId: d.internalId,
@@ -604,55 +694,276 @@ export class ExportsService {
     ]
       .sort((a, b) => b.issueDateTime.localeCompare(a.issueDateTime))
       .slice(0, 5000);
+  }
 
-    const artifactKeys: Record<string, string> = {};
-    for (const fmt of formats) {
-      const upper = String(fmt).toUpperCase();
-      let buf: Buffer;
-      let contentType: string;
-      let objectId: string;
-      if (upper === 'CSV') {
-        buf = exportDocsToCsv(rows);
-        contentType = 'text/csv';
-        objectId = `${exportJobId}.csv`;
-      } else if (upper === 'XLSX') {
-        buf = exportDocsToXlsx(rows);
-        contentType =
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-        objectId = `${exportJobId}.xlsx`;
-      } else if (upper === 'JSON') {
-        buf = exportDocsToJson(rows);
-        contentType = 'application/json';
-        objectId = `${exportJobId}.json`;
-      } else if (upper === 'PDF') {
-        const pdf = exportDocsToPdfInventory(rows);
-        buf = pdf.buffer;
-        contentType = pdf.contentType;
-        objectId = `${exportJobId}.pdf`;
-      } else {
-        continue;
-      }
-      const put = await this.artifacts.put({
-        tenantId,
-        kind: 'exports',
-        objectId,
-        contentType,
-        body: buf,
-      });
-      artifactKeys[upper.toLowerCase()] = put.key;
-    }
+  private issuedWhere(
+    tenantId: string,
+    filters: LocalExportFilters,
+    scope: LocalExportKindScope,
+    issueRange: LocalExportIssueRange | undefined,
+  ) {
+    return {
+      tenantId,
+      ...(filters.branchId ? { branchId: filters.branchId } : {}),
+      ...(filters.statuses?.length
+        ? { status: { in: filters.statuses as never[] } }
+        : {}),
+      ...(scope.issuedKinds !== 'all' && scope.issuedKinds !== 'none'
+        ? { kind: { in: scope.issuedKinds as DocumentKind[] } }
+        : {}),
+      ...(issueRange ? { issueDateTime: issueRange } : {}),
+    };
+  }
 
-    await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.exportJob.update({
-        where: { id: exportJobId },
-        data: {
-          status: 'READY',
-          artifactObjectKeysJson: artifactKeys as Prisma.InputJsonValue,
-          errorSummary: null,
-          finishedAt: new Date(),
-        },
+  private receivedWhere(
+    tenantId: string,
+    filters: LocalExportFilters,
+    scope: LocalExportKindScope,
+    issueRange: LocalExportIssueRange | undefined,
+  ) {
+    return {
+      tenantId,
+      ...(filters.branchId ? { branchId: filters.branchId } : {}),
+      ...(scope.receivedKinds !== 'all' && scope.receivedKinds !== 'none'
+        ? { kind: { in: scope.receivedKinds as ReceivedDocumentKind[] } }
+        : {}),
+      ...(issueRange ? { dateTimeIssued: issueRange } : {}),
+    };
+  }
+
+  private async loadTenantLogo(
+    tenantId: string,
+  ): Promise<{ buffer: Buffer; contentType?: string } | null> {
+    const tenant = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.tenant.findUnique({
+        where: { id: tenantId },
+        select: { logoObjectKey: true, logoContentType: true },
       }),
     );
+    if (!tenant?.logoObjectKey) return null;
+    try {
+      const buffer = await this.artifacts.getByKey(tenant.logoObjectKey);
+      return { buffer, contentType: tenant.logoContentType ?? undefined };
+    } catch {
+      return null;
+    }
+  }
+
+  private async collectPdfRefs(
+    tenantId: string,
+    filters: LocalExportFilters,
+    scope: LocalExportKindScope,
+    issueRange: LocalExportIssueRange | undefined,
+  ): Promise<Array<{ side: 'sales' | 'purchases'; id: string; at: string }>> {
+    const refs: Array<{ side: 'sales' | 'purchases'; id: string; at: string }> =
+      [];
+
+    if (scope.issuedKinds !== 'none') {
+      let last: { issueDateTime: Date; id: string } | undefined;
+      for (;;) {
+        const page = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+          tx.document.findMany({
+            where: {
+              ...this.issuedWhere(tenantId, filters, scope, issueRange),
+              ...(last
+                ? {
+                    OR: [
+                      { issueDateTime: { gt: last.issueDateTime } },
+                      {
+                        issueDateTime: last.issueDateTime,
+                        id: { gt: last.id },
+                      },
+                    ],
+                  }
+                : {}),
+            },
+            orderBy: [{ issueDateTime: 'asc' }, { id: 'asc' }],
+            take: PDF_REF_PAGE,
+            select: { id: true, issueDateTime: true },
+          }),
+        );
+        if (!page.length) break;
+        for (const row of page) {
+          refs.push({
+            side: 'sales',
+            id: row.id,
+            at: row.issueDateTime.toISOString(),
+          });
+        }
+        const tail = page[page.length - 1]!;
+        last = { issueDateTime: tail.issueDateTime, id: tail.id };
+        if (page.length < PDF_REF_PAGE) break;
+      }
+    }
+
+    if (scope.receivedKinds !== 'none') {
+      let last: { dateTimeIssued: Date | null; id: string } | undefined;
+      for (;;) {
+        const page = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+          tx.receivedDocument.findMany({
+            where: {
+              ...this.receivedWhere(tenantId, filters, scope, issueRange),
+              ...(last
+                ? {
+                    OR: [
+                      { dateTimeIssued: { gt: last.dateTimeIssued ?? undefined } },
+                      {
+                        dateTimeIssued: last.dateTimeIssued,
+                        id: { gt: last.id },
+                      },
+                    ],
+                  }
+                : {}),
+            },
+            orderBy: [{ dateTimeIssued: 'asc' }, { id: 'asc' }],
+            take: PDF_REF_PAGE,
+            select: { id: true, dateTimeIssued: true },
+          }),
+        );
+        if (!page.length) break;
+        for (const row of page) {
+          refs.push({
+            side: 'purchases',
+            id: row.id,
+            at: (row.dateTimeIssued ?? new Date(0)).toISOString(),
+          });
+        }
+        const tail = page[page.length - 1]!;
+        last = { dateTimeIssued: tail.dateTimeIssued, id: tail.id };
+        if (page.length < PDF_REF_PAGE) break;
+      }
+    }
+
+    refs.sort(
+      (a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id),
+    );
+    return refs;
+  }
+
+  private async loadPdfInputsBatch(
+    tenantId: string,
+    refs: Array<{ side: 'sales' | 'purchases'; id: string }>,
+    locale: LocalInvoicePdfLocale,
+    logo: LocalInvoicePdfInput['logo'],
+  ): Promise<LocalInvoicePdfInput[]> {
+    const saleIds = refs.filter((r) => r.side === 'sales').map((r) => r.id);
+    const purchaseIds = refs
+      .filter((r) => r.side === 'purchases')
+      .map((r) => r.id);
+
+    const issued = saleIds.length
+      ? await this.tenantPrisma.withTenant(tenantId, (tx) =>
+          tx.document.findMany({
+            where: { tenantId, id: { in: saleIds } },
+            include: {
+              lines: {
+                include: { taxes: true },
+                orderBy: { lineNumber: 'asc' },
+              },
+            },
+          }),
+        )
+      : [];
+    const received = purchaseIds.length
+      ? await this.tenantPrisma.withTenant(tenantId, (tx) =>
+          tx.receivedDocument.findMany({
+            where: { tenantId, id: { in: purchaseIds } },
+            include: { lines: { orderBy: { lineNumber: 'asc' } } },
+          }),
+        )
+      : [];
+
+    const issuedById = new Map(issued.map((d) => [d.id, d]));
+    const receivedById = new Map(received.map((d) => [d.id, d]));
+    const out: LocalInvoicePdfInput[] = [];
+    for (const ref of refs) {
+      if (ref.side === 'sales') {
+        const row = issuedById.get(ref.id);
+        if (!row) continue;
+        out.push(mapIssuedRowToPdfInput(row, locale, logo));
+      } else {
+        const row = receivedById.get(ref.id);
+        if (!row) continue;
+        out.push(
+          mapReceivedRowToPdfInput(
+            {
+              ...row,
+              lines: row.lines as unknown as Array<Record<string, unknown>>,
+            },
+            locale,
+            logo,
+          ),
+        );
+      }
+    }
+    return out;
+  }
+
+  private async *iteratePdfInputs(
+    tenantId: string,
+    refs: Array<{ side: 'sales' | 'purchases'; id: string }>,
+    locale: LocalInvoicePdfLocale,
+    logo: LocalInvoicePdfInput['logo'],
+  ): AsyncGenerator<LocalInvoicePdfInput> {
+    for (let i = 0; i < refs.length; i += PDF_EXPORT_BATCH) {
+      const chunk = refs.slice(i, i + PDF_EXPORT_BATCH);
+      const inputs = await this.loadPdfInputsBatch(
+        tenantId,
+        chunk,
+        locale,
+        logo,
+      );
+      for (const input of inputs) yield input;
+    }
+  }
+
+  private async buildInvoicePdfExport(args: {
+    tenantId: string;
+    filters: LocalExportFilters;
+    scope: LocalExportKindScope;
+    issueRange: LocalExportIssueRange | undefined;
+    locale: LocalInvoicePdfLocale;
+    mode: LocalExportPdfMode;
+  }): Promise<{ buffer: Buffer; contentType: string; fileName: string }> {
+    const refs = await this.collectPdfRefs(
+      args.tenantId,
+      args.filters,
+      args.scope,
+      args.issueRange,
+    );
+    const logo = await this.loadTenantLogo(args.tenantId);
+
+    if (args.mode === 'zip') {
+      const used = new Set<string>();
+      const entries: Array<{ name: string; body: Buffer }> = [];
+      for await (const input of this.iteratePdfInputs(
+        args.tenantId,
+        refs,
+        args.locale,
+        logo,
+      )) {
+        const body = await renderLocalInvoicePdf(input);
+        entries.push({
+          name: safeInvoicePdfFilename(input.internalId, `${entries.length + 1}`, used),
+          body,
+        });
+      }
+      return {
+        buffer: buildZipStore(entries),
+        contentType: 'application/zip',
+        fileName: 'invoices.zip',
+      };
+    }
+
+    const rendered = await renderLocalInvoicesPdfFromSource(
+      args.locale,
+      this.iteratePdfInputs(args.tenantId, refs, args.locale, logo),
+    );
+    return {
+      buffer: rendered.buffer,
+      contentType: 'application/pdf',
+      fileName: 'invoices.pdf',
+    };
   }
 
   async processPackagePoll(

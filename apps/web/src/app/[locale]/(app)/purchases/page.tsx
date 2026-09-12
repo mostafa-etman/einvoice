@@ -35,6 +35,7 @@ import {
   isSyncBusy,
   type SortBy,
 } from './_components/purchase-list-utils';
+import { cairoExportRangeIso } from '../exports/export-date-range';
 
 export default function PurchasesPage() {
   const t = useTranslations('purchases');
@@ -122,8 +123,8 @@ export default function PurchasesPage() {
     setError(null);
     try {
       const run = await syncPurchases({
-        from: syncFrom ? `${syncFrom}T00:00:00.000Z` : undefined,
-        to: syncTo ? `${syncTo}T23:59:59.999Z` : undefined,
+        from: syncFrom ? cairoExportRangeIso(syncFrom, false) : undefined,
+        to: syncTo ? cairoExportRangeIso(syncTo, true) : undefined,
       });
       setSync(run);
       setShowStuckReset(true);

@@ -60,6 +60,7 @@ export default function ExportsPage() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [documentType, setDocumentType] = useState<DocumentTypeScope>('all');
+  const [pdfMode, setPdfMode] = useState<'single' | 'zip'>('single');
 
   const reload = useCallback(() => {
     return listExportJobs()
@@ -99,6 +100,8 @@ export default function ExportsPage() {
     try {
       const job = await createLocalExport({
         formats,
+        locale: locale.toLowerCase().startsWith('ar') ? 'ar' : 'en',
+        ...(formats.includes('PDF') ? { pdfMode } : {}),
         filters: {
           from: from ? cairoExportRangeIso(from, false) : undefined,
           to: to ? cairoExportRangeIso(to, true) : undefined,
@@ -165,7 +168,9 @@ export default function ExportsPage() {
       a.download =
         job.kind === 'ETA_PACKAGE'
           ? `eta-package-${job.id}.zip`
-          : `export-${job.id}.${format || 'bin'}`;
+          : blob.type.includes('zip')
+            ? `export-${job.id}-invoices.zip`
+            : `export-${job.id}.${format || 'bin'}`;
       a.click();
       URL.revokeObjectURL(url);
       setDownloaded((prev) => ({ ...prev, [job.id]: true }));
@@ -346,6 +351,29 @@ export default function ExportsPage() {
               ))}
             </div>
           </fieldset>
+          {formats.includes('PDF') ? (
+            <fieldset className="m-0 mt-token-md border-0 p-0">
+              <legend className="mb-token-sm text-token-sm font-medium text-foreground">
+                {t('pdfMode')}
+              </legend>
+              <div className="flex flex-col gap-token-sm">
+                <Radio
+                  name="export-pdf-mode"
+                  value="single"
+                  checked={pdfMode === 'single'}
+                  onChange={() => setPdfMode('single')}
+                  label={t('pdfModeSingle')}
+                />
+                <Radio
+                  name="export-pdf-mode"
+                  value="zip"
+                  checked={pdfMode === 'zip'}
+                  onChange={() => setPdfMode('zip')}
+                  label={t('pdfModeZip')}
+                />
+              </div>
+            </fieldset>
+          ) : null}
           <div className="mt-token-md grid gap-token-sm sm:grid-cols-2">
             <Input
               type="date"

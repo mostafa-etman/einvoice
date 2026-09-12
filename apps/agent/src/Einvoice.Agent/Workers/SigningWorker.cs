@@ -65,9 +65,16 @@ public sealed class SigningWorker : BackgroundService
             }
             catch (DeviceUnauthorizedException)
             {
-                Online = false;
-                StatusText = "Unpaired / 401";
-                _log.LogWarning("Device token rejected (401). Stop uploads until re-paired.");
+                if (_api.IsUnpaired)
+                {
+                    Online = false;
+                    StatusText = "Unpaired / 401";
+                    _log.LogWarning("Device token rejected (401). Stop uploads until re-paired.");
+                }
+                else
+                {
+                    _log.LogDebug("Ignoring stale 401 after token rotation.");
+                }
             }
             catch (Exception ex)
             {
@@ -83,7 +90,8 @@ public sealed class SigningWorker : BackgroundService
 
     private async Task TickAsync(CancellationToken ct)
     {
-        if (!HasDeviceToken) return;
+        if (PairingLifecycle.ShouldSkipAuthenticatedCalls(_api.IsPairing, HasDeviceToken))
+            return;
 
         await HeartbeatSafeAsync(ct).ConfigureAwait(false);
         await ClaimAndEnqueueAsync(ct).ConfigureAwait(false);

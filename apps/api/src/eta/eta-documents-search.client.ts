@@ -133,17 +133,18 @@ export class EtaDocumentsSearchClient {
       string,
       unknown
     >;
+    const nestedData =
+      obj.data && typeof obj.data === 'object' && !Array.isArray(obj.data)
+        ? (obj.data as Record<string, unknown>)
+        : null;
     const result = Array.isArray(obj.result)
       ? (obj.result as Record<string, unknown>[])
       : Array.isArray(obj.Result)
         ? (obj.Result as Record<string, unknown>[])
-        : [];
-    const continuationToken =
-      (typeof obj.continuationToken === 'string'
-        ? obj.continuationToken
-        : typeof obj.ContinuationToken === 'string'
-          ? obj.ContinuationToken
-          : null) ?? null;
+        : Array.isArray(nestedData?.result)
+          ? (nestedData.result as Record<string, unknown>[])
+          : [];
+    const continuationToken = readEtaContinuationToken(obj);
     // ETA uses "EndofResultSet" when finished — treat as no further pages.
     const done =
       !continuationToken ||
@@ -167,6 +168,33 @@ export class EtaDocumentsSearchClient {
     }
     return { submissionDateFrom: from, submissionDateTo: to };
   }
+}
+
+export function readEtaContinuationToken(
+  obj: Record<string, unknown>,
+): string | null {
+  const meta =
+    obj.metadata && typeof obj.metadata === 'object' && !Array.isArray(obj.metadata)
+      ? (obj.metadata as Record<string, unknown>)
+      : null;
+  const data =
+    obj.data && typeof obj.data === 'object' && !Array.isArray(obj.data)
+      ? (obj.data as Record<string, unknown>)
+      : null;
+  const candidates = [
+    obj.continuationToken,
+    obj.ContinuationToken,
+    obj.nextContinuationToken,
+    obj.nextToken,
+    meta?.continuationToken,
+    meta?.ContinuationToken,
+    data?.continuationToken,
+    data?.ContinuationToken,
+  ];
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.trim()) return c.trim();
+  }
+  return null;
 }
 
 /** Split [from, to] into ≤ maxDays windows (ETA Search limit is 30 days). */

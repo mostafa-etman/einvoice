@@ -78,4 +78,36 @@ describe('eta-sync-collect', () => {
     expect(searchIncomplete).toBe(false);
     expect([...byUuid.keys()].sort()).toEqual(['u-07', 'u-08']);
   });
+
+  it('walks continuation tokens until all same-day pages are collected (250 / pageSize 100)', async () => {
+    const PAGE = 100;
+    const TOTAL = 250;
+    const all = Array.from({ length: TOTAL }, (_, i) => ({
+      uuid: `uuid-${String(i + 1).padStart(3, '0')}`,
+      dateTimeIssued: '2026-09-12T12:00:00Z',
+    }));
+    const tokensSeen: Array<string | undefined> = [];
+    const { byUuid, searchIncomplete } = await collectEtaSearchRows({
+      sleepFn: async () => undefined,
+      windows: [
+        {
+          from: new Date('2026-09-11T22:00:00.000Z'),
+          to: new Date('2026-09-12T21:59:59.999Z'),
+        },
+      ],
+      searchPage: async ({ continuationToken }) => {
+        tokensSeen.push(continuationToken);
+        const start =
+          continuationToken === 'p2' ? 100 : continuationToken === 'p3' ? 200 : 0;
+        const slice = all.slice(start, start + PAGE);
+        const next =
+          start + PAGE < TOTAL ? (start === 0 ? 'p2' : 'p3') : null;
+        return { result: slice, continuationToken: next };
+      },
+    });
+    expect(searchIncomplete).toBe(false);
+    expect(tokensSeen).toEqual([undefined, 'p2', 'p3']);
+    expect(byUuid.size).toBe(TOTAL);
+    expect([...byUuid.keys()]).toEqual(all.map((r) => r.uuid));
+  });
 });

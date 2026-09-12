@@ -60,4 +60,26 @@ describe('EtaDocumentsSearchClient direction filter', () => {
       expect(days).toBeLessThanOrEqual(30);
     }
   });
+
+  it('reads continuation tokens from metadata when the top-level field is missing', async () => {
+    const fetchImpl = (async () =>
+      new Response(
+        JSON.stringify({
+          result: [{ uuid: 'u-1' }],
+          metadata: { continuationToken: 'next-page' },
+        }),
+        { status: 200 },
+      )) as typeof fetch;
+    const client = new EtaDocumentsSearchClient('https://eta.test', fetchImpl);
+    const page = await client.searchSent('tok', {
+      pageSize: 1,
+      window: {
+        from: '2026-01-01T00:00:00.000Z',
+        to: '2026-01-02T00:00:00.000Z',
+        dateField: 'issue',
+      },
+    });
+    expect(page.continuationToken).toBe('next-page');
+    expect(page.result).toHaveLength(1);
+  });
 });

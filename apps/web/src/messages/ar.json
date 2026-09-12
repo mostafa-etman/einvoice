@@ -996,7 +996,11 @@
     "retryLoad": "إعادة المحاولة",
     "errorGeneric": "حدث خطأ. حاول مرة أخرى.",
     "listCaption": "عمليات التصدير",
-    "etaPackageHelp": "طلب → متابعة الطلبات → تنزيل zip"
+    "etaPackageHelp": "طلب → متابعة الطلبات → تنزيل zip",
+    "colRecordId": "معرّف السجل",
+    "pdfMode": "PDF",
+    "pdfModeSingle": "ملف PDF واحد يحتوي على كل الفواتير",
+    "pdfModeZip": "ZIP — ملف PDF لكل فاتورة"
   },
   "devices": {
     "title": "أجهزة التوقيع",

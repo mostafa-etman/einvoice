@@ -995,7 +995,11 @@
     "retryLoad": "Retry",
     "errorGeneric": "Something went wrong. Try again.",
     "listCaption": "Export jobs",
-    "etaPackageHelp": "Request -> Get Package Requests -> download zip"
+    "etaPackageHelp": "Request -> Get Package Requests -> download zip",
+    "colRecordId": "Record ID",
+    "pdfMode": "PDF",
+    "pdfModeSingle": "One PDF containing all invoices",
+    "pdfModeZip": "ZIP — one PDF per invoice"
   },
   "devices": {
     "title": "Signing devices",

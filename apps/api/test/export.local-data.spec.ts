@@ -142,7 +142,7 @@ describe('Local export sales/purchases data', () => {
 
   function pdfText(buf: Buffer) {
     expect(buf.subarray(0, 4).toString()).toBe('%PDF');
-    return buf.toString('utf8');
+    return buf.toString('latin1');
   }
 
   const cases: Array<{
@@ -197,6 +197,9 @@ describe('Local export sales/purchases data', () => {
           expect(text).toContain('internalId');
           expect(text).toContain('side');
         }
+        if (format === 'PDF') {
+          expect(file.contentType).toBe('application/pdf');
+        }
       });
     }
   }
@@ -246,5 +249,110 @@ describe('Local export sales/purchases data', () => {
     const text = file.buffer.toString('utf8');
     expect(text).toContain(SALE_ID);
     expect(text).toContain(PURCHASE_ID);
+  });
+
+  it('uses Arabic application labels for XLSX when locale=ar', async () => {
+    if (!dbAvailable) return;
+    const job = await exportsService.createLocalExport({
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      formats: ['XLSX'],
+      locale: 'ar',
+      filters: {
+        documentTypes: [...ISSUED_DOCUMENT_TYPES, ...RECEIVED_DOCUMENT_TYPES],
+      },
+    });
+    await exportsService.processLocalExport(ctx.tenantId, job.id);
+    const file = await exportsService.download(ctx.tenantId, job.id, 'xlsx');
+    const text = xlsxText(file.buffer);
+    expect(text).toContain('رقم الفاتورة');
+    expect(text).toContain('تاريخ الإصدار');
+    expect(text).toContain('نوع المستند');
+    expect(text).not.toContain('Invoice #');
+    expect(text).toContain(SALE_ID);
+    expect(text).toContain(PURCHASE_ID);
+  });
+
+  it('uses English application labels for XLSX when locale=en', async () => {
+    if (!dbAvailable) return;
+    const job = await exportsService.createLocalExport({
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      formats: ['XLSX'],
+      locale: 'en',
+      filters: {
+        documentTypes: [...ISSUED_DOCUMENT_TYPES, ...RECEIVED_DOCUMENT_TYPES],
+      },
+    });
+    await exportsService.processLocalExport(ctx.tenantId, job.id);
+    const file = await exportsService.download(ctx.tenantId, job.id, 'xlsx');
+    const text = xlsxText(file.buffer);
+    expect(text).toContain('Invoice #');
+    expect(text).toContain('Issue date');
+    expect(text).toContain('Document type');
+    expect(text).not.toContain('رقم الفاتورة');
+    expect(text).toContain(SALE_ID);
+  });
+
+  it('PDF export contains actual invoice identifiers (not only a count)', async () => {
+    if (!dbAvailable) return;
+    const job = await exportsService.createLocalExport({
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      formats: ['PDF'],
+      locale: 'en',
+      filters: {
+        documentTypes: [...ISSUED_DOCUMENT_TYPES, ...RECEIVED_DOCUMENT_TYPES],
+      },
+    });
+    await exportsService.processLocalExport(ctx.tenantId, job.id);
+    const file = await exportsService.download(ctx.tenantId, job.id, 'pdf');
+    expect(file.contentType).toBe('application/pdf');
+    const text = pdfText(file.buffer);
+    expect(text).toContain(SALE_ID);
+    expect(text).toContain(PURCHASE_ID);
+    expect(text).not.toMatch(/Documents: \d+/);
+  });
+
+  it('ZIP PDF mode contains one PDF per matching invoice', async () => {
+    if (!dbAvailable) return;
+    const job = await exportsService.createLocalExport({
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      formats: ['PDF'],
+      locale: 'en',
+      pdfMode: 'zip',
+      filters: {
+        documentTypes: [...ISSUED_DOCUMENT_TYPES, ...RECEIVED_DOCUMENT_TYPES],
+      },
+    });
+    await exportsService.processLocalExport(ctx.tenantId, job.id);
+    const file = await exportsService.download(ctx.tenantId, job.id, 'pdf');
+    expect(file.contentType).toBe('application/zip');
+    expect(file.fileName).toMatch(/\.zip$/);
+    expect(file.buffer.subarray(0, 2).toString('latin1')).toBe('PK');
+    const latin = file.buffer.toString('latin1');
+    expect(latin).toContain(`${SALE_ID}-`);
+    expect(latin).toContain(`${PURCHASE_ID}-`);
+  });
+
+  it('emits a valid empty PDF when the range matches nothing', async () => {
+    if (!dbAvailable) return;
+    const job = await exportsService.createLocalExport({
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      formats: ['PDF'],
+      locale: 'en',
+      filters: {
+        from: '2020-01-01T00:00:00.000+02:00',
+        to: '2020-01-01T23:59:59.999+02:00',
+        documentTypes: [...ISSUED_DOCUMENT_TYPES, ...RECEIVED_DOCUMENT_TYPES],
+      },
+    });
+    await exportsService.processLocalExport(ctx.tenantId, job.id);
+    const file = await exportsService.download(ctx.tenantId, job.id, 'pdf');
+    expect(file.contentType).toBe('application/pdf');
+    expect(pdfText(file.buffer)).toContain('No documents in this period');
+    expect(pdfText(file.buffer)).not.toContain(SALE_ID);
   });
 });

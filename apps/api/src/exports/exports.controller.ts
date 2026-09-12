@@ -43,6 +43,8 @@ export class ExportsController {
     body: {
       formats: Array<'CSV' | 'XLSX' | 'PDF' | 'JSON'>;
       filters: LocalExportFilters;
+      locale?: string;
+      pdfMode?: 'single' | 'zip';
     },
   ) {
     return this.exports.createLocalExport({
@@ -50,6 +52,8 @@ export class ExportsController {
       userId: user.userId,
       formats: body.formats,
       filters: body.filters ?? {},
+      locale: body.locale,
+      pdfMode: body.pdfMode,
     });
   }
 

@@ -112,6 +112,7 @@ describe('exports page', () => {
     await waitFor(() => {
       expect(createLocalExport).toHaveBeenCalledWith({
         formats: ['CSV', 'JSON'],
+        locale: 'en',
         filters: {
           from: '2026-01-01T00:00:00.000+02:00',
           to: '2026-01-31T23:59:59.999+02:00',
@@ -147,6 +148,7 @@ describe('exports page', () => {
     await waitFor(() => {
       expect(createLocalExport).toHaveBeenCalledWith({
         formats: ['CSV', 'JSON'],
+        locale: 'en',
         filters: {
           from: undefined,
           to: undefined,
@@ -169,6 +171,7 @@ describe('exports page', () => {
     await waitFor(() => {
       expect(createLocalExport).toHaveBeenLastCalledWith({
         formats: ['CSV', 'JSON'],
+        locale: 'en',
         filters: {
           from: undefined,
           to: undefined,
@@ -279,5 +282,24 @@ describe('exports page', () => {
     renderPage('ar');
     expect(await screen.findByRole('heading', { level: 1, name: ar.exports.title })).toBeInTheDocument();
     expect(await screen.findByText('LOCAL')).toHaveAttribute('dir', 'ltr');
+  });
+
+  it('sends the page locale and PDF packaging mode with the export request', async () => {
+    (getExportJob as jest.Mock).mockResolvedValue(job({ status: 'READY' }));
+    renderPage('ar');
+    await screen.findByText(ar.exports.noJobs);
+    fireEvent.click(screen.getByLabelText('PDF'));
+    expect(screen.getByRole('radio', { name: ar.exports.pdfModeSingle })).toBeChecked();
+    fireEvent.click(screen.getByRole('radio', { name: ar.exports.pdfModeZip }));
+    fireEvent.click(screen.getByRole('button', { name: ar.exports.createLocal }));
+    await waitFor(() => {
+      expect(createLocalExport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          locale: 'ar',
+          pdfMode: 'zip',
+          formats: expect.arrayContaining(['PDF']),
+        }),
+      );
+    });
   });
 });

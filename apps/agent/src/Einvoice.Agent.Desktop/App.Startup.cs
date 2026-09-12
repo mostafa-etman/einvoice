@@ -28,6 +28,7 @@ public partial class App
     private DateTimeOffset _pinExpires = DateTimeOffset.MinValue;
     private ToolStripMenuItem? _pairMenuItem;
     private ToolStripMenuItem? _unpairMenuItem;
+    private int _pairingUiGate;
 
     [STAThread]
     public static void Main(string[] args)
@@ -371,55 +372,82 @@ public partial class App
             _unpairMenuItem.Enabled = paired;
     }
 
-    private async Task PairDeviceAsync(bool force)
+    private bool TryEnterPairingUi() => Interlocked.CompareExchange(ref _pairingUiGate, 1, 0) == 0;
+
+    private void ExitPairingUi() => Interlocked.Exchange(ref _pairingUiGate, 0);
+
+    private async Task PairDeviceAsync(bool force, bool alreadyEntered = false)
     {
         if (_settings is null || _api is null) return;
 
-        if (!force && HasPersistedPairing())
+        if (!alreadyEntered && !TryEnterPairingUi())
         {
             MessageBox.Show(
-                "This PC is already paired. Closing or restarting the agent does not require a new pairing code.\n\n" +
-                $"API: {_settings.ApiBaseUrl}\n\n" +
-                "The token PIN is still requested when signing.\n" +
-                "Use Unpair / re-pair only if you are moving this agent or resetting it.",
-                "Already paired",
+                "Pairing is already in progress.",
+                "Pairing",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
             return;
         }
 
-        var dlg = new PairingDialog(_settings.DeviceLabel, _settings.ApiBaseUrl);
-        if (dlg.ShowDialog() != true) return;
-
         try
         {
-            var apiBase = AgentSettings.NormalizeApiBaseUrl(dlg.ApiBaseUrl);
-            _settings.ApiBaseUrl = apiBase;
-            _api.SetBaseUrl(apiBase);
-
-            var local = LocalAgentConfig.Load(_settings.LocalConfigPath);
-            local.ApiBaseUrl = apiBase;
-            local.Save(_settings.LocalConfigPath);
-            _localConfig = local;
-
-            var result = await _api.PairAsync(dlg.PairingCode, dlg.DeviceLabel, Environment.MachineName);
-            var token = result.Value<string>("deviceToken");
-            if (string.IsNullOrWhiteSpace(token))
-                throw new InvalidOperationException("Pairing response missing deviceToken.");
-
-            var pairing = new PersistedPairing
+            if (!force && HasPersistedPairing())
             {
-                DeviceToken = token.Trim(),
-                DeviceId = result.Value<string>("deviceId"),
-                TenantId = result.Value<string>("tenantId"),
-                ApiBaseUrl = apiBase,
-                DeviceLabel = dlg.DeviceLabel,
-                PairedAtUtc = DateTimeOffset.UtcNow,
-            };
-            DeviceTokenStore.SavePairing(pairing, _settings.PairingStorePath);
+                MessageBox.Show(
+                    "This PC is already paired. Closing or restarting the agent does not require a new pairing code.\n\n" +
+                    $"API: {_settings.ApiBaseUrl}\n\n" +
+                    "The token PIN is still requested when signing.\n" +
+                    "Use Unpair / re-pair only if you are moving this agent or resetting it.",
+                    "Already paired",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
 
-            _settings.DeviceToken = pairing.DeviceToken;
-            _api.SetDeviceToken(pairing.DeviceToken);
+            var dlg = new PairingDialog(_settings.DeviceLabel, _settings.ApiBaseUrl);
+            if (dlg.ShowDialog() != true) return;
+
+            var previousApi = _settings.ApiBaseUrl;
+            var apiBase = AgentSettings.NormalizeApiBaseUrl(dlg.ApiBaseUrl);
+            JObject result;
+            PersistedPairing pairing;
+            try
+            {
+                _settings.ApiBaseUrl = apiBase;
+                _api.SetBaseUrl(apiBase);
+
+                result = await _api.PairAsync(dlg.PairingCode, dlg.DeviceLabel, Environment.MachineName);
+                var token = result.Value<string>("deviceToken");
+                if (string.IsNullOrWhiteSpace(token))
+                    throw new InvalidOperationException("Pairing response missing deviceToken.");
+
+                pairing = new PersistedPairing
+                {
+                    DeviceToken = token.Trim(),
+                    DeviceId = result.Value<string>("deviceId"),
+                    TenantId = result.Value<string>("tenantId"),
+                    ApiBaseUrl = apiBase,
+                    DeviceLabel = dlg.DeviceLabel,
+                    PairedAtUtc = DateTimeOffset.UtcNow,
+                };
+                DeviceTokenStore.SavePairing(pairing, _settings.PairingStorePath);
+
+                _settings.DeviceToken = pairing.DeviceToken;
+                _api.SetDeviceToken(pairing.DeviceToken);
+
+                var local = LocalAgentConfig.Load(_settings.LocalConfigPath);
+                local.ApiBaseUrl = apiBase;
+                local.Save(_settings.LocalConfigPath);
+                _localConfig = local;
+            }
+            catch
+            {
+                _settings.ApiBaseUrl = previousApi;
+                _api.SetBaseUrl(previousApi);
+                throw;
+            }
+
             var resumed = result.Value<bool?>("resumed") == true;
             MessageBox.Show(
                 $"Paired successfully{(resumed ? " (existing device on this PC)" : "")}.\n" +
@@ -439,38 +467,59 @@ public partial class App
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
+        finally
+        {
+            if (!alreadyEntered) ExitPairingUi();
+        }
     }
 
     private async Task UnpairAndRepairAsync()
     {
         if (_settings is null || _api is null) return;
-        var confirm = MessageBox.Show(
-            "Unpair this PC from the company?\n\n" +
-            "You will need a new pairing code from Devices. " +
-            "Normal close/restart does not require this.\n\n" +
-            "The eSeal PIN is not stored with pairing and is not sent to the cloud.",
-            "Unpair / re-pair",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning);
-        if (confirm != MessageBoxResult.Yes) return;
+        if (!TryEnterPairingUi())
+        {
+            MessageBox.Show(
+                "Pairing is already in progress.",
+                "Pairing",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
 
         try
         {
-            if (!string.IsNullOrWhiteSpace(_settings.DeviceToken) && _api is not null)
-                await _api.UnpairAsync();
+            var confirm = MessageBox.Show(
+                "Unpair this PC from the company?\n\n" +
+                "You will need a new pairing code from Devices. " +
+                "Normal close/restart does not require this.\n\n" +
+                "The eSeal PIN is not stored with pairing and is not sent to the cloud.",
+                "Unpair / re-pair",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (confirm != MessageBoxResult.Yes) return;
+
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(_settings.DeviceToken) && _api is not null)
+                    await _api.UnpairAsync();
+            }
+            catch
+            {
+                // Server revoke is best-effort; always clear local credentials.
+            }
+
+            DeviceTokenStore.Clear(_settings.PairingStorePath, _settings.TokenStorePath);
+            _settings.DeviceToken = null;
+            _api?.ClearDeviceToken();
+            RefreshPairingMenu();
+            RefreshTrayText();
+
+            await PairDeviceAsync(force: true, alreadyEntered: true);
         }
-        catch
+        finally
         {
-            // Server revoke is best-effort; always clear local credentials.
+            ExitPairingUi();
         }
-
-        DeviceTokenStore.Clear(_settings.PairingStorePath, _settings.TokenStorePath);
-        _settings.DeviceToken = null;
-        _api?.ClearDeviceToken();
-        RefreshPairingMenu();
-        RefreshTrayText();
-
-        await PairDeviceAsync(force: true);
     }
 
     private void UnlockPin()
