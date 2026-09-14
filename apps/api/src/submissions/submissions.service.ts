@@ -29,7 +29,14 @@ import {
 } from './submit-cooldown';
 import { MAX_DUPLICATE_RETRIES } from './duplicate-submission';
 import { documentNotEditableException } from '../documents/documents-mutability';
-import { checkLateSubmission, parseEtaDocument, type JsonObject } from '@einvoice/eta-core';
+import {
+  checkLateSubmission,
+  formatEtaIntakeError,
+  formatEtaIntakeErrorSummary,
+  parseEtaDocument,
+  redactEtaLogJson,
+  type JsonObject,
+} from '@einvoice/eta-core';
 import { UsageEmitService } from '../analytics/usage-emit.service';
 import { QuotaService } from '../billing/quota.service';
 import { PointsService } from '../billing/points.service';
@@ -1268,17 +1275,13 @@ export class SubmissionsService implements OnModuleDestroy {
               ? 'REFUSED_AT_INTAKE'
               : null,
           lastErrorMessage: mapped.needsAttention
-            ? mapped.needsAttentionReasons.join('; ').slice(0, 1000)
+            ? mapped.needsAttentionReasons.join('; ').slice(0, 8000)
             : mapped.refusedCount > 0 && mapped.acceptedCount === 0
               ? mapped.mapped
                   .filter((m) => m.kind === 'refused')
-                  .map((m) =>
-                    typeof m.intakeErrorJson?.message === 'string'
-                      ? m.intakeErrorJson.message
-                      : 'Refused at intake',
-                  )
+                  .map((m) => formatEtaIntakeError(m.intakeErrorJson))
                   .join('; ')
-                  .slice(0, 1000)
+                  .slice(0, 8000)
               : null,
         },
       });
@@ -1331,26 +1334,18 @@ export class SubmissionsService implements OnModuleDestroy {
             currencyCode: issuedDoc?.currencyCode,
           });
         } else {
-          const detailMsg =
-            Array.isArray(m.intakeErrorJson?.details) &&
-            m.intakeErrorJson.details[0] &&
-            typeof (m.intakeErrorJson.details[0] as { message?: string }).message ===
-              'string'
-              ? (m.intakeErrorJson.details[0] as { message: string }).message
-              : null;
-          const errMsg =
-            detailMsg ||
-            (typeof m.intakeErrorJson?.message === 'string'
-              ? m.intakeErrorJson.message
-              : JSON.stringify(m.intakeErrorJson));
+          const errMsg = formatEtaIntakeError(m.intakeErrorJson);
+          this.logger.warn(
+            `ETA intake refused document=${m.documentId} internalId=${m.internalId} submission=${submission.id} submissionUUID=${etaSubmissionUuidForStore ?? mapped.etaSubmissionUuid} httpStatus=202 ${errMsg} raw=${JSON.stringify(redactEtaLogJson(m.intakeErrorJson))}`,
+          );
           await tx.document.update({
             where: { id: m.documentId },
             data: {
               status: 'SIGNED',
               needsAttention: true,
-              needsAttentionReason: `ETA refused at intake: ${errMsg}`.slice(
+              needsAttentionReason: `ETA refused at intake: ${formatEtaIntakeErrorSummary(m.intakeErrorJson)}`.slice(
                 0,
-                1000,
+                2000,
               ),
               submissionUuid: etaSubmissionUuidForStore,
               etaStatusRaw: etaBody as unknown as Prisma.InputJsonValue,
@@ -1374,7 +1369,10 @@ export class SubmissionsService implements OnModuleDestroy {
               reason:
                 m.kind === 'accepted'
                   ? `Accepted submissionUUID=${etaSubmissionUuidForStore}`
-                  : `Refused at intake`,
+                  : `Refused at intake: ${formatEtaIntakeError(m.intakeErrorJson)}`.slice(
+                      0,
+                      2000,
+                    ),
               etaStatusRawSnapshot: etaBody as unknown as Prisma.InputJsonValue,
             },
           });
@@ -1416,8 +1414,13 @@ export class SubmissionsService implements OnModuleDestroy {
         message:
           m.kind === 'accepted'
             ? `uuid=${m.etaUuid}`
-            : JSON.stringify(m.intakeErrorJson),
+            : formatEtaIntakeError(m.intakeErrorJson),
         triggerSource,
+        ...(m.kind === 'refused'
+          ? {
+              rawBody: JSON.stringify(redactEtaLogJson(m.intakeErrorJson)),
+            }
+          : {}),
       });
     }
 

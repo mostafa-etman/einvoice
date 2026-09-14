@@ -143,3 +143,9 @@ export {
   type InternalIdSchemeInput,
   type InternalIdSchemeIssue,
 } from './internal-id.js';
+export {
+  formatEtaIntakeError,
+  formatEtaIntakeErrorSummary,
+  redactEtaLogJson,
+  type EtaIntakeErrorLike,
+} from './eta-intake-error.js';

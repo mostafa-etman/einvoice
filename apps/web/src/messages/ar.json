@@ -1003,7 +1003,12 @@
     "colRecordId": "معرّف السجل",
     "pdfMode": "PDF",
     "pdfModeSingle": "ملف PDF واحد يحتوي على كل الفواتير",
-    "pdfModeZip": "ZIP — ملف PDF لكل فاتورة"
+    "pdfModeZip": "ZIP — ملف PDF لكل فاتورة",
+    "exportDate": "تاريخ التصدير",
+    "exportTime": "وقت التصدير",
+    "statusScope": "الفواتير المطلوب تصديرها",
+    "statusScopeAll": "كل الحالات",
+    "statusScopeValid": "فواتير مصلحة الضرائب السارية"
   },
   "devices": {
     "title": "أجهزة التوقيع",

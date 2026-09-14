@@ -50,6 +50,10 @@ import { loadEnv } from '../config/env';
 import { tenantArtifactKey } from '../storage/minio-artifact.store';
 import { splitLocalExportDocumentTypes, type LocalExportKindScope } from './local-export-scope';
 import { localExportIssueRange, type LocalExportIssueRange } from './local-export-range';
+import {
+  issuedStatusWhere,
+  receivedStatusWhere,
+} from './eta-valid-export-filter';
 
 export type LocalExportFilters = {
   from?: string;
@@ -705,9 +709,7 @@ export class ExportsService {
     return {
       tenantId,
       ...(filters.branchId ? { branchId: filters.branchId } : {}),
-      ...(filters.statuses?.length
-        ? { status: { in: filters.statuses as never[] } }
-        : {}),
+      ...(issuedStatusWhere(filters.statuses) ?? {}),
       ...(scope.issuedKinds !== 'all' && scope.issuedKinds !== 'none'
         ? { kind: { in: scope.issuedKinds as DocumentKind[] } }
         : {}),
@@ -724,6 +726,7 @@ export class ExportsService {
     return {
       tenantId,
       ...(filters.branchId ? { branchId: filters.branchId } : {}),
+      ...(receivedStatusWhere(filters.statuses) ?? {}),
       ...(scope.receivedKinds !== 'all' && scope.receivedKinds !== 'none'
         ? { kind: { in: scope.receivedKinds as ReceivedDocumentKind[] } }
         : {}),
@@ -947,6 +950,13 @@ export class ExportsService {
           name: safeInvoicePdfFilename(input.internalId, `${entries.length + 1}`, used),
           body,
         });
+      }
+      if (!entries.length) {
+        const empty = await renderLocalInvoicesPdfFromSource(
+          args.locale,
+          (async function* () {})(),
+        );
+        entries.push({ name: 'empty.pdf', body: empty.buffer });
       }
       return {
         buffer: buildZipStore(entries),

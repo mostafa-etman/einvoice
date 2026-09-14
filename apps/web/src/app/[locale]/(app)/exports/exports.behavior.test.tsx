@@ -10,6 +10,7 @@ import {
   listExportJobs,
   type ExportJob,
 } from '@/lib/api/exports';
+import { formatCairoDateDisplay, formatCairoTimeDisplay } from '@/lib/format-date';
 import ExportsPage from './page';
 
 jest.mock('@/lib/api/exports', () => {
@@ -94,6 +95,15 @@ describe('exports page', () => {
     renderPage();
     expect(await screen.findByText('LOCAL')).toHaveAttribute('dir', 'ltr');
     expect(screen.getByText('ETA_PACKAGE')).toHaveAttribute('dir', 'ltr');
+    expect(screen.getByText(en.exports.exportDate)).toBeInTheDocument();
+    expect(screen.getByText(en.exports.exportTime)).toBeInTheDocument();
+    expect(
+      screen.getAllByText(formatCairoDateDisplay('2026-01-01T00:00:00.000Z', 'en')).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(formatCairoTimeDisplay('2026-01-01T00:00:00.000Z', 'en')).length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText('2026-01-01T00:00:00.000Z')).not.toBeInTheDocument();
     expect(screen.getByTestId('package-progress-pkg-1')).toBeInTheDocument();
     expect(listExportJobs).toHaveBeenCalledWith();
   });
@@ -180,6 +190,40 @@ describe('exports page', () => {
             'PURCHASE_RETURN',
             'OTHER_RECEIVED',
           ],
+        },
+      });
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 1000));
+    });
+  });
+
+  it('sends VALID server-side when Valid ETA invoices is selected', async () => {
+    (getExportJob as jest.Mock).mockResolvedValue(job({ status: 'READY' }));
+    renderPage();
+    await screen.findByText(en.exports.noJobs);
+    expect(screen.getByRole('radio', { name: en.exports.statusScopeAll })).toBeChecked();
+    fireEvent.click(screen.getByRole('radio', { name: en.exports.statusScopeValid }));
+    fireEvent.click(screen.getByRole('button', { name: en.exports.createLocal }));
+    await waitFor(() => {
+      expect(createLocalExport).toHaveBeenCalledWith({
+        formats: ['CSV', 'JSON'],
+        locale: 'en',
+        filters: {
+          from: undefined,
+          to: undefined,
+          documentTypes: [
+            'INVOICE',
+            'CREDIT_NOTE',
+            'DEBIT_NOTE',
+            'EXPORT_INVOICE',
+            'EXPORT_CREDIT_NOTE',
+            'EXPORT_DEBIT_NOTE',
+            'PURCHASE_INVOICE',
+            'PURCHASE_RETURN',
+            'OTHER_RECEIVED',
+          ],
+          statuses: ['VALID'],
         },
       });
     });

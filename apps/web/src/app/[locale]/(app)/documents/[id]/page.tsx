@@ -3,7 +3,7 @@
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { LocalPdfPreviewModal } from '@/components/local-pdf-preview-modal';
 import { CustomerPicker } from '@/components/customers/customer-picker';
 import {
@@ -32,7 +32,7 @@ import {
   refreshDocumentStatus,
   triggerBrowserDownload,
 } from '@/lib/api/submissions';
-import { canCreateReturnCreditNote, canEditDocument, canPrepareDocumentForSubmit } from '@/lib/document-actions';
+import { canCreateReturnCreditNote, canEditDocument, canPrepareDocumentForSubmit, invoiceKindForNote, mapCreditNoteReferenceItems } from '@/lib/document-actions';
 import { resolveDocumentStatus } from '@/lib/document-status-display';
 import { listSigningJobs } from '@/lib/api/signing';
 import {
@@ -71,6 +71,8 @@ import {
   sortEtaCodeEntries,
   subtypesForTaxType,
   taxesForMode,
+  formatEtaIntakeError,
+  formatEtaIntakeErrorSummary,
   type LineTaxMode,
 } from '@einvoice/eta-core';
 import { LineTaxesEditor, taxRowSummary } from './line-taxes-editor';
@@ -346,6 +348,10 @@ export default function DocumentEditorPage() {
       kind: string;
     }>
   >([]);
+  const [referenceNextCursor, setReferenceNextCursor] = useState<string | null>(
+    null,
+  );
+  const [referenceLoading, setReferenceLoading] = useState(false);
   const [referenceFormatHint, setReferenceFormatHint] = useState<string | null>(
     null,
   );
@@ -593,35 +599,69 @@ export default function DocumentEditorPage() {
     };
   }, [isNew, branchId, kind, internalIdManual]);
 
-  // Reference picker candidates (issued originals) for credit/debit notes.
+  // Reference picker: server-side VALID invoice search (not a 100-row snapshot).
   useEffect(() => {
-    const isNote = kind.includes('CREDIT') || kind.includes('DEBIT');
-    if (!isNote) return;
-    listDocuments({ limit: 100, sortBy: 'issueDateTime', sortDir: 'desc' })
-      .then((res) => {
-        const items = (res.items ?? [])
-          .filter((d) => {
-            const status = String(d.status ?? '');
-            const uuid = String(d.etaUuid ?? '');
-            const k = String(d.kind ?? '');
-            return (
-              uuid &&
-              (status === 'VALID' || status === 'SUBMITTED' || status === 'SIGNED') &&
-              (k.includes('INVOICE') || k.includes('CREDIT') || k.includes('DEBIT'))
-            );
-          })
-          .map((d) => ({
-            id: String(d.id),
-            internalId: String(d.internalId ?? ''),
-            etaUuid: String(d.etaUuid ?? ''),
-            issueDateTime: String(d.issueDateTime ?? ''),
-            totalAmount: String(d.totalAmount ?? ''),
-            kind: String(d.kind ?? ''),
-          }));
-        setReferenceCandidates(items);
+    const invoiceKind = invoiceKindForNote(kind);
+    if (!invoiceKind) {
+      setReferenceCandidates([]);
+      setReferenceNextCursor(null);
+      return;
+    }
+    let cancelled = false;
+    const handle = window.setTimeout(() => {
+      setReferenceLoading(true);
+      listDocuments({
+        status: 'VALID',
+        kind: invoiceKind,
+        q: referencePickerQuery.trim() || undefined,
+        limit: 50,
+        sortBy: 'issueDateTime',
+        sortDir: 'desc',
       })
-      .catch(() => setReferenceCandidates([]));
-  }, [kind]);
+        .then((res) => {
+          if (cancelled) return;
+          setReferenceCandidates(mapCreditNoteReferenceItems(res.items ?? []));
+          setReferenceNextCursor(res.nextCursor ?? null);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setReferenceCandidates([]);
+          setReferenceNextCursor(null);
+        })
+        .finally(() => {
+          if (!cancelled) setReferenceLoading(false);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [kind, referencePickerQuery]);
+
+  const loadMoreReferenceCandidates = useCallback(() => {
+    const invoiceKind = invoiceKindForNote(kind);
+    if (!invoiceKind || !referenceNextCursor || referenceLoading) return;
+    setReferenceLoading(true);
+    listDocuments({
+      status: 'VALID',
+      kind: invoiceKind,
+      q: referencePickerQuery.trim() || undefined,
+      cursor: referenceNextCursor,
+      limit: 50,
+      sortBy: 'issueDateTime',
+      sortDir: 'desc',
+    })
+      .then((res) => {
+        const extra = mapCreditNoteReferenceItems(res.items ?? []);
+        setReferenceCandidates((prev) => {
+          const seen = new Set(prev.map((c) => c.etaUuid));
+          return [...prev, ...extra.filter((c) => !seen.has(c.etaUuid))];
+        });
+        setReferenceNextCursor(res.nextCursor ?? null);
+      })
+      .catch(() => undefined)
+      .finally(() => setReferenceLoading(false));
+  }, [kind, referenceNextCursor, referenceLoading, referencePickerQuery]);
 
   const selectedBranch = branches.find((b) => b.id === branchId);
   const branchAddressIncomplete = Boolean(
@@ -1302,11 +1342,21 @@ export default function DocumentEditorPage() {
                 <summary>{t('submitAttemptLog')}</summary>
                 <ul className="mt-token-xs space-y-token-xs">
                   {submitAttemptLog.map((e, i) => (
-                    <li key={`${String(e.at)}-${i}`}>
+                    <li
+                      key={`${String(e.at)}-${i}`}
+                      className="whitespace-pre-wrap break-words font-en"
+                      dir="ltr"
+                    >
                       {String(e.at)} — {String(e.outcome)}
                       {e.code ? ` [${String(e.code)}]` : ''}
                       {e.retryAfterSeconds ? ` retryAfter=${String(e.retryAfterSeconds)}s` : ''}
-                      {e.message ? `: ${String(e.message).slice(0, 120)}` : ''}
+                      {e.message
+                        ? `\n${formatEtaIntakeError(e.message)}`
+                        : ''}
+                      {e.rawBody &&
+                      String(e.rawBody) !== String(e.message)
+                        ? `\n${formatEtaIntakeError(e.rawBody)}`
+                        : ''}
                     </li>
                   ))}
                 </ul>
@@ -1697,17 +1747,7 @@ export default function DocumentEditorPage() {
               />
             </label>
             <div className="max-h-40 overflow-auto rounded border border-border">
-              {referenceCandidates
-                .filter((c) => {
-                  const q = referencePickerQuery.trim().toLowerCase();
-                  if (!q) return true;
-                  return (
-                    c.internalId.toLowerCase().includes(q) ||
-                    c.etaUuid.toLowerCase().includes(q)
-                  );
-                })
-                .slice(0, 30)
-                .map((c) => (
+              {referenceCandidates.map((c) => (
                   <button
                     key={c.id}
                     type="button"
@@ -1735,7 +1775,21 @@ export default function DocumentEditorPage() {
                     </span>
                   </button>
                 ))}
-              {referenceCandidates.length === 0 ? (
+              {referenceLoading ? (
+                <p className="px-token-sm py-token-xs text-token-xs text-foreground/60">
+                  {t('loading')}
+                </p>
+              ) : null}
+              {referenceNextCursor && !referenceLoading ? (
+                <button
+                  type="button"
+                  className="block w-full px-token-sm py-token-xs text-start text-token-xs text-brand"
+                  onClick={() => loadMoreReferenceCandidates()}
+                >
+                  {t('loadMore')}
+                </button>
+              ) : null}
+              {!referenceLoading && referenceCandidates.length === 0 ? (
                 <p className="px-token-sm py-token-xs text-token-xs text-foreground/60">
                   {t('referencesNoneLocal')}
                 </p>
@@ -2480,17 +2534,12 @@ export default function DocumentEditorPage() {
                         if (res.lastErrorMessage) {
                           setNeedsAttention(true);
                           setNeedsAttentionReason(res.lastErrorMessage);
-                          setError(res.lastErrorMessage);
+                          setError(formatEtaIntakeErrorSummary(res.lastErrorMessage));
                         } else if (first?.intakeError) {
                           setNeedsAttention(true);
-                          const msg =
-                            typeof first.intakeError === 'object' &&
-                            first.intakeError &&
-                            'message' in first.intakeError
-                              ? String((first.intakeError as { message: unknown }).message)
-                              : JSON.stringify(first.intakeError);
+                          const msg = formatEtaIntakeError(first.intakeError);
                           setNeedsAttentionReason(msg);
-                          setError(msg);
+                          setError(formatEtaIntakeErrorSummary(first.intakeError));
                         } else {
                           setNeedsAttention(false);
                           setNeedsAttentionReason(null);

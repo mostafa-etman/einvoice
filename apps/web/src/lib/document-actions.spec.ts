@@ -2,6 +2,8 @@ import {
   canCreateReturnCreditNote,
   canEditDocument,
   canPrepareDocumentForSubmit,
+  invoiceKindForNote,
+  mapCreditNoteReferenceItems,
 } from './document-actions';
 
 describe('canPrepareDocumentForSubmit', () => {
@@ -71,5 +73,65 @@ describe('canCreateReturnCreditNote', () => {
       false,
     );
     expect(canCreateReturnCreditNote('INVOICE', 'VALID', null)).toBe(false);
+  });
+});
+
+describe('invoiceKindForNote', () => {
+  it('maps credit and debit notes onto the matching sales invoice kind', () => {
+    expect(invoiceKindForNote('CREDIT_NOTE')).toBe('INVOICE');
+    expect(invoiceKindForNote('DEBIT_NOTE')).toBe('INVOICE');
+    expect(invoiceKindForNote('EXPORT_CREDIT_NOTE')).toBe('EXPORT_INVOICE');
+    expect(invoiceKindForNote('EXPORT_DEBIT_NOTE')).toBe('EXPORT_INVOICE');
+  });
+
+  it('rejects kinds that are not notes', () => {
+    expect(invoiceKindForNote('INVOICE')).toBeNull();
+    expect(invoiceKindForNote('PURCHASE_INVOICE')).toBeNull();
+  });
+});
+
+describe('mapCreditNoteReferenceItems', () => {
+  it('keeps VALID invoices with an ETA UUID and drops everything else', () => {
+    const mapped = mapCreditNoteReferenceItems([
+      {
+        id: '1',
+        kind: 'INVOICE',
+        status: 'VALID',
+        etaUuid: 'uuid-old',
+        internalId: 'INV-1',
+        issueDateTime: '2026-01-01T00:00:00.000Z',
+        totalAmount: '10',
+      },
+      {
+        id: '2',
+        kind: 'INVOICE',
+        status: 'INVALID',
+        etaUuid: 'uuid-bad',
+        internalId: 'INV-2',
+      },
+      {
+        id: '3',
+        kind: 'CREDIT_NOTE',
+        status: 'VALID',
+        etaUuid: 'uuid-cn',
+        internalId: 'CN-1',
+      },
+      {
+        id: '4',
+        kind: 'INVOICE',
+        status: 'VALID',
+        etaUuid: null,
+        internalId: 'INV-4',
+      },
+      {
+        id: '5',
+        kind: 'INVOICE',
+        status: 'DRAFT',
+        etaStatus: 'Valid',
+        etaUuid: 'uuid-synced',
+        internalId: 'INV-5',
+      },
+    ]);
+    expect(mapped.map((c) => c.etaUuid)).toEqual(['uuid-old', 'uuid-synced']);
   });
 });

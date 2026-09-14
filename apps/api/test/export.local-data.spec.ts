@@ -355,4 +355,71 @@ describe('Local export sales/purchases data', () => {
     expect(pdfText(file.buffer)).toContain('No documents in this period');
     expect(pdfText(file.buffer)).not.toContain(SALE_ID);
   });
+
+  it('Valid ETA filter includes VALID invoices and excludes INVALID and Cancelled', async () => {
+    if (!dbAvailable) return;
+    const tenantPrisma = app.get(TenantPrismaService);
+    const issuedAt = new Date('2026-08-05T10:00:00.000+02:00');
+    await tenantPrisma.withTenant(ctx.tenantId, async (tx) => {
+      await tx.document.create({
+        data: {
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          kind: 'INVOICE',
+          status: 'INVALID',
+          currencyCode: 'EGP',
+          issueDateTime: issuedAt,
+          internalId: 'INVALID-FIX-1',
+          version: 1,
+          etaDocumentType: 'i',
+          etaDocumentTypeVersion: '1.0',
+          typeVersionFetchedAt: new Date(),
+          issuerSnapshotJson: { type: 'B', id: '123' },
+          etaPayloadJson: { dummy: true },
+          totalAmount: '10.00',
+          netAmount: '10.00',
+        },
+      });
+      await tx.document.create({
+        data: {
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          kind: 'INVOICE',
+          status: 'CANCELLED',
+          currencyCode: 'EGP',
+          issueDateTime: issuedAt,
+          internalId: 'CANCELLED-FIX-1',
+          version: 1,
+          etaDocumentType: 'i',
+          etaDocumentTypeVersion: '1.0',
+          typeVersionFetchedAt: new Date(),
+          issuerSnapshotJson: { type: 'B', id: '123' },
+          etaPayloadJson: { dummy: true },
+          totalAmount: '10.00',
+          netAmount: '10.00',
+        },
+      });
+    });
+    const job = await exportsService.createLocalExport({
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      formats: ['CSV', 'PDF'],
+      filters: {
+        documentTypes: [...ISSUED_DOCUMENT_TYPES, ...RECEIVED_DOCUMENT_TYPES],
+        statuses: ['VALID'],
+      },
+    });
+    await exportsService.processLocalExport(ctx.tenantId, job.id);
+    const csv = await exportsService.download(ctx.tenantId, job.id, 'csv');
+    const pdf = await exportsService.download(ctx.tenantId, job.id, 'pdf');
+    const csvTextValue = csv.buffer.toString('utf8');
+    const pdfTextValue = pdf.buffer.toString('latin1');
+    expect(csvTextValue).toContain(SALE_ID);
+    expect(csvTextValue).toContain(PURCHASE_ID);
+    expect(csvTextValue).not.toContain('INVALID-FIX-1');
+    expect(csvTextValue).not.toContain('CANCELLED-FIX-1');
+    expect(pdfTextValue).toContain(SALE_ID);
+    expect(pdfTextValue).not.toContain('INVALID-FIX-1');
+    expect(pdfTextValue).not.toContain('CANCELLED-FIX-1');
+  });
 });

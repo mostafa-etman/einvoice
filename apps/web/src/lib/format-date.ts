@@ -38,6 +38,37 @@ export function formatDateTimeDisplay(
   }).format(date);
 }
 
+/** DISPLAY ONLY. Calendar date in Africa/Cairo, separate from time. */
+export function formatCairoDateDisplay(
+  value: Date | string | number | null | undefined,
+  locale: string,
+): string {
+  const date = toDate(value);
+  if (!date) return '—';
+  return new Intl.DateTimeFormat(displayLocale(locale), {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'Africa/Cairo',
+  }).format(date);
+}
+
+/** DISPLAY ONLY. Clock time in Africa/Cairo (24h). */
+export function formatCairoTimeDisplay(
+  value: Date | string | number | null | undefined,
+  locale: string,
+): string {
+  const date = toDate(value);
+  if (!date) return '—';
+  return new Intl.DateTimeFormat(displayLocale(locale), {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    timeZone: 'Africa/Cairo',
+  }).format(date);
+}
+
 /**
  * Latin digits, ISO calendar date (`YYYY-MM-DD`).
  * Use for values a user may paste into ETA portals or signed payloads.

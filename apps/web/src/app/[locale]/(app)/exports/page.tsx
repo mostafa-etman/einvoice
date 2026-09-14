@@ -25,6 +25,7 @@ import { useMutationToast } from '@/components/ui/use-mutation-toast';
 import { KIND_FILTERS as SALES_DOCUMENT_TYPES } from '../documents/_components/document-list-utils';
 import { KIND_FILTERS as PURCHASE_DOCUMENT_TYPES } from '../purchases/_components/purchase-list-utils';
 import { cairoExportRangeIso } from './export-date-range';
+import { formatCairoDateDisplay, formatCairoTimeDisplay } from '@/lib/format-date';
 
 type DocumentTypeScope = 'all' | 'sales' | 'purchases';
 
@@ -60,6 +61,7 @@ export default function ExportsPage() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [documentType, setDocumentType] = useState<DocumentTypeScope>('all');
+  const [statusScope, setStatusScope] = useState<'all' | 'valid'>('all');
   const [pdfMode, setPdfMode] = useState<'single' | 'zip'>('single');
 
   const reload = useCallback(() => {
@@ -106,6 +108,7 @@ export default function ExportsPage() {
           from: from ? cairoExportRangeIso(from, false) : undefined,
           to: to ? cairoExportRangeIso(to, true) : undefined,
           documentTypes: documentTypesForScope(documentType),
+          ...(statusScope === 'valid' ? { statuses: ['VALID'] } : {}),
         },
       });
       const finished = await pollUntilReady(job.id);
@@ -187,6 +190,20 @@ export default function ExportsPage() {
       cell: (j) => (
         <span className="font-en" dir="ltr">
           {j.kind}
+        </span>
+      ),
+    },
+    {
+      id: 'exportDate',
+      header: t('exportDate'),
+      cell: (j) => formatCairoDateDisplay(j.createdAt, locale),
+    },
+    {
+      id: 'exportTime',
+      header: t('exportTime'),
+      cell: (j) => (
+        <span className="font-en" dir="ltr">
+          {formatCairoTimeDisplay(j.createdAt, locale)}
         </span>
       ),
     },
@@ -327,6 +344,28 @@ export default function ExportsPage() {
                   value={value}
                   checked={documentType === value}
                   onChange={() => setDocumentType(value)}
+                  label={label}
+                />
+              ))}
+            </div>
+          </fieldset>
+          <fieldset className="m-0 mt-token-md border-0 p-0">
+            <legend className="mb-token-sm text-token-sm font-medium text-foreground">
+              {t('statusScope')}
+            </legend>
+            <div className="flex flex-wrap gap-token-md">
+              {(
+                [
+                  ['all', t('statusScopeAll')],
+                  ['valid', t('statusScopeValid')],
+                ] as const
+              ).map(([value, label]) => (
+                <Radio
+                  key={value}
+                  name="export-status-scope"
+                  value={value}
+                  checked={statusScope === value}
+                  onChange={() => setStatusScope(value)}
                   label={label}
                 />
               ))}

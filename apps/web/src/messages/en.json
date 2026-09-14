@@ -1002,7 +1002,12 @@
     "colRecordId": "Record ID",
     "pdfMode": "PDF",
     "pdfModeSingle": "One PDF containing all invoices",
-    "pdfModeZip": "ZIP — one PDF per invoice"
+    "pdfModeZip": "ZIP — one PDF per invoice",
+    "exportDate": "Export date",
+    "exportTime": "Export time",
+    "statusScope": "Invoices to export",
+    "statusScopeAll": "All statuses",
+    "statusScopeValid": "Valid ETA invoices"
   },
   "devices": {
     "title": "Signing devices",
