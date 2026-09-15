@@ -290,6 +290,17 @@ describe('platform admin page', () => {
     expect(screen.queryByRole('tab', { name: /^users$/i })).not.toBeInTheDocument();
   });
 
+  it('shows labeled branch and device quotas on the plans tab', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('tab', { name: en.admin.tabPlans }));
+    expect(await screen.findByLabelText(en.admin.branchQuota)).toBeInTheDocument();
+    expect(screen.getByLabelText(en.admin.deviceQuota)).toBeInTheDocument();
+    expect(await screen.findByText('BASIC')).toBeInTheDocument();
+    const plansPanel = screen.getByRole('tabpanel');
+    expect(plansPanel).toHaveTextContent(/1\s+branches/);
+    expect(plansPanel).toHaveTextContent(/1\s+devices/);
+  });
+
   it('keeps Arabic chrome RTL while tenant ids stay LTR', async () => {
     renderPage('ar');
     expect(await screen.findByRole('heading', { level: 1, name: ar.admin.title })).toBeInTheDocument();

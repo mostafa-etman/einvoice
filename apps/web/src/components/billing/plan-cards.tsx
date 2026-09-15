@@ -7,6 +7,21 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/cn';
 
+function formatPlanLimit(value: number, unlimited: string): string {
+  if (value < 0) return unlimited;
+  return formatQuantityDisplay(value);
+}
+
+function PlanLimitValue({ value, unlimited }: { value: number; unlimited: string }) {
+  const formatted = formatPlanLimit(value, unlimited);
+  if (value < 0) return <span>{formatted}</span>;
+  return (
+    <span className="font-en tabular-nums" dir="ltr">
+      {formatted}
+    </span>
+  );
+}
+
 function formatEgp(value: number, locale: string): string {
   const formatted = new Intl.NumberFormat(locale === 'ar' ? 'ar-EG' : 'en-EG', {
     maximumFractionDigits: 0,
@@ -72,6 +87,22 @@ export function PlanCards({
               <li>{t('cardPoints', { points: formatQuantityDisplay(plan.includedPoints) })}</li>
               <li>{t('cardUsers', { count: plan.maxUsers })}</li>
               <li>{t('cardCompanies', { count: plan.maxCompanies })}</li>
+              <li>
+                {t.rich('cardBranches', {
+                  count: formatPlanLimit(plan.branchQuota, t('unlimited')),
+                  num: () => (
+                    <PlanLimitValue value={plan.branchQuota} unlimited={t('unlimited')} />
+                  ),
+                })}
+              </li>
+              <li>
+                {t.rich('cardDevices', {
+                  count: formatPlanLimit(plan.deviceQuota, t('unlimited')),
+                  num: () => (
+                    <PlanLimitValue value={plan.deviceQuota} unlimited={t('unlimited')} />
+                  ),
+                })}
+              </li>
               <li>{t('cardCapacity', { count: formatQuantityDisplay(plan.docCapacity) })}</li>
             </ul>
             <div className="mt-token-md">

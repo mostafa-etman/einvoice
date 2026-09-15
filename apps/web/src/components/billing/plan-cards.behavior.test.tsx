@@ -47,6 +47,12 @@ describe('PlanCards', () => {
     expect(screen.getByText(/12,000 EGP/)).toHaveAttribute('dir', 'ltr');
     fireEvent.click(screen.getByRole('button', { name: en.billing.choosePlan }));
     expect(onChoose).toHaveBeenCalledWith(starter);
+    const branchCount = screen.getByText('2');
+    expect(branchCount).toHaveAttribute('dir', 'ltr');
+    expect(branchCount.closest('li')).toHaveTextContent('Branches: 2');
+    const deviceCount = screen.getByText('1');
+    expect(deviceCount).toHaveAttribute('dir', 'ltr');
+    expect(deviceCount.closest('li')).toHaveTextContent('Devices: 1');
   });
 
   it('does not force Arabic quota copy into LTR', () => {
@@ -54,5 +60,23 @@ describe('PlanCards', () => {
     expect(screen.getByRole('heading', { name: 'ستارتر' })).toBeInTheDocument();
     const users = screen.getByText(ar.billing.cardUsers.replace('{count}', '3'));
     expect(users).not.toHaveAttribute('dir', 'ltr');
+    expect(screen.getByText('2').closest('li')).toHaveTextContent('عدد الفروع: 2');
+    expect(screen.getByText('1').closest('li')).toHaveTextContent('عدد الأجهزة: 1');
+    expect(screen.getByText('2')).toHaveAttribute('dir', 'ltr');
+  });
+
+  it('shows Unlimited when a quota is negative', () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={en}>
+        <PlanCards
+          plans={[{ ...starter, branchQuota: -1, deviceQuota: 0 }]}
+          onChoose={jest.fn()}
+        />
+      </NextIntlClientProvider>,
+    );
+    expect(screen.getByText(en.billing.unlimited).closest('li')).toHaveTextContent(
+      'Branches: Unlimited',
+    );
+    expect(screen.getByText('0').closest('li')).toHaveTextContent('Devices: 0');
   });
 });

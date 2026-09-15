@@ -20,6 +20,8 @@ describe('platform admin page smoke', () => {
     expect(ar.admin.extraBranches).toContain('فروع');
     expect(en.admin.branchQuota).toContain('branch');
     expect(ar.admin.deviceQuota).toContain('أجهزة');
+    expect(en.admin.branches).toBe('branches');
+    expect(ar.admin.devices).toContain('أجهزة');
     expect(en.admin.isActive).toBeTruthy();
     expect(en.admin.hideFromCustomers).toBeTruthy();
     expect(en.admin.tabTrials).toBeTruthy();

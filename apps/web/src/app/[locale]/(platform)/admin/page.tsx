@@ -424,7 +424,22 @@ export default function PlatformAdminPage() {
                               <span className="font-en tabular-nums" dir="ltr">
                                 {p.discountedPriceEgp}/{p.officialPriceEgp} EGP
                               </span>{' '}
-                              · {p.maxUsers}u / {p.maxCompanies}c · {p.branchQuota}b / {p.deviceQuota}d ·{' '}
+                              <span className="font-en tabular-nums" dir="ltr">
+                                {p.maxUsers}
+                              </span>{' '}
+                              {t('maxUsers')} ·{' '}
+                              <span className="font-en tabular-nums" dir="ltr">
+                                {p.maxCompanies}
+                              </span>{' '}
+                              {t('maxCompanies')} ·{' '}
+                              <span className="font-en tabular-nums" dir="ltr">
+                                {p.branchQuota}
+                              </span>{' '}
+                              {t('branches')} ·{' '}
+                              <span className="font-en tabular-nums" dir="ltr">
+                                {p.deviceQuota}
+                              </span>{' '}
+                              {t('devices')} ·{' '}
                               {p.isActive ? t('planActive') : t('planInactive')}
                             </p>
                           </div>

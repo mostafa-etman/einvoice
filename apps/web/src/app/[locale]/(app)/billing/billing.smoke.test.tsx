@@ -30,6 +30,10 @@ describe('billing page smoke', () => {
     expect(ar.billing.sendBlockedMessage).toContain('واتساب');
     expect(en.billing.promoNote).toContain('{invoicePromo}');
     expect(ar.billing.cardPoints).toBeTruthy();
+    expect(en.billing.cardBranches).toContain('Branches');
+    expect(ar.billing.cardBranches).toContain('الفروع');
+    expect(en.billing.cardDevices).toContain('Devices');
+    expect(ar.billing.cardDevices).toContain('الأجهزة');
     expect(en.admin.tabAddons).toBeTruthy();
     expect(ar.admin.trialDays).toBeTruthy();
     expect(en.common.copy).toBeTruthy();
