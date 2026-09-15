@@ -6,6 +6,7 @@ import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { QuotaExceededError, QuotaExceededHttpException, type QuotaResource } from './quota-errors';
 import { cairoMonthBounds, cairoMonthDateStrings, CAIRO_TZ } from './quota-period';
 import { TenantAccessService } from './tenant-access.guard';
+import { requireTenantAccount } from './account-scope';
 
 export type Entitlements = {
   planCode: string;
@@ -55,9 +56,10 @@ export class QuotaService {
 
   /** Effective entitlements = Plan (+ latest non-expired QuotaOverride). Falls back to Free plan quotas pre-subscription. */
   async getEffectiveEntitlements(tenantId: string): Promise<Entitlements> {
+    const { accountId } = await requireTenantAccount(this.prisma, tenantId);
     return this.tenantPrisma.withTenant(tenantId, async (tx) => {
       const subscription = await tx.subscription.findUnique({
-        where: { tenantId },
+        where: { accountId },
         include: { plan: true },
       });
 

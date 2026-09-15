@@ -21,6 +21,8 @@ describe('billing page smoke', () => {
     expect(en.billing.subscribeWhatsApp).toContain('WhatsApp');
     expect(ar.auth.planBranchHint).toContain('واتساب');
     expect(en.billing.sendBlockedMessage).toContain('00201000864620');
+    expect(en.billing.sharedPointsHint.toLowerCase()).toContain('shared');
+    expect(ar.billing.sharedPointsHint).toContain('شرك');
     expect(ar.billing.sendBlockedMessage).toContain('واتساب');
     expect(en.billing.promoNote).toContain('{invoicePromo}');
     expect(ar.billing.cardPoints).toBeTruthy();

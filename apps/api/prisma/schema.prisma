@@ -247,12 +247,36 @@ model User {
   auditLogs       AuditLog[]       @relation("AuditActor")
   impersonationsAsOperator ImpersonationSession[] @relation("ImpersonationOperator")
   impersonationsAsTarget   ImpersonationSession[] @relation("ImpersonationTarget")
+  ownedAccounts   Account[]
 
   @@map("users")
 }
 
+/// Billing parent: one plan + one points pool shared by every company the owner creates.
+model Account {
+  id               String    @id @default(uuid()) @db.Uuid
+  ownerUserId      String?   @map("owner_user_id") @db.Uuid
+  pointsBalance    Int       @default(0) @map("points_balance")
+  /// Self-serve trial end. Null for paid / mapped legacy accounts (never trial).
+  trialEndsAt      DateTime? @map("trial_ends_at")
+  extraUsers       Int       @default(0) @map("extra_users")
+  extraCompanies   Int       @default(0) @map("extra_companies")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  owner          User?           @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
+  tenants        Tenant[]
+  subscription   Subscription?
+  pointsLedger   PointsLedger[]
+
+  @@index([ownerUserId])
+  @@map("accounts")
+}
+
 model Tenant {
   id        String   @id @default(uuid()) @db.Uuid
+  /// Billing parent that owns plan, points, trial, and user/company limits.
+  accountId String   @map("account_id") @db.Uuid
   name      String
   /// Taxpayer legal / registered company name used as ETA issuer.name.
   /// Distinct from `name` (workspace label) and from branch.name (e.g. "Main").
@@ -316,14 +340,9 @@ model Tenant {
   approvedByUserId     String?   @map("approved_by_user_id") @db.Uuid
   rejectedAt           DateTime? @map("rejected_at")
   rejectedReason       String?   @map("rejected_reason")
-  pointsBalance        Int       @default(0) @map("points_balance")
-  /// Self-serve trial end. Null for paid / mapped legacy tenants (never trial).
-  trialEndsAt          DateTime? @map("trial_ends_at")
-  extraUsers           Int       @default(0) @map("extra_users")
-  extraCompanies       Int       @default(0) @map("extra_companies")
   /// When set, login no longer redirects to ETA credentials for this tenant.
   etaSetupPromptDismissedAt DateTime? @map("eta_setup_prompt_dismissed_at")
-  subscription         Subscription?
+  account              Account   @relation(fields: [accountId], references: [id], onDelete: Restrict)
   quotaOverrides       QuotaOverride[]
   paymentCustomers     PaymentCustomer[]
   invoiceRefs          InvoiceRef[]
@@ -337,6 +356,7 @@ model Tenant {
   tenantDocumentPointCosts TenantDocumentPointCost[]
   trialUsedTaxRegistrations TrialUsedTaxRegistration[]
 
+  @@index([accountId])
   @@map("tenants")
 }
 
@@ -1626,7 +1646,7 @@ model Plan {
   documentQuota   Int      @map("document_quota")
   branchQuota     Int      @map("branch_quota")
   deviceQuota     Int      @map("device_quota")
-  /// Points credited once when a tenant is first assigned this paid plan.
+  /// Points credited once when an account is first assigned this paid plan.
   includedPoints  Int      @default(0) @map("included_points")
   officialPriceEgp    Int      @default(0) @map("official_price_egp")
   discountedPriceEgp  Int      @default(0) @map("discounted_price_egp")
@@ -1731,7 +1751,9 @@ model TenantDocumentPointCost {
 
 model PointsLedger {
   id            String             @id @default(uuid()) @db.Uuid
-  tenantId      String             @map("tenant_id") @db.Uuid
+  accountId     String             @map("account_id") @db.Uuid
+  /// Sending company for DOCUMENT_SEND. Null for account-level grants/adjustments.
+  tenantId      String?            @map("tenant_id") @db.Uuid
   delta         Int
   balanceAfter  Int                @map("balance_after")
   reason        PointsLedgerReason
@@ -1742,15 +1764,17 @@ model PointsLedger {
   note          String?
   createdAt     DateTime           @default(now()) @map("created_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  tenant  Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@index([accountId, createdAt])
   @@index([tenantId, createdAt])
   @@map("points_ledger")
 }
 
 model Subscription {
   id                      String             @id @default(uuid()) @db.Uuid
-  tenantId                String             @unique @map("tenant_id") @db.Uuid
+  accountId               String             @unique @map("account_id") @db.Uuid
   planId                  String             @map("plan_id") @db.Uuid
   status                  SubscriptionStatus @default(ACTIVE)
   graceEndsAt             DateTime?          @map("grace_ends_at")
@@ -1762,8 +1786,8 @@ model Subscription {
   createdAt               DateTime           @default(now()) @map("created_at")
   updatedAt               DateTime           @updatedAt @map("updated_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  plan   Plan   @relation(fields: [planId], references: [id])
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  plan    Plan    @relation(fields: [planId], references: [id])
 
   @@index([status, graceEndsAt])
   @@map("subscriptions")

@@ -12,6 +12,11 @@ describe('platform admin page smoke', () => {
     expect(en.common.tenantId).toBeTruthy();
     expect(ar.common.tenantId).toContain('مستأجر');
     expect(en.admin.adjustPoints).toBeTruthy();
+    expect(en.admin.accountCompanies).toBeTruthy();
+    expect(en.admin.sharedPoints).toBeTruthy();
+    expect(ar.admin.accountCompanies).toBeTruthy();
+    expect(en.billing.sharedPointsHint).toBeTruthy();
+    expect(ar.billing.sharedPointsHint).toBeTruthy();
     expect(en.admin.isActive).toBeTruthy();
     expect(en.admin.hideFromCustomers).toBeTruthy();
     expect(en.admin.tabTrials).toBeTruthy();

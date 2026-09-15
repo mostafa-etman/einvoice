@@ -39,15 +39,21 @@ export class BillingPastDueProcessor extends WorkerHost {
    */
   async sweep(now: Date = new Date()): Promise<{ movedTenantIds: string[] }> {
     const tenants = await this.prisma.tenant.findMany({
-      select: { id: true },
+      select: { id: true, accountId: true },
       take: 5000,
     });
 
     const movedTenantIds: string[] = [];
-    for (const { id: tenantId } of tenants) {
+    const seenAccounts = new Set<string>();
+    for (const { id: tenantId, accountId } of tenants) {
+      if (seenAccounts.has(accountId)) continue;
+      seenAccounts.add(accountId);
       try {
         const subscription = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-          tx.subscription.findUnique({ where: { tenantId }, select: { status: true, graceEndsAt: true } }),
+          tx.subscription.findUnique({
+            where: { accountId },
+            select: { status: true, graceEndsAt: true },
+          }),
         );
         if (subscription?.status !== 'PAST_DUE' || !subscription.graceEndsAt || subscription.graceEndsAt >= now) {
           continue;
@@ -55,7 +61,7 @@ export class BillingPastDueProcessor extends WorkerHost {
 
         await this.tenantPrisma.withTenant(tenantId, (tx) =>
           tx.subscription.updateMany({
-            where: { tenantId, status: 'PAST_DUE', graceEndsAt: { lt: now } },
+            where: { accountId, status: 'PAST_DUE', graceEndsAt: { lt: now } },
             data: { status: 'READ_ONLY' },
           }),
         );

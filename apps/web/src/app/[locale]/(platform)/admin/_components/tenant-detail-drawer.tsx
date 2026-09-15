@@ -157,6 +157,12 @@ export function TenantDetailDrawer({
                 </dd>
               </div>
               <div>
+                <dt className="text-foreground-muted">{t('account')}</dt>
+                <dd className="m-0 font-en font-medium" dir="ltr">
+                  {detail.accountId ?? '—'}
+                </dd>
+              </div>
+              <div>
                 <dt className="text-foreground-muted">{t('colPlan')}</dt>
                 <dd className="m-0 font-en font-medium" dir="ltr">
                   {detail.planCode ?? '—'}
@@ -175,7 +181,7 @@ export function TenantDetailDrawer({
                 </dd>
               </div>
               <div>
-                <dt className="text-foreground-muted">{t('points')}</dt>
+                <dt className="text-foreground-muted">{t('sharedPoints')}</dt>
                 <dd className="m-0 font-en font-medium tabular-nums" dir="ltr">
                   {detail.pointsBalance}
                 </dd>
@@ -199,6 +205,24 @@ export function TenantDetailDrawer({
                 </dd>
               </div>
             </dl>
+            <p className="m-0 text-token-sm text-foreground-muted">{t('planAppliesToAccount')}</p>
+            {detail.companies && detail.companies.length > 0 ? (
+              <div>
+                <h3 className="m-0 text-token-sm font-medium text-foreground-muted">
+                  {t('accountCompanies')}
+                </h3>
+                <ul className="m-0 list-none p-0 text-token-sm">
+                  {detail.companies.map((company) => (
+                    <li key={company.id} className="flex items-center justify-between gap-token-sm py-token-xs">
+                      <span className="font-medium">{company.name}</span>
+                      <span className="font-en text-foreground-muted" dir="ltr">
+                        {company.lifecycleStatus}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             <p className="m-0 text-token-sm">
               <span className="font-en tabular-nums" dir="ltr">
                 {detail.entitlements.documentQuota}
@@ -253,6 +277,23 @@ export function TenantDetailDrawer({
                     </>
                   ) : null}
                 </p>
+                {usage.accountUsage ? (
+                  <p className="m-0 text-token-sm text-foreground-muted">
+                    {t('accountUsage')}:{' '}
+                    <span className="font-en tabular-nums" dir="ltr">
+                      {usage.accountUsage.documents}
+                    </span>{' '}
+                    {t('docs')} ·{' '}
+                    <span className="font-en tabular-nums" dir="ltr">
+                      {usage.accountUsage.branches}
+                    </span>{' '}
+                    {t('branches')} ·{' '}
+                    <span className="font-en tabular-nums" dir="ltr">
+                      {usage.accountUsage.devices}
+                    </span>{' '}
+                    {t('devices')}
+                  </p>
+                ) : null}
               </div>
             ) : null}
             <div className="flex flex-wrap items-center gap-token-sm">

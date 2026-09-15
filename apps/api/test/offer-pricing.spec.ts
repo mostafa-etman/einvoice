@@ -88,8 +88,12 @@ describe('Official offer pricing', () => {
     expect(created.body.activationStatus).toBe('ACTIVE');
     expect(created.body.trialEndsAt).toBeTruthy();
     const prisma = app.get(PrismaService);
-    const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: created.body.id } });
-    expect(tenant.pointsBalance).toBeGreaterThan(0);
+    const tenant = await prisma.tenant.findUniqueOrThrow({
+      where: { id: created.body.id },
+      select: { accountId: true },
+    });
+    const account = await prisma.account.findUniqueOrThrow({ where: { id: tenant.accountId } });
+    expect(account.pointsBalance).toBeGreaterThan(0);
     const sub = await request(app.getHttpServer())
       .get('/billing/subscription')
       .set('Authorization', `Bearer ${user.token}`)
@@ -135,9 +139,12 @@ describe('Official offer pricing', () => {
     const prisma = app.get(PrismaService);
     const tenantPrisma = app.get(TenantPrismaService);
     const points = app.get(PointsService);
-
-    await prisma.tenant.update({
+    const row = await prisma.tenant.findUniqueOrThrow({
       where: { id: tenantId },
+      select: { accountId: true },
+    });
+    await prisma.account.update({
+      where: { id: row.accountId },
       data: { trialEndsAt: new Date(Date.now() - 60_000) },
     });
 

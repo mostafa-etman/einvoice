@@ -4,6 +4,7 @@ import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { PLATFORM_AUDIT_ACTIONS } from '../platform-admin/platform-audit';
+import { loadAccountBilling, requireTenantAccount } from './account-scope';
 import { isTrialExpired } from './points-errors';
 import { supportWhatsappUrl } from './tenant-lifecycle-status';
 import { normalizeTaxRegistration } from './tax-registration';
@@ -156,15 +157,13 @@ export class TrialTaxRegistrationService {
   }
 
   private async hasConsumedTrial(tenantId: string): Promise<boolean> {
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: tenantId },
-      select: { trialEndsAt: true },
-    });
-    if (tenant?.trialEndsAt) return true;
+    const { account } = await loadAccountBilling(this.prisma, tenantId);
+    if (account.trialEndsAt) return true;
 
+    const { accountId } = await requireTenantAccount(this.prisma, tenantId);
     const subscription = await this.tenantPrisma.withTenant(tenantId, (tx) =>
       tx.subscription.findUnique({
-        where: { tenantId },
+        where: { accountId },
         include: { plan: true },
       }),
     );
@@ -172,7 +171,7 @@ export class TrialTaxRegistrationService {
 
     const grant = await this.tenantPrisma.withTenant(tenantId, (tx) =>
       tx.pointsLedger.findFirst({
-        where: { tenantId, reason: 'TRIAL_GRANT' },
+        where: { accountId, reason: 'TRIAL_GRANT' },
         select: { id: true },
       }),
     );
@@ -180,14 +179,12 @@ export class TrialTaxRegistrationService {
   }
 
   private async isOnActiveTrial(tenantId: string): Promise<boolean> {
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: tenantId },
-      select: { trialEndsAt: true },
-    });
-    if (!tenant?.trialEndsAt || isTrialExpired(tenant.trialEndsAt)) return false;
+    const { account } = await loadAccountBilling(this.prisma, tenantId);
+    if (!account.trialEndsAt || isTrialExpired(account.trialEndsAt)) return false;
+    const { accountId } = await requireTenantAccount(this.prisma, tenantId);
     const subscription = await this.tenantPrisma.withTenant(tenantId, (tx) =>
       tx.subscription.findUnique({
-        where: { tenantId },
+        where: { accountId },
         include: { plan: true },
       }),
     );

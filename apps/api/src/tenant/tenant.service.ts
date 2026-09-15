@@ -178,10 +178,45 @@ export class TenantService implements OnModuleInit {
       await this.trialTax.assertAvailable(opts.taxRegistrationNumber);
     }
 
+    let existingAccountId: string | null = null;
+    if (!isFirst) {
+      const owned = await this.prisma.account.findFirst({
+        where: { ownerUserId: userId },
+        select: { id: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      existingAccountId = owned?.id ?? null;
+      if (!existingAccountId) {
+        const memberships = await this.tenantPrisma.withUser(userId, (tx) =>
+          tx.membership.findMany({
+            where: { userId, role: { name: 'Owner' } },
+            select: { tenantId: true },
+            orderBy: { createdAt: 'asc' },
+          }),
+        );
+        if (memberships[0]) {
+          const parent = await this.prisma.tenant.findUnique({
+            where: { id: memberships[0].tenantId },
+            select: { accountId: true },
+          });
+          existingAccountId = parent?.accountId ?? null;
+        }
+      }
+    }
+
     const result = await this.prisma.$transaction(async (tx) => {
+      const accountId =
+        existingAccountId ??
+        (
+          await tx.account.create({
+            data: { ownerUserId: userId },
+          })
+        ).id;
+
       const tenant = await tx.tenant.create({
         data: {
           name,
+          accountId,
           activationStatus,
           approvedAt: activationStatus === 'ACTIVE' ? new Date() : null,
           approvedByUserId:
@@ -242,6 +277,7 @@ export class TenantService implements OnModuleInit {
     } else {
       await this.subscriptions.ensureFreeSubscription(result.tenant.id);
       const mayAssignSelectedPaid =
+        isFirst &&
         Boolean(selectedPlan && !selectedPlan.isTrial) &&
         (autoApprove || opts.activation === 'active');
       if (mayAssignSelectedPaid && planCode && planCode !== 'FREE') {
@@ -249,16 +285,8 @@ export class TenantService implements OnModuleInit {
           actorUserId: userId,
           reason: 'signup_plan',
         });
-      } else if (!isFirst && opts.activation !== 'active') {
-        const parentPlan = await this.primaryOwnerPlanCode(userId, result.tenant.id);
-        if (parentPlan && parentPlan !== 'FREE' && parentPlan !== 'TRIAL') {
-          await this.subscriptions.assignPlan(result.tenant.id, parentPlan, {
-            actorUserId: userId,
-            reason: 'sub_company_inherit',
-          });
-        }
       }
-      if (activationStatus === 'ACTIVE' && (isFirst || opts.activation === 'active')) {
+      if (activationStatus === 'ACTIVE' && isFirst) {
         await this.points.grantPlanPointsIfNeeded(result.tenant.id, userId);
       }
     }
@@ -274,10 +302,14 @@ export class TenantService implements OnModuleInit {
         activationStatus,
         planCode: startTrial ? 'TRIAL' : (planCode ?? 'FREE'),
         trial: startTrial,
+        accountId: result.tenant.accountId,
       },
     });
 
-    return this.prisma.tenant.findUniqueOrThrow({ where: { id: result.tenant.id } });
+    return this.prisma.tenant.findUniqueOrThrow({
+      where: { id: result.tenant.id },
+      include: { account: true },
+    });
   }
 
   /**
@@ -323,27 +355,6 @@ export class TenantService implements OnModuleInit {
     return memberships.length;
   }
 
-  private async primaryOwnerPlanCode(
-    userId: string,
-    excludeTenantId: string,
-  ): Promise<string | null> {
-    const memberships = await this.tenantPrisma.withUser(userId, (tx) =>
-      tx.membership.findMany({
-        where: { userId, role: { name: 'Owner' } },
-        select: { tenantId: true },
-        orderBy: { createdAt: 'asc' },
-      }),
-    );
-    for (const m of memberships) {
-      if (m.tenantId === excludeTenantId) continue;
-      const sub = await this.tenantPrisma.withTenant(m.tenantId, (tx) =>
-        tx.subscription.findUnique({ where: { tenantId: m.tenantId }, include: { plan: true } }),
-      );
-      if (sub?.plan.code) return sub.plan.code;
-    }
-    return null;
-  }
-
   private async startSelfServeTrial(
     tenantId: string,
     userId: string,
@@ -363,8 +374,12 @@ export class TenantService implements OnModuleInit {
       reason: 'signup_trial',
       status: 'TRIAL',
     });
-    await this.prisma.tenant.update({
+    const { accountId } = await this.prisma.tenant.findUniqueOrThrow({
       where: { id: tenantId },
+      select: { accountId: true },
+    });
+    await this.prisma.account.update({
+      where: { id: accountId },
       data: { trialEndsAt, extraUsers: 0, extraCompanies: 0 },
     });
     await this.points.grantTrialPointsIfNeeded(tenantId, userId);
@@ -374,7 +389,7 @@ export class TenantService implements OnModuleInit {
     const memberships = await this.tenantPrisma.withUser(userId, (tx) =>
       tx.membership.findMany({
         where: { userId },
-        include: { tenant: true, role: true },
+        include: { tenant: { include: { account: true } }, role: true },
       }),
     );
     return memberships.map((m) => ({
@@ -383,8 +398,9 @@ export class TenantService implements OnModuleInit {
         name: m.tenant.name,
         activationStatus: m.tenant.activationStatus,
         suspendedAt: m.tenant.suspendedAt,
-        pointsBalance: m.tenant.pointsBalance,
-        trialEndsAt: m.tenant.trialEndsAt?.toISOString() ?? null,
+        accountId: m.tenant.accountId,
+        pointsBalance: m.tenant.account.pointsBalance,
+        trialEndsAt: m.tenant.account.trialEndsAt?.toISOString() ?? null,
         lifecycleStatus: tenantLifecycleStatus(m.tenant),
       },
       role: { id: m.role.id, name: m.role.name },
@@ -447,13 +463,13 @@ export class TenantService implements OnModuleInit {
   }
 
   async addMember(tenantId: string, actorUserId: string, email: string, roleId: string) {
-    await this.limits.assertCanAddMember(tenantId);
     const user = await this.prisma.user.findUnique({
       where: { email: email.trim().toLowerCase() },
     });
     if (!user) {
       throw new NotFoundException('User not found');
     }
+    await this.limits.assertCanAddMember(tenantId, user.id);
     try {
       const membership = await this.tenantPrisma.withTenant(tenantId, async (tx) => {
         const role = await tx.role.findFirst({

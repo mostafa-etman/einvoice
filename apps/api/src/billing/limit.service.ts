@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { Plan, QuotaOverride } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { LimitExceededError, LimitExceededHttpException } from './limit-errors';
 import { PointsService } from './points.service';
+import { loadAccountBilling, requireTenantAccount } from './account-scope';
 
 export type LimitSnapshot = {
   maxUsers: number;
@@ -44,93 +45,137 @@ export class LimitService {
   ) {}
 
   async snapshot(tenantId: string): Promise<LimitSnapshot> {
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: tenantId },
-      select: { extraUsers: true, extraCompanies: true },
-    });
-    if (!tenant) throw new NotFoundException('tenant_not_found');
+    const { account } = await loadAccountBilling(this.prisma, tenantId);
+    const { accountId } = await requireTenantAccount(this.prisma, tenantId);
 
-    const [subscription, override, userCount, ownerId] = await Promise.all([
+    const [subscription, override, userCount, companyUsed] = await Promise.all([
       this.tenantPrisma.withTenant(tenantId, (tx) =>
-        tx.subscription.findUnique({ where: { tenantId }, include: { plan: true } }),
+        tx.subscription.findUnique({ where: { accountId }, include: { plan: true } }),
       ),
-      this.tenantPrisma.withTenant(tenantId, (tx) =>
-        tx.quotaOverride.findFirst({
-          where: { tenantId },
-          orderBy: { createdAt: 'desc' },
-        }),
-      ),
-      this.tenantPrisma.withTenant(tenantId, (tx) => tx.membership.count({ where: { tenantId } })),
-      this.ownerUserId(tenantId),
+      this.accountUserCompanyOverride(accountId),
+      this.countAccountUsers(accountId),
+      this.prisma.tenant.count({ where: { accountId } }),
     ]);
 
     const plan = subscription?.plan ?? (await this.prisma.plan.findUniqueOrThrow({ where: { code: 'FREE' } }));
-    const merged = mergeUserCompanyLimits(plan, tenant.extraUsers, tenant.extraCompanies, override);
-    const companyUsed = ownerId ? await this.countOwnerCompanies(ownerId) : 1;
+    const merged = mergeUserCompanyLimits(plan, account.extraUsers, account.extraCompanies, override);
 
     return {
       maxUsers: merged.maxUsers,
       maxCompanies: merged.maxCompanies,
-      extraUsers: tenant.extraUsers,
-      extraCompanies: tenant.extraCompanies,
+      extraUsers: account.extraUsers,
+      extraCompanies: account.extraCompanies,
       users: { used: userCount, limit: merged.maxUsers },
       companies: { used: companyUsed, limit: merged.maxCompanies },
       overrideActive: merged.overrideActive,
     };
   }
 
-  async assertCanAddMember(tenantId: string): Promise<void> {
+  async assertCanAddMember(tenantId: string, userId?: string): Promise<void> {
+    const { accountId } = await requireTenantAccount(this.prisma, tenantId);
+    if (userId && (await this.userInAccount(accountId, userId))) return;
     const snap = await this.snapshot(tenantId);
     if (snap.users.used >= snap.users.limit) {
       throw await this.limitException('users', snap.users.used, snap.users.limit);
     }
   }
 
-  /** Blocks creating another Owner company beyond the account cap. First company is always allowed. */
+  /** Blocks creating another company beyond the account cap. First company is always allowed. */
   async assertCanCreateCompany(userId: string): Promise<void> {
-    const used = await this.countOwnerCompanies(userId);
+    const accountId = await this.ownerAccountId(userId);
+    if (!accountId) return;
+    const used = await this.prisma.tenant.count({ where: { accountId } });
     if (used <= 0) return;
-    const limit = await this.accountCompanyLimit(userId);
-    if (used >= limit) {
-      throw await this.limitException('companies', used, limit);
+    const anyTenant = await this.prisma.tenant.findFirst({
+      where: { accountId },
+      select: { id: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!anyTenant) return;
+    const snap = await this.snapshot(anyTenant.id);
+    if (used >= snap.maxCompanies) {
+      throw await this.limitException('companies', used, snap.maxCompanies);
     }
   }
 
-  private async accountCompanyLimit(userId: string): Promise<number> {
+  private async ownerAccountId(userId: string): Promise<string | null> {
+    const owned = await this.prisma.account.findFirst({
+      where: { ownerUserId: userId },
+      select: { id: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (owned) return owned.id;
     const memberships = await this.tenantPrisma.withUser(userId, (tx) =>
       tx.membership.findMany({
         where: { userId, role: { name: 'Owner' } },
         select: { tenantId: true },
-      }),
-    );
-    if (!memberships.length) return 1;
-    let max = 1;
-    for (const m of memberships) {
-      const snap = await this.snapshot(m.tenantId);
-      if (snap.maxCompanies > max) max = snap.maxCompanies;
-    }
-    return max;
-  }
-
-  private async countOwnerCompanies(userId: string): Promise<number> {
-    const memberships = await this.tenantPrisma.withUser(userId, (tx) =>
-      tx.membership.findMany({
-        where: { userId, role: { name: 'Owner' } },
-        select: { tenantId: true },
-      }),
-    );
-    return memberships.length;
-  }
-
-  private async ownerUserId(tenantId: string): Promise<string | null> {
-    const membership = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.membership.findFirst({
-        where: { tenantId, role: { name: 'Owner' } },
         orderBy: { createdAt: 'asc' },
-        select: { userId: true },
       }),
     );
-    return membership?.userId ?? null;
+    if (!memberships.length) return null;
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: memberships[0].tenantId },
+      select: { accountId: true },
+    });
+    return tenant?.accountId ?? null;
+  }
+
+  private async countAccountUsers(accountId: string): Promise<number> {
+    const tenants = await this.prisma.tenant.findMany({
+      where: { accountId },
+      select: { id: true },
+    });
+    const userIds = new Set<string>();
+    for (const tenant of tenants) {
+      const members = await this.tenantPrisma.withTenant(tenant.id, (tx) =>
+        tx.membership.findMany({ where: { tenantId: tenant.id }, select: { userId: true } }),
+      );
+      for (const m of members) userIds.add(m.userId);
+    }
+    return userIds.size;
+  }
+
+  private async userInAccount(accountId: string, userId: string): Promise<boolean> {
+    const tenants = await this.prisma.tenant.findMany({
+      where: { accountId },
+      select: { id: true },
+    });
+    for (const tenant of tenants) {
+      const membership = await this.tenantPrisma.withTenant(tenant.id, (tx) =>
+        tx.membership.findFirst({
+          where: { tenantId: tenant.id, userId },
+          select: { id: true },
+        }),
+      );
+      if (membership) return true;
+    }
+    return false;
+  }
+
+  private async accountUserCompanyOverride(accountId: string): Promise<LimitOverride> {
+    const tenants = await this.prisma.tenant.findMany({
+      where: { accountId },
+      select: { id: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    let latest: LimitOverride = null;
+    let latestAt = 0;
+    for (const tenant of tenants) {
+      const override = await this.tenantPrisma.withTenant(tenant.id, (tx) =>
+        tx.quotaOverride.findFirst({
+          where: { tenantId: tenant.id },
+          orderBy: { createdAt: 'desc' },
+        }),
+      );
+      if (!override) continue;
+      if (override.userQuota == null && override.companyQuota == null) continue;
+      const at = override.createdAt.getTime();
+      if (at >= latestAt) {
+        latestAt = at;
+        latest = override;
+      }
+    }
+    return latest;
   }
 
   private async limitException(resource: 'users' | 'companies', used: number, limit: number) {

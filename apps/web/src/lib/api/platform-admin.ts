@@ -6,6 +6,7 @@ export type LifecycleStatus = 'PENDING' | 'ACTIVE' | 'REJECTED' | 'SUSPENDED';
 export type TenantSummary = {
   id: string;
   name: string;
+  accountId?: string;
   planCode: PlanCode | null;
   status: SubscriptionStatus | null;
   lifecycleStatus: LifecycleStatus;
@@ -40,6 +41,12 @@ export type TenantDetail = TenantSummary & {
     deviceQuota: number;
     overrideActive: boolean;
   };
+  companies?: Array<{
+    id: string;
+    name: string;
+    lifecycleStatus: LifecycleStatus;
+    createdAt: string;
+  }>;
 };
 
 export type TenantUsage = {
@@ -71,6 +78,19 @@ export type TenantUsage = {
     }>;
     nextCursor: string | null;
     consumedOnPage: number;
+  };
+  accountUsage?: {
+    documents: number;
+    branches: number;
+    devices: number;
+    companies: Array<{
+      tenantId: string;
+      name: string;
+      documents: number;
+      branches: number;
+      devices: number;
+      documentQuota: number;
+    }>;
   };
 };
 

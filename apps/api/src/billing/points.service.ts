@@ -10,6 +10,7 @@ import {
   InsufficientPointsHttpException,
   isTrialExpired,
 } from './points-errors';
+import { loadAccountBilling, requireTenantAccount } from './account-scope';
 import { supportWhatsappUrl } from './tenant-lifecycle-status';
 
 export type DocumentCostView = {
@@ -57,12 +58,8 @@ export class PointsService implements OnModuleInit {
   }
 
   async getBalance(tenantId: string): Promise<number> {
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: tenantId },
-      select: { pointsBalance: true },
-    });
-    if (!tenant) throw new NotFoundException('tenant_not_found');
-    return tenant.pointsBalance;
+    const { account } = await loadAccountBilling(this.prisma, tenantId);
+    return account.pointsBalance;
   }
 
   async getEffectiveCosts(tenantId?: string): Promise<DocumentCostView[]> {
@@ -165,6 +162,7 @@ export class PointsService implements OnModuleInit {
     await this.applyDelta(tenantId, amount, 'ADMIN_ADJUST', {
       actorUserId: operatorUserId,
       note: note ?? null,
+      accountLevel: true,
     });
     await this.audit.write({
       action: PLATFORM_AUDIT_ACTIONS.POINTS_ADJUST,
@@ -179,8 +177,9 @@ export class PointsService implements OnModuleInit {
   }
 
   async grantTrialPointsIfNeeded(tenantId: string, actorUserId?: string | null) {
+    const { accountId } = await requireTenantAccount(this.prisma, tenantId);
     const existing = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.pointsLedger.findFirst({ where: { tenantId, reason: 'TRIAL_GRANT' } }),
+      tx.pointsLedger.findFirst({ where: { accountId, reason: 'TRIAL_GRANT' } }),
     );
     if (existing) return;
     const settings = await this.ensureSettings();
@@ -189,17 +188,19 @@ export class PointsService implements OnModuleInit {
     await this.applyDelta(tenantId, amount, 'TRIAL_GRANT', {
       actorUserId: actorUserId ?? null,
       note: `trial:${settings.trialDays}d`,
+      accountLevel: true,
     });
   }
 
   async grantPlanPointsIfNeeded(tenantId: string, actorUserId?: string | null) {
+    const { accountId } = await requireTenantAccount(this.prisma, tenantId);
     const existing = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.pointsLedger.findFirst({ where: { tenantId, reason: 'PLAN_GRANT' } }),
+      tx.pointsLedger.findFirst({ where: { accountId, reason: 'PLAN_GRANT' } }),
     );
     if (existing) return;
 
     const subscription = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.subscription.findUnique({ where: { tenantId }, include: { plan: true } }),
+      tx.subscription.findUnique({ where: { accountId }, include: { plan: true } }),
     );
     if (subscription?.plan.isTrial) return;
     const included = subscription?.plan.includedPoints ?? 0;
@@ -208,6 +209,7 @@ export class PointsService implements OnModuleInit {
     await this.applyDelta(tenantId, included, 'PLAN_GRANT', {
       actorUserId: actorUserId ?? null,
       note: `plan:${subscription?.plan.code ?? 'unknown'}`,
+      accountLevel: true,
     });
   }
 
@@ -227,14 +229,19 @@ export class PointsService implements OnModuleInit {
   ): Promise<{ total: number; balanceAfter: number }> {
     const tenantRow = await tx.tenant.findUnique({
       where: { id: input.tenantId },
+      select: { accountId: true },
+    });
+    if (!tenantRow) throw new NotFoundException('tenant_not_found');
+    const accountRow = await tx.account.findUnique({
+      where: { id: tenantRow.accountId },
       select: { pointsBalance: true, trialEndsAt: true },
     });
-    if (isTrialExpired(tenantRow?.trialEndsAt ?? null)) {
+    if (isTrialExpired(accountRow?.trialEndsAt ?? null)) {
       const contact = await this.getSupportContact();
       throw new InsufficientPointsHttpException(
         new InsufficientPointsError(
           0,
-          tenantRow?.pointsBalance ?? 0,
+          accountRow?.pointsBalance ?? 0,
           contact.whatsappUrl,
           contact.whatsappDisplay,
           'TRIAL_ENDED',
@@ -248,36 +255,37 @@ export class PointsService implements OnModuleInit {
       total += costMap.get(kind) ?? costMap.get(this.normalizeKind(kind)) ?? 0;
     }
     if (total <= 0) {
-      return { total: 0, balanceAfter: tenantRow?.pointsBalance ?? 0 };
+      return { total: 0, balanceAfter: accountRow?.pointsBalance ?? 0 };
     }
 
     const updated = await tx.$executeRaw`
-      UPDATE tenants
+      UPDATE accounts
       SET points_balance = points_balance - ${total}, updated_at = now()
-      WHERE id = ${input.tenantId}::uuid AND points_balance >= ${total}
+      WHERE id = ${tenantRow.accountId}::uuid AND points_balance >= ${total}
     `;
     if (Number(updated) === 0) {
-      const tenant = await tx.tenant.findUnique({
-        where: { id: input.tenantId },
+      const account = await tx.account.findUnique({
+        where: { id: tenantRow.accountId },
         select: { pointsBalance: true },
       });
       const contact = await this.getSupportContact();
       throw new InsufficientPointsHttpException(
         new InsufficientPointsError(
           total,
-          tenant?.pointsBalance ?? 0,
+          account?.pointsBalance ?? 0,
           contact.whatsappUrl,
           contact.whatsappDisplay,
         ),
       );
     }
 
-    const after = await tx.tenant.findUniqueOrThrow({
-      where: { id: input.tenantId },
+    const after = await tx.account.findUniqueOrThrow({
+      where: { id: tenantRow.accountId },
       select: { pointsBalance: true },
     });
     await tx.pointsLedger.create({
       data: {
+        accountId: tenantRow.accountId,
         tenantId: input.tenantId,
         delta: -total,
         balanceAfter: after.pointsBalance,
@@ -297,10 +305,12 @@ export class PointsService implements OnModuleInit {
   ) {
     await this.assertTenant(tenantId);
     const limit = Math.min(Math.max(query.limit ?? 50, 1), 200);
+    const { accountId } = await requireTenantAccount(this.prisma, tenantId);
     const rows = await this.tenantPrisma.withTenant(tenantId, (tx) =>
       tx.pointsLedger.findMany({
         where: {
-          tenantId,
+          accountId,
+          OR: [{ tenantId }, { tenantId: null }],
           ...(query.from || query.to
             ? {
                 createdAt: {
@@ -347,26 +357,31 @@ export class PointsService implements OnModuleInit {
     tenantId: string,
     delta: number,
     reason: PointsLedgerReason,
-    opts: { actorUserId?: string | null; note?: string | null; documentKind?: string | null },
+    opts: {
+      actorUserId?: string | null;
+      note?: string | null;
+      documentKind?: string | null;
+      accountLevel?: boolean;
+    },
   ) {
-    await this.assertTenant(tenantId);
+    const { accountId } = await requireTenantAccount(this.prisma, tenantId);
     await this.tenantPrisma.withTenant(tenantId, async (tx) => {
       if (delta < 0) {
         const updated = await tx.$executeRaw`
-          UPDATE tenants
+          UPDATE accounts
           SET points_balance = points_balance + ${delta}, updated_at = now()
-          WHERE id = ${tenantId}::uuid AND points_balance >= ${-delta}
+          WHERE id = ${accountId}::uuid AND points_balance >= ${-delta}
         `;
         if (Number(updated) === 0) {
-          const tenant = await tx.tenant.findUnique({
-            where: { id: tenantId },
+          const account = await tx.account.findUnique({
+            where: { id: accountId },
             select: { pointsBalance: true },
           });
           const contact = await this.getSupportContact();
           throw new InsufficientPointsHttpException(
             new InsufficientPointsError(
               -delta,
-              tenant?.pointsBalance ?? 0,
+              account?.pointsBalance ?? 0,
               contact.whatsappUrl,
               contact.whatsappDisplay,
             ),
@@ -374,18 +389,19 @@ export class PointsService implements OnModuleInit {
         }
       } else {
         await tx.$executeRaw`
-          UPDATE tenants
+          UPDATE accounts
           SET points_balance = points_balance + ${delta}, updated_at = now()
-          WHERE id = ${tenantId}::uuid
+          WHERE id = ${accountId}::uuid
         `;
       }
-      const after = await tx.tenant.findUniqueOrThrow({
-        where: { id: tenantId },
+      const after = await tx.account.findUniqueOrThrow({
+        where: { id: accountId },
         select: { pointsBalance: true },
       });
       await tx.pointsLedger.create({
         data: {
-          tenantId,
+          accountId,
+          tenantId: opts.accountLevel ? null : tenantId,
           delta,
           balanceAfter: after.pointsBalance,
           reason,

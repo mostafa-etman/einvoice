@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { tenantLifecycleStatus } from './tenant-lifecycle-status';
+import { requireTenantAccount } from './account-scope';
 
 export type TenantWriteCheck = { allowed: true } | { allowed: false; reason: string };
 
@@ -50,8 +51,9 @@ export class TenantAccessService {
       return { allowed: false, reason: 'tenant_suspended' };
     }
 
+    const { accountId } = await requireTenantAccount(this.prisma, tenantId);
     const subscription = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.subscription.findUnique({ where: { tenantId }, select: { status: true } }),
+      tx.subscription.findUnique({ where: { accountId }, select: { status: true } }),
     );
     if (subscription?.status === 'READ_ONLY') {
       return { allowed: false, reason: 'tenant_read_only' };

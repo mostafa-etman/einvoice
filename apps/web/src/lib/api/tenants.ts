@@ -10,6 +10,7 @@ export type TenantMembership = {
     suspendedAt?: string | null;
     pointsBalance?: number;
     trialEndsAt?: string | null;
+    accountId?: string;
   };
   role: { id: string; name: string };
 };

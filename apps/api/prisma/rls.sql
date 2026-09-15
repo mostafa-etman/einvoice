@@ -3,6 +3,7 @@
 -- Intentionally NOT tenant-isolated (global / shared / identity):
 --   users              — global login identity; tenant membership is via memberships
 --   tenants            — root registry (access mediated by memberships + app checks)
+--   accounts           — billing parent (plan/points/trial); RLS scoped to session tenant's account
 --   permissions, plans, platform_settings, document_point_costs, addons — platform catalogs
 --   trial_used_tax_registrations — platform trial-abuse registry (RLS: no tenant_id / platform_operator)
 --   currencies, eta_code_catalogs, eta_code_entries — shared ETA reference data
@@ -312,13 +313,47 @@ CREATE POLICY tenant_isolation_tenant_data_export_jobs ON tenant_data_export_job
   USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
   WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
 
--- SaaS layer (013)
+-- Billing parent (account-level plan + shared points). Session tenant may only
+-- see/update the account it belongs to. Unscoped PrismaService (tenant GUC
+-- unset) matches the tenants-table pattern used for onboarding and super-admin.
+ALTER TABLE accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE accounts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS account_isolation_accounts ON accounts;
+CREATE POLICY account_isolation_accounts ON accounts
+  USING (
+    EXISTS (
+      SELECT 1 FROM tenants t
+      WHERE t.account_id = accounts.id
+        AND t.id::text = NULLIF(current_setting('app.tenant_id', true), '')
+    )
+    OR NULLIF(current_setting('app.tenant_id', true), '') IS NULL
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM tenants t
+      WHERE t.account_id = accounts.id
+        AND t.id::text = NULLIF(current_setting('app.tenant_id', true), '')
+    )
+    OR NULLIF(current_setting('app.tenant_id', true), '') IS NULL
+  );
+
+-- SaaS layer (013) — subscription is per account, visible to every company in it.
 ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE subscriptions FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_subscriptions ON subscriptions;
 CREATE POLICY tenant_isolation_subscriptions ON subscriptions
-  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
-  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+  USING (
+    account_id IN (
+      SELECT t.account_id FROM tenants t
+      WHERE t.id::text = NULLIF(current_setting('app.tenant_id', true), '')
+    )
+  )
+  WITH CHECK (
+    account_id IN (
+      SELECT t.account_id FROM tenants t
+      WHERE t.id::text = NULLIF(current_setting('app.tenant_id', true), '')
+    )
+  );
 
 ALTER TABLE quota_overrides ENABLE ROW LEVEL SECURITY;
 ALTER TABLE quota_overrides FORCE ROW LEVEL SECURITY;
@@ -394,8 +429,32 @@ ALTER TABLE points_ledger ENABLE ROW LEVEL SECURITY;
 ALTER TABLE points_ledger FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_points_ledger ON points_ledger;
 CREATE POLICY tenant_isolation_points_ledger ON points_ledger
-  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
-  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+  USING (
+    (
+      tenant_id IS NOT NULL
+      AND tenant_id::text = NULLIF(current_setting('app.tenant_id', true), '')
+    )
+    OR (
+      tenant_id IS NULL
+      AND account_id IN (
+        SELECT t.account_id FROM tenants t
+        WHERE t.id::text = NULLIF(current_setting('app.tenant_id', true), '')
+      )
+    )
+  )
+  WITH CHECK (
+    (
+      tenant_id IS NOT NULL
+      AND tenant_id::text = NULLIF(current_setting('app.tenant_id', true), '')
+    )
+    OR (
+      tenant_id IS NULL
+      AND account_id IN (
+        SELECT t.account_id FROM tenants t
+        WHERE t.id::text = NULLIF(current_setting('app.tenant_id', true), '')
+      )
+    )
+  );
 
 -- Cross-tenant uniqueness for free-trial consumption. Tenant HTTP (app.tenant_id set)
 -- cannot see or mutate rows; PrismaService and platform_operator can.

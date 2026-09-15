@@ -233,12 +233,13 @@ export default function BillingPage() {
           </p>
         ) : null}
         <div className="mt-token-md flex flex-wrap items-center justify-between gap-token-sm">
-          <p className="m-0 text-token-sm">
-            {t('pointsBalance')}:{' '}
-            <span className="font-en font-medium tabular-nums" dir="ltr">
-              {subscription?.pointsBalance ?? 0}
-            </span>
-          </p>
+            <p className="m-0 text-token-sm">
+              {t('pointsBalance')}:{' '}
+              <span className="font-en font-medium tabular-nums" dir="ltr">
+                {subscription?.pointsBalance ?? 0}
+              </span>
+            </p>
+            <p className="m-0 w-full text-token-xs text-foreground-muted">{t('sharedPointsHint')}</p>
           <Button
             type="button"
             variant="secondary"

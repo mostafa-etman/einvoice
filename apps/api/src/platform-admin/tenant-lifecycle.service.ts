@@ -8,6 +8,7 @@ import { SubscriptionService } from '../billing/subscription.service';
 import { LimitService } from '../billing/limit.service';
 import { toAddonView } from '../billing/pricing-view';
 import { tenantLifecycleStatus, type TenantLifecycleStatus } from '../billing/tenant-lifecycle-status';
+import { loadAccountBilling, requireTenantAccount } from '../billing/account-scope';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
@@ -87,8 +88,8 @@ export class TenantLifecycleService {
 
     const items = await Promise.all(
       page.map(async (tenant) => {
-        const [subscription, ownerMembership] = await Promise.all([
-          this.getSubscriptionWithPlan(tenant.id),
+        const [subscription, ownerMembership, account] = await Promise.all([
+          this.getSubscriptionWithPlan(tenant.id, tenant.accountId),
           this.tenantPrisma.withTenant(tenant.id, (tx) =>
             tx.membership.findFirst({
               where: { tenantId: tenant.id, role: { name: 'Owner' } },
@@ -96,8 +97,12 @@ export class TenantLifecycleService {
               orderBy: { createdAt: 'asc' },
             }),
           ),
+          this.prisma.account.findUnique({
+            where: { id: tenant.accountId },
+            select: { pointsBalance: true, trialEndsAt: true, extraUsers: true, extraCompanies: true },
+          }),
         ]);
-        return this.toSummary(tenant, subscription, ownerMembership?.user.email ?? null);
+        return this.toSummary(tenant, subscription, ownerMembership?.user.email ?? null, account);
       }),
     );
 
@@ -118,8 +123,8 @@ export class TenantLifecycleService {
     if (!tenant) {
       throw new NotFoundException('tenant_not_found');
     }
-    const [subscription, entitlements, ownerMembership] = await Promise.all([
-      this.getSubscriptionWithPlan(tenantId),
+    const [subscription, entitlements, ownerMembership, account, siblings] = await Promise.all([
+      this.getSubscriptionWithPlan(tenantId, tenant.accountId),
       this.quota.getEffectiveEntitlements(tenantId),
       this.tenantPrisma.withTenant(tenantId, (tx) =>
         tx.membership.findFirst({
@@ -128,18 +133,39 @@ export class TenantLifecycleService {
           orderBy: { createdAt: 'asc' },
         }),
       ),
+      this.prisma.account.findUnique({
+        where: { id: tenant.accountId },
+        select: { pointsBalance: true, trialEndsAt: true, extraUsers: true, extraCompanies: true },
+      }),
+      this.prisma.tenant.findMany({
+        where: { accountId: tenant.accountId },
+        select: {
+          id: true,
+          name: true,
+          activationStatus: true,
+          suspendedAt: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
     ]);
 
     return {
-      ...this.toSummary(tenant, subscription, ownerMembership?.user.email ?? null),
+      ...this.toSummary(tenant, subscription, ownerMembership?.user.email ?? null, account),
       ownerEmail: ownerMembership?.user.email ?? null,
       ownerId: ownerMembership?.user.id ?? null,
       entitlements,
       limits: await this.limits.snapshot(tenantId).catch(() => null),
       graceEndsAt: subscription?.graceEndsAt?.toISOString() ?? null,
-      trialEndsAt: tenant.trialEndsAt?.toISOString() ?? null,
-      extraUsers: tenant.extraUsers,
-      extraCompanies: tenant.extraCompanies,
+      trialEndsAt: account?.trialEndsAt?.toISOString() ?? null,
+      extraUsers: account?.extraUsers ?? 0,
+      extraCompanies: account?.extraCompanies ?? 0,
+      companies: siblings.map((c) => ({
+        id: c.id,
+        name: c.name,
+        lifecycleStatus: tenantLifecycleStatus(c),
+        createdAt: c.createdAt.toISOString(),
+      })),
     };
   }
 
@@ -181,9 +207,6 @@ export class TenantLifecycleService {
       where: { id: tenantId },
       data: { suspendedAt: new Date(), suspendedReason: reason },
     });
-    await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.subscription.updateMany({ where: { tenantId }, data: { status: 'SUSPENDED' } }),
-    );
 
     await this.audit.write({
       action: PLATFORM_AUDIT_ACTIONS.TENANT_SUSPEND,
@@ -204,12 +227,6 @@ export class TenantLifecycleService {
       where: { id: tenantId },
       data: { suspendedAt: null, suspendedReason: null },
     });
-    await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.subscription.updateMany({
-        where: { tenantId, status: 'SUSPENDED' },
-        data: { status: 'ACTIVE', graceEndsAt: null },
-      }),
-    );
 
     await this.audit.write({
       action: PLATFORM_AUDIT_ACTIONS.TENANT_ACTIVATE,
@@ -241,8 +258,9 @@ export class TenantLifecycleService {
         await this.trialTax.bindTenantCurrentTaxNumber(tenantId, { allowOverride: true });
       }
       if (!plan.isTrial) {
-        await this.prisma.tenant.update({
-          where: { id: tenantId },
+        const { accountId } = await requireTenantAccount(this.prisma, tenantId);
+        await this.prisma.account.update({
+          where: { id: accountId },
           data: { trialEndsAt: null },
         });
         await this.points.grantPlanPointsIfNeeded(tenantId, input.operatorUserId);
@@ -267,7 +285,8 @@ export class TenantLifecycleService {
       extras.trialEndsAt = input.trialEndsAt ? new Date(input.trialEndsAt) : null;
     }
     if (Object.keys(extras).length) {
-      await this.prisma.tenant.update({ where: { id: tenantId }, data: extras });
+      const { accountId } = await requireTenantAccount(this.prisma, tenantId);
+      await this.prisma.account.update({ where: { id: accountId }, data: extras });
     }
 
     const hasOverrideFields =
@@ -324,12 +343,6 @@ export class TenantLifecycleService {
         suspendedReason: null,
       },
     });
-    await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.subscription.updateMany({
-        where: { tenantId, status: { in: ['SUSPENDED', 'READ_ONLY'] } },
-        data: { status: 'ACTIVE', graceEndsAt: null },
-      }),
-    );
     await this.audit.write({
       action: PLATFORM_AUDIT_ACTIONS.TENANT_APPROVE,
       outcome: 'success',
@@ -534,6 +547,28 @@ export class TenantLifecycleService {
 
   async getUsage(tenantId: string) {
     await this.assertTenantExists(tenantId);
+    const { account } = await loadAccountBilling(this.prisma, tenantId);
+    const siblings = await this.prisma.tenant.findMany({
+      where: { accountId: account.id },
+      select: { id: true, name: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    const perCompany = await Promise.all(
+      siblings.map(async (company) => {
+        const [entitlements, usage] = await Promise.all([
+          this.quota.getEffectiveEntitlements(company.id),
+          this.quota.getUsage(company.id),
+        ]);
+        return {
+          tenantId: company.id,
+          name: company.name,
+          documents: usage.documents,
+          branches: usage.branches,
+          devices: usage.devices,
+          documentQuota: entitlements.documentQuota,
+        };
+      }),
+    );
     const [entitlements, usage, pointsBalance, ledger] = await Promise.all([
       this.quota.getEffectiveEntitlements(tenantId),
       this.quota.getUsage(tenantId),
@@ -550,6 +585,12 @@ export class TenantLifecycleService {
       pointsBalance,
       pointsLedger: ledger,
       limits: await this.limits.snapshot(tenantId),
+      accountUsage: {
+        documents: perCompany.reduce((sum, row) => sum + row.documents, 0),
+        branches: perCompany.reduce((sum, row) => sum + row.branches, 0),
+        devices: perCompany.reduce((sum, row) => sum + row.devices, 0),
+        companies: perCompany,
+      },
     };
   }
 
@@ -623,13 +664,15 @@ export class TenantLifecycleService {
     if (addon.kind === 'POINTS') {
       await this.points.adjustBalance(tenantId, addon.quantity, operatorUserId, reason || addon.code);
     } else if (addon.kind === 'USER') {
-      await this.prisma.tenant.update({
-        where: { id: tenantId },
+      const { accountId } = await requireTenantAccount(this.prisma, tenantId);
+      await this.prisma.account.update({
+        where: { id: accountId },
         data: { extraUsers: { increment: addon.quantity } },
       });
     } else if (addon.kind === 'COMPANY') {
-      await this.prisma.tenant.update({
-        where: { id: tenantId },
+      const { accountId } = await requireTenantAccount(this.prisma, tenantId);
+      await this.prisma.account.update({
+        where: { id: accountId },
         data: { extraCompanies: { increment: addon.quantity } },
       });
     }
@@ -688,9 +731,12 @@ export class TenantLifecycleService {
     return tenant;
   }
 
-  private getSubscriptionWithPlan(tenantId: string): Promise<SubscriptionWithPlan | null> {
+  private getSubscriptionWithPlan(
+    tenantId: string,
+    accountId: string,
+  ): Promise<SubscriptionWithPlan | null> {
     return this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.subscription.findUnique({ where: { tenantId }, include: { plan: true } }),
+      tx.subscription.findUnique({ where: { accountId }, include: { plan: true } }),
     );
   }
 
@@ -698,19 +744,26 @@ export class TenantLifecycleService {
     tenant: Tenant,
     subscription: SubscriptionWithPlan | null,
     ownerEmail: string | null = null,
+    account: {
+      pointsBalance: number;
+      trialEndsAt: Date | null;
+      extraUsers: number;
+      extraCompanies: number;
+    } | null = null,
   ) {
     return {
       id: tenant.id,
       name: tenant.name,
+      accountId: tenant.accountId,
       planCode: subscription?.plan.code ?? null,
       status: subscription?.status ?? null,
       lifecycleStatus: tenantLifecycleStatus(tenant),
       activationStatus: tenant.activationStatus,
       suspendedAt: tenant.suspendedAt,
-      pointsBalance: tenant.pointsBalance,
-      trialEndsAt: tenant.trialEndsAt?.toISOString() ?? null,
-      extraUsers: tenant.extraUsers,
-      extraCompanies: tenant.extraCompanies,
+      pointsBalance: account?.pointsBalance ?? 0,
+      trialEndsAt: account?.trialEndsAt?.toISOString() ?? null,
+      extraUsers: account?.extraUsers ?? 0,
+      extraCompanies: account?.extraCompanies ?? 0,
       createdAt: tenant.createdAt.toISOString(),
       ownerEmail,
     };

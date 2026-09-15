@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { BILLING_AUDIT_ACTIONS } from './billing-audit';
 import { isTrialExpired } from './points-errors';
+import { loadAccountBilling, requireTenantAccount } from './account-scope';
 
 export type SubscriptionView = {
   status: SubscriptionStatus;
@@ -66,10 +67,11 @@ export class SubscriptionService {
     private readonly audit: AuditService,
   ) {}
 
-  /** Idempotent: creates an ACTIVE Free subscription for the tenant if one doesn't already exist. */
+  /** Idempotent: creates an ACTIVE Free subscription for the tenant's account if one doesn't already exist. */
   async ensureFreeSubscription(tenantId: string): Promise<Subscription> {
+    const { accountId } = await requireTenantAccount(this.prisma, tenantId);
     const existing = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.subscription.findUnique({ where: { tenantId } }),
+      tx.subscription.findUnique({ where: { accountId } }),
     );
     if (existing) return existing;
 
@@ -78,22 +80,30 @@ export class SubscriptionService {
       throw new Error('Free plan is not seeded — run the 013 saas-layer migration first');
     }
 
-    const subscription = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.subscription.create({
-        data: { tenantId, planId: freePlan.id, status: 'ACTIVE' },
-      }),
-    );
+    try {
+      const subscription = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+        tx.subscription.create({
+          data: { accountId, planId: freePlan.id, status: 'ACTIVE' },
+        }),
+      );
 
-    await this.audit.write({
-      action: BILLING_AUDIT_ACTIONS.SUBSCRIPTION_FREE_CREATE,
-      outcome: 'success',
-      tenantId,
-      resourceType: 'subscription',
-      resourceId: subscription.id,
-      metadata: { planCode: 'FREE' },
-    });
+      await this.audit.write({
+        action: BILLING_AUDIT_ACTIONS.SUBSCRIPTION_FREE_CREATE,
+        outcome: 'success',
+        tenantId,
+        resourceType: 'subscription',
+        resourceId: subscription.id,
+        metadata: { planCode: 'FREE', accountId },
+      });
 
-    return subscription;
+      return subscription;
+    } catch (err) {
+      const raced = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+        tx.subscription.findUnique({ where: { accountId } }),
+      );
+      if (raced) return raced;
+      throw err;
+    }
   }
 
   async assignPlan(
@@ -106,12 +116,13 @@ export class SubscriptionService {
       throw new Error(`Unknown plan code: ${planCode}`);
     }
 
+    const { accountId } = await requireTenantAccount(this.prisma, tenantId);
     await this.ensureFreeSubscription(tenantId);
 
     const status = opts.status ?? 'ACTIVE';
     const subscription = await this.tenantPrisma.withTenant(tenantId, (tx) =>
       tx.subscription.update({
-        where: { tenantId },
+        where: { accountId },
         data: {
           planId: plan.id,
           status,
@@ -129,7 +140,7 @@ export class SubscriptionService {
       tenantId,
       resourceType: 'subscription',
       resourceId: subscription.id,
-      metadata: { planCode, status, reason: opts.reason },
+      metadata: { planCode, status, reason: opts.reason, accountId },
     });
 
     return subscription;
@@ -140,10 +151,11 @@ export class SubscriptionService {
     status: SubscriptionStatus,
     opts: { graceEndsAt?: Date | null } = {},
   ): Promise<Subscription> {
+    const { accountId } = await requireTenantAccount(this.prisma, tenantId);
     await this.ensureFreeSubscription(tenantId);
     return this.tenantPrisma.withTenant(tenantId, (tx) =>
       tx.subscription.update({
-        where: { tenantId },
+        where: { accountId },
         data: {
           status,
           graceEndsAt: opts.graceEndsAt === undefined ? undefined : opts.graceEndsAt,
@@ -180,21 +192,12 @@ export class SubscriptionService {
   async getSubscriptionView(tenantId: string): Promise<SubscriptionView> {
     await this.ensureFreeSubscription(tenantId);
 
-    const [subscription, tenant, override] = await Promise.all([
+    const { accountId } = await requireTenantAccount(this.prisma, tenantId);
+    const [subscription, account, override] = await Promise.all([
       this.tenantPrisma.withTenant(tenantId, (tx) =>
-        tx.subscription.findUniqueOrThrow({ where: { tenantId }, include: { plan: true } }),
+        tx.subscription.findUniqueOrThrow({ where: { accountId }, include: { plan: true } }),
       ),
-      this.prisma.tenant.findUnique({
-        where: { id: tenantId },
-        select: {
-          suspendedAt: true,
-          activationStatus: true,
-          pointsBalance: true,
-          trialEndsAt: true,
-          extraUsers: true,
-          extraCompanies: true,
-        },
-      }),
+      loadAccountBilling(this.prisma, tenantId).then((r) => r.account),
       this.tenantPrisma.withTenant(tenantId, (tx) =>
         tx.quotaOverride.findFirst({
           where: { tenantId, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
@@ -202,13 +205,17 @@ export class SubscriptionService {
         }),
       ),
     ]);
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { suspendedAt: true, activationStatus: true },
+    });
 
-    const trialExpired = isTrialExpired(tenant?.trialEndsAt ?? null);
-    const noPoints = (tenant?.pointsBalance ?? 0) <= 0;
+    const trialExpired = isTrialExpired(account.trialEndsAt);
+    const noPoints = account.pointsBalance <= 0;
     let sendBlockedReason: SubscriptionView['sendBlockedReason'] = null;
     if (trialExpired) {
       sendBlockedReason = 'TRIAL_ENDED';
-    } else if (noPoints && (subscription.plan.isTrial || tenant?.trialEndsAt)) {
+    } else if (noPoints && (subscription.plan.isTrial || account.trialEndsAt)) {
       sendBlockedReason = 'INSUFFICIENT_POINTS';
     } else if (noPoints) {
       const costly = await this.prisma.documentPointCost.findFirst({ where: { points: { gt: 0 } } });
@@ -249,13 +256,13 @@ export class SubscriptionService {
         overrideActive: Boolean(override),
       },
       accessMode,
-      pointsBalance: tenant?.pointsBalance ?? 0,
-      trialEndsAt: tenant?.trialEndsAt?.toISOString() ?? null,
-      trialActive: Boolean(tenant?.trialEndsAt) && !trialExpired,
+      pointsBalance: account.pointsBalance,
+      trialEndsAt: account.trialEndsAt?.toISOString() ?? null,
+      trialActive: Boolean(account.trialEndsAt) && !trialExpired,
       sendBlocked: sendBlockedReason !== null,
       sendBlockedReason,
-      extraUsers: tenant?.extraUsers ?? 0,
-      extraCompanies: tenant?.extraCompanies ?? 0,
+      extraUsers: account.extraUsers,
+      extraCompanies: account.extraCompanies,
     };
   }
 }
