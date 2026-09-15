@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CopyableTenantId } from '@/components/copyable-tenant-id';
@@ -52,6 +52,14 @@ export function TenantDetailDrawer({
   const [pointsNote, setPointsNote] = useState('');
   const [addonCode, setAddonCode] = useState('');
   const [addonReason, setAddonReason] = useState('');
+  const [extrasOpen, setExtrasOpen] = useState(false);
+  const [extrasReason, setExtrasReason] = useState('');
+  const [extras, setExtras] = useState({
+    extraUsers: 0,
+    extraCompanies: 0,
+    extraBranches: 0,
+    extraDevices: 0,
+  });
 
   const detailQuery = useQuery({
     queryKey: ['platform-admin-tenant', tenantId],
@@ -103,6 +111,16 @@ export function TenantDetailDrawer({
   const usage = usageQuery.data;
   const pointsDeltaNumber = Number(pointsDelta);
   const canAdjustPoints = Number.isFinite(pointsDeltaNumber) && pointsDeltaNumber !== 0;
+
+  useEffect(() => {
+    if (!detail) return;
+    setExtras({
+      extraUsers: detail.extraUsers ?? 0,
+      extraCompanies: detail.extraCompanies ?? 0,
+      extraBranches: detail.extraBranches ?? 0,
+      extraDevices: detail.extraDevices ?? 0,
+    });
+  }, [detail]);
 
   return (
     <Drawer open onClose={onClose} title={t('detailsTitle')}>
@@ -202,6 +220,18 @@ export function TenantDetailDrawer({
                 <dt className="text-foreground-muted">{t('extraCompanies')}</dt>
                 <dd className="m-0 font-en font-medium tabular-nums" dir="ltr">
                   {detail.extraCompanies ?? 0}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-foreground-muted">{t('extraBranches')}</dt>
+                <dd className="m-0 font-en font-medium tabular-nums" dir="ltr">
+                  {detail.extraBranches ?? 0}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-foreground-muted">{t('extraDevices')}</dt>
+                <dd className="m-0 font-en font-medium tabular-nums" dir="ltr">
+                  {detail.extraDevices ?? 0}
                 </dd>
               </div>
             </dl>
@@ -316,6 +346,9 @@ export function TenantDetailDrawer({
               </Button>
               <Button type="button" variant="secondary" size="sm" onClick={() => setAddonOpen(true)}>
                 {t('applyAddon')}
+              </Button>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setExtrasOpen(true)}>
+                {t('saveExtras')}
               </Button>
             </div>
             <div className="flex flex-wrap items-center gap-token-sm border-t border-border pt-token-md">
@@ -461,6 +494,59 @@ export function TenantDetailDrawer({
             className="font-en"
           />
           <Input label={t('reason')} value={addonReason} onChange={(e) => setAddonReason(e.target.value)} />
+        </div>
+      </Modal>
+
+      <Modal
+        open={extrasOpen}
+        onClose={() => setExtrasOpen(false)}
+        title={t('saveExtras')}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setExtrasOpen(false)}>
+              {tActions('cancel')}
+            </Button>
+            <Button
+              loading={planMut.isPending}
+              onClick={() => {
+                const reason = extrasReason.trim() || 'account extras';
+                setExtrasOpen(false);
+                setExtrasReason('');
+                planMut.mutate({ ...extras, reason });
+              }}
+            >
+              {t('saveExtras')}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-token-sm">
+          <p className="m-0 text-token-sm text-foreground-muted">{t('planAppliesToAccount')}</p>
+          <Input
+            type="number"
+            label={t('extraUsers')}
+            value={extras.extraUsers}
+            onChange={(e) => setExtras((x) => ({ ...x, extraUsers: Number(e.target.value) }))}
+          />
+          <Input
+            type="number"
+            label={t('extraCompanies')}
+            value={extras.extraCompanies}
+            onChange={(e) => setExtras((x) => ({ ...x, extraCompanies: Number(e.target.value) }))}
+          />
+          <Input
+            type="number"
+            label={t('extraBranches')}
+            value={extras.extraBranches}
+            onChange={(e) => setExtras((x) => ({ ...x, extraBranches: Number(e.target.value) }))}
+          />
+          <Input
+            type="number"
+            label={t('extraDevices')}
+            value={extras.extraDevices}
+            onChange={(e) => setExtras((x) => ({ ...x, extraDevices: Number(e.target.value) }))}
+          />
+          <Input label={t('reason')} value={extrasReason} onChange={(e) => setExtrasReason(e.target.value)} />
         </div>
       </Modal>
     </Drawer>

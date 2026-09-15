@@ -33,10 +33,12 @@ function QuotaBar({
   label,
   used,
   limit,
+  hint,
 }: {
   label: string;
   used: number;
   limit: number;
+  hint?: string;
 }) {
   const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
   const danger = limit > 0 && used >= limit;
@@ -48,6 +50,7 @@ function QuotaBar({
           {formatQuantityDisplay(used)} / {formatQuantityDisplay(limit)}
         </span>
       </div>
+      {hint ? <p className="m-0 text-token-xs text-foreground-muted">{hint}</p> : null}
       <div
         role="progressbar"
         aria-label={label}
@@ -264,8 +267,18 @@ export default function BillingPage() {
         ) : quotas ? (
           <div className="grid gap-token-md sm:grid-cols-3">
             <QuotaBar label={t('documents')} used={quotas.documents.used} limit={quotas.documents.limit} />
-            <QuotaBar label={t('branches')} used={quotas.branches.used} limit={quotas.branches.limit} />
-            <QuotaBar label={t('devices')} used={quotas.devices.used} limit={quotas.devices.limit} />
+            <QuotaBar
+              label={t('branches')}
+              used={quotas.branches.used}
+              limit={quotas.branches.limit}
+              hint={t('sharedBranchesHint')}
+            />
+            <QuotaBar
+              label={t('devices')}
+              used={quotas.devices.used}
+              limit={quotas.devices.limit}
+              hint={t('sharedDevicesHint')}
+            />
             {quotas.users ? (
               <QuotaBar label={t('users')} used={quotas.users.used} limit={quotas.users.limit} />
             ) : null}

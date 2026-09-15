@@ -261,6 +261,8 @@ model Account {
   trialEndsAt      DateTime? @map("trial_ends_at")
   extraUsers       Int       @default(0) @map("extra_users")
   extraCompanies   Int       @default(0) @map("extra_companies")
+  extraBranches    Int       @default(0) @map("extra_branches")
+  extraDevices     Int       @default(0) @map("extra_devices")
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 

@@ -341,6 +341,18 @@ export default function PlatformAdminPage() {
                     />
                     <Input
                       type="number"
+                      label={t('branchQuota')}
+                      value={planForm.branchQuota}
+                      onChange={(e) => setPlanForm((f) => ({ ...f, branchQuota: Number(e.target.value) }))}
+                    />
+                    <Input
+                      type="number"
+                      label={t('deviceQuota')}
+                      value={planForm.deviceQuota}
+                      onChange={(e) => setPlanForm((f) => ({ ...f, deviceQuota: Number(e.target.value) }))}
+                    />
+                    <Input
+                      type="number"
                       label={t('includedPoints')}
                       value={planForm.includedPoints}
                       onChange={(e) => setPlanForm((f) => ({ ...f, includedPoints: Number(e.target.value) }))}
@@ -412,7 +424,7 @@ export default function PlatformAdminPage() {
                               <span className="font-en tabular-nums" dir="ltr">
                                 {p.discountedPriceEgp}/{p.officialPriceEgp} EGP
                               </span>{' '}
-                              · {p.maxUsers}u / {p.maxCompanies}c ·{' '}
+                              · {p.maxUsers}u / {p.maxCompanies}c · {p.branchQuota}b / {p.deviceQuota}d ·{' '}
                               {p.isActive ? t('planActive') : t('planInactive')}
                             </p>
                           </div>

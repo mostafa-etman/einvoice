@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, forwardRef } from '@nestjs/common';
 import type { QuotaOverride } from '@prisma/client';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -6,7 +6,8 @@ import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { QuotaExceededError, QuotaExceededHttpException, type QuotaResource } from './quota-errors';
 import { cairoMonthBounds, cairoMonthDateStrings, CAIRO_TZ } from './quota-period';
 import { TenantAccessService } from './tenant-access.guard';
-import { requireTenantAccount } from './account-scope';
+import { loadAccountBilling, requireTenantAccount } from './account-scope';
+import { PointsService } from './points.service';
 
 export type Entitlements = {
   planCode: string;
@@ -18,6 +19,12 @@ export type Entitlements = {
 
 export type UsageSnapshot = {
   period: { from: Date; to: Date; monthKey: string; timezone: string };
+  documents: number;
+  branches: number;
+  devices: number;
+};
+
+export type CompanyMeters = {
   documents: number;
   branches: number;
   devices: number;
@@ -52,10 +59,17 @@ export class QuotaService {
     private readonly tenantPrisma: TenantPrismaService,
     private readonly analytics: AnalyticsService,
     private readonly tenantAccess: TenantAccessService,
+    @Inject(forwardRef(() => PointsService))
+    private readonly points: PointsService,
   ) {}
 
-  /** Effective entitlements = Plan (+ latest non-expired QuotaOverride). Falls back to Free plan quotas pre-subscription. */
+  /**
+   * Effective entitlements = Plan + account extras for branches/devices
+   * (+ latest non-expired QuotaOverride). Documents stay per-company.
+   * Falls back to Free plan quotas pre-subscription.
+   */
   async getEffectiveEntitlements(tenantId: string): Promise<Entitlements> {
+    const { account } = await loadAccountBilling(this.prisma, tenantId);
     const { accountId } = await requireTenantAccount(this.prisma, tenantId);
     return this.tenantPrisma.withTenant(tenantId, async (tx) => {
       const subscription = await tx.subscription.findUnique({
@@ -65,35 +79,60 @@ export class QuotaService {
 
       const plan = subscription?.plan ?? (await this.prisma.plan.findUniqueOrThrow({ where: { code: 'FREE' } }));
 
-      const override = await tx.quotaOverride.findFirst({
+      const tenantOverride = await tx.quotaOverride.findFirst({
         where: { tenantId },
         orderBy: { createdAt: 'desc' },
       });
+      const accountBdOverride = await this.accountBranchDeviceOverride(accountId);
 
-      return mergeEntitlements(plan, override);
+      const documents = mergeEntitlements(plan, tenantOverride);
+      const pooledPlan: PlanQuotas = {
+        code: plan.code,
+        documentQuota: plan.documentQuota,
+        branchQuota: Math.max(0, plan.branchQuota) + Math.max(0, account.extraBranches),
+        deviceQuota: Math.max(0, plan.deviceQuota) + Math.max(0, account.extraDevices),
+      };
+      const pooled = mergeEntitlements(pooledPlan, accountBdOverride);
+
+      return {
+        planCode: plan.code,
+        documentQuota: documents.documentQuota,
+        branchQuota: pooled.branchQuota,
+        deviceQuota: pooled.deviceQuota,
+        overrideActive: documents.overrideActive || pooled.overrideActive,
+      };
     });
   }
 
-  /** Documents = analytics `issued` for the Africa/Cairo calendar month; branches = active; devices = PAIRED. */
-  async getUsage(tenantId: string, now: Date = new Date()): Promise<UsageSnapshot> {
-    const { from, to, monthKey } = cairoMonthBounds(now);
+  /** Per-company meters (documents this Cairo month; this company's active branches / paired devices). */
+  async getCompanyMeters(tenantId: string, now: Date = new Date()): Promise<CompanyMeters> {
     const { fromDate, toDate } = cairoMonthDateStrings(now);
-
-    const [summary, branches, devices] = await Promise.all([
+    const [summary, local] = await Promise.all([
       this.analytics.getSummary({ tenantId, from: fromDate, to: toDate }),
-      this.tenantPrisma.withTenant(tenantId, (tx) =>
-        tx.branch.count({ where: { tenantId, isActive: true } }),
-      ),
-      this.tenantPrisma.withTenant(tenantId, (tx) =>
-        tx.signingDevice.count({ where: { tenantId, status: 'PAIRED' } }),
-      ),
+      this.countTenantBranchesDevices(tenantId),
     ]);
+    return {
+      documents: summary.totals.issued ?? 0,
+      branches: local.branches,
+      devices: local.devices,
+    };
+  }
+
+  /**
+   * Documents = this company's analytics `issued` for the Africa/Cairo calendar month.
+   * Branches / devices = ACCOUNT-wide active branches / PAIRED devices.
+   */
+  async getUsage(tenantId: string, now: Date = new Date()): Promise<UsageSnapshot> {
+    const { accountId } = await requireTenantAccount(this.prisma, tenantId);
+    const { from, to, monthKey } = cairoMonthBounds(now);
+    const meters = await this.getCompanyMeters(tenantId, now);
+    const pooled = await this.countAccountBranchesDevices(accountId);
 
     return {
       period: { from, to, monthKey, timezone: CAIRO_TZ },
-      documents: summary.totals.issued ?? 0,
-      branches,
-      devices,
+      documents: meters.documents,
+      branches: pooled.branches,
+      devices: pooled.devices,
     };
   }
 
@@ -132,7 +171,10 @@ export class QuotaService {
       resource === 'documents' ? usage.documents : resource === 'branches' ? usage.branches : usage.devices;
 
     if (used >= limit) {
-      throw new QuotaExceededHttpException(new QuotaExceededError(resource, used, limit));
+      const contact = await this.points.getSupportContact();
+      throw new QuotaExceededHttpException(
+        new QuotaExceededError(resource, used, limit, contact.whatsappUrl, contact.whatsappDisplay),
+      );
     }
   }
 
@@ -142,5 +184,58 @@ export class QuotaService {
     if (!result.allowed) {
       throw new ForbiddenException(result.reason);
     }
+  }
+
+  async countTenantBranchesDevices(tenantId: string): Promise<{ branches: number; devices: number }> {
+    const [branches, devices] = await Promise.all([
+      this.tenantPrisma.withTenant(tenantId, (tx) =>
+        tx.branch.count({ where: { tenantId, isActive: true } }),
+      ),
+      this.tenantPrisma.withTenant(tenantId, (tx) =>
+        tx.signingDevice.count({ where: { tenantId, status: 'PAIRED' } }),
+      ),
+    ]);
+    return { branches, devices };
+  }
+
+  async countAccountBranchesDevices(accountId: string): Promise<{ branches: number; devices: number }> {
+    const tenants = await this.prisma.tenant.findMany({
+      where: { accountId },
+      select: { id: true },
+    });
+    let branches = 0;
+    let devices = 0;
+    for (const tenant of tenants) {
+      const local = await this.countTenantBranchesDevices(tenant.id);
+      branches += local.branches;
+      devices += local.devices;
+    }
+    return { branches, devices };
+  }
+
+  private async accountBranchDeviceOverride(accountId: string): Promise<OverrideQuotas> {
+    const tenants = await this.prisma.tenant.findMany({
+      where: { accountId },
+      select: { id: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    let latest: OverrideQuotas = null;
+    let latestAt = 0;
+    for (const tenant of tenants) {
+      const override = await this.tenantPrisma.withTenant(tenant.id, (tx) =>
+        tx.quotaOverride.findFirst({
+          where: { tenantId: tenant.id },
+          orderBy: { createdAt: 'desc' },
+        }),
+      );
+      if (!override) continue;
+      if (override.branchQuota == null && override.deviceQuota == null) continue;
+      const at = override.createdAt.getTime();
+      if (at >= latestAt) {
+        latestAt = at;
+        latest = override;
+      }
+    }
+    return latest;
   }
 }

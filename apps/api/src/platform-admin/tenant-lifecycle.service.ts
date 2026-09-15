@@ -38,6 +38,8 @@ export type AssignPlanInput = {
   companyQuota?: number | null;
   extraUsers?: number;
   extraCompanies?: number;
+  extraBranches?: number;
+  extraDevices?: number;
   trialEndsAt?: string | null;
   reason: string;
   operatorUserId: string;
@@ -99,7 +101,7 @@ export class TenantLifecycleService {
           ),
           this.prisma.account.findUnique({
             where: { id: tenant.accountId },
-            select: { pointsBalance: true, trialEndsAt: true, extraUsers: true, extraCompanies: true },
+            select: { pointsBalance: true, trialEndsAt: true, extraUsers: true, extraCompanies: true, extraBranches: true, extraDevices: true },
           }),
         ]);
         return this.toSummary(tenant, subscription, ownerMembership?.user.email ?? null, account);
@@ -135,7 +137,7 @@ export class TenantLifecycleService {
       ),
       this.prisma.account.findUnique({
         where: { id: tenant.accountId },
-        select: { pointsBalance: true, trialEndsAt: true, extraUsers: true, extraCompanies: true },
+        select: { pointsBalance: true, trialEndsAt: true, extraUsers: true, extraCompanies: true, extraBranches: true, extraDevices: true },
       }),
       this.prisma.tenant.findMany({
         where: { accountId: tenant.accountId },
@@ -160,6 +162,8 @@ export class TenantLifecycleService {
       trialEndsAt: account?.trialEndsAt?.toISOString() ?? null,
       extraUsers: account?.extraUsers ?? 0,
       extraCompanies: account?.extraCompanies ?? 0,
+      extraBranches: account?.extraBranches ?? 0,
+      extraDevices: account?.extraDevices ?? 0,
       companies: siblings.map((c) => ({
         id: c.id,
         name: c.name,
@@ -276,10 +280,22 @@ export class TenantLifecycleService {
       });
     }
 
-    const extras: { extraUsers?: number; extraCompanies?: number; trialEndsAt?: Date | null } = {};
+    const extras: {
+      extraUsers?: number;
+      extraCompanies?: number;
+      extraBranches?: number;
+      extraDevices?: number;
+      trialEndsAt?: Date | null;
+    } = {};
     if (typeof input.extraUsers === 'number') extras.extraUsers = Math.max(0, Math.floor(input.extraUsers));
     if (typeof input.extraCompanies === 'number') {
       extras.extraCompanies = Math.max(0, Math.floor(input.extraCompanies));
+    }
+    if (typeof input.extraBranches === 'number') {
+      extras.extraBranches = Math.max(0, Math.floor(input.extraBranches));
+    }
+    if (typeof input.extraDevices === 'number') {
+      extras.extraDevices = Math.max(0, Math.floor(input.extraDevices));
     }
     if (input.trialEndsAt !== undefined) {
       extras.trialEndsAt = input.trialEndsAt ? new Date(input.trialEndsAt) : null;
@@ -555,16 +571,16 @@ export class TenantLifecycleService {
     });
     const perCompany = await Promise.all(
       siblings.map(async (company) => {
-        const [entitlements, usage] = await Promise.all([
+        const [entitlements, meters] = await Promise.all([
           this.quota.getEffectiveEntitlements(company.id),
-          this.quota.getUsage(company.id),
+          this.quota.getCompanyMeters(company.id),
         ]);
         return {
           tenantId: company.id,
           name: company.name,
-          documents: usage.documents,
-          branches: usage.branches,
-          devices: usage.devices,
+          documents: meters.documents,
+          branches: meters.branches,
+          devices: meters.devices,
           documentQuota: entitlements.documentQuota,
         };
       }),
@@ -673,7 +689,10 @@ export class TenantLifecycleService {
       const { accountId } = await requireTenantAccount(this.prisma, tenantId);
       await this.prisma.account.update({
         where: { id: accountId },
-        data: { extraCompanies: { increment: addon.quantity } },
+        data: {
+          extraCompanies: { increment: addon.quantity },
+          extraBranches: { increment: addon.quantity },
+        },
       });
     }
 
@@ -749,6 +768,8 @@ export class TenantLifecycleService {
       trialEndsAt: Date | null;
       extraUsers: number;
       extraCompanies: number;
+      extraBranches: number;
+      extraDevices: number;
     } | null = null,
   ) {
     return {
@@ -764,6 +785,8 @@ export class TenantLifecycleService {
       trialEndsAt: account?.trialEndsAt?.toISOString() ?? null,
       extraUsers: account?.extraUsers ?? 0,
       extraCompanies: account?.extraCompanies ?? 0,
+      extraBranches: account?.extraBranches ?? 0,
+      extraDevices: account?.extraDevices ?? 0,
       createdAt: tenant.createdAt.toISOString(),
       ownerEmail,
     };

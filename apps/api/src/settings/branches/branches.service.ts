@@ -158,6 +158,16 @@ export class BranchesSettingsService {
       await this.assertCurrency(input.defaultCurrencyCode);
     }
 
+    if (input.isActive === true) {
+      const current = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+        tx.branch.findFirst({ where: { id: branchId, tenantId }, select: { isActive: true } }),
+      );
+      if (current && !current.isActive) {
+        await this.quota.checkTenantWritable(tenantId);
+        await this.quota.assertWithinLimits(tenantId, 'branches');
+      }
+    }
+
     const branch = await this.tenantPrisma.withTenant(tenantId, async (tx) => {
       const existing = await tx.branch.findFirst({
         where: { id: branchId, tenantId },

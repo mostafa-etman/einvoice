@@ -91,6 +91,8 @@ export type SubscriptionView = {
   sendBlockedReason?: 'TRIAL_ENDED' | 'INSUFFICIENT_POINTS' | null;
   extraUsers?: number;
   extraCompanies?: number;
+  extraBranches?: number;
+  extraDevices?: number;
 };
 
 export type QuotaMeter = { used: number; limit: number };

@@ -103,9 +103,10 @@ describe('billing page', () => {
     expect(screen.queryByText(en.billing.noInvoices)).not.toBeInTheDocument();
   });
 
-  it('shows that points are shared across companies', async () => {
+  it('shows that points, branches, and devices are shared across companies', async () => {
     renderPage();
     expect(await screen.findByText(en.billing.sharedPointsHint)).toBeInTheDocument();
+    expect(await screen.findAllByText(en.billing.sharedBranchesHint)).toHaveLength(2);
   });
 
   it('shows empty invoices when the list is empty', async () => {

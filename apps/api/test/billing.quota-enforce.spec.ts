@@ -63,7 +63,18 @@ describe('Billing quota enforcement GATE', () => {
       .post('/branches')
       .set('Authorization', `Bearer ${ctx.token}`)
       .set('X-Tenant-Id', ctx.tenantId)
-      .send({ name: 'Second Branch', etaBranchCode: '1', activityCode: '6201' })
+      .send({
+        name: 'Second Branch',
+        etaBranchCode: '2',
+        activityCode: '6201',
+        address: {
+          country: 'EG',
+          governate: 'Cairo',
+          regionCity: 'Nasr City',
+          street: 'Main',
+          buildingNumber: '1',
+        },
+      })
       .expect(409);
 
     expect(res.body).toMatchObject({
@@ -72,6 +83,7 @@ describe('Billing quota enforcement GATE', () => {
       used: 1,
       limit: 1,
     });
+    expect(res.body.whatsappUrl).toMatch(/wa\.me/);
   });
 
   it('devices: a QuotaOverride of deviceQuota=0 refuses /agent/pair before the pairing code is even looked up', async () => {

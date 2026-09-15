@@ -16,6 +16,8 @@ export type TenantSummary = {
   trialEndsAt?: string | null;
   extraUsers?: number;
   extraCompanies?: number;
+  extraBranches?: number;
+  extraDevices?: number;
   createdAt: string;
   ownerEmail: string | null;
 };
@@ -25,12 +27,16 @@ export type TenantDetail = TenantSummary & {
   graceEndsAt: string | null;
   extraUsers?: number;
   extraCompanies?: number;
+  extraBranches?: number;
+  extraDevices?: number;
   trialEndsAt?: string | null;
   limits?: {
     maxUsers: number;
     maxCompanies: number;
     extraUsers: number;
     extraCompanies: number;
+    extraBranches?: number;
+    extraDevices?: number;
     users: { used: number; limit: number };
     companies: { used: number; limit: number };
   } | null;
@@ -232,6 +238,8 @@ export function assignPlan(
     companyQuota?: number | null;
     extraUsers?: number;
     extraCompanies?: number;
+    extraBranches?: number;
+    extraDevices?: number;
     trialEndsAt?: string | null;
     reason: string;
   },

@@ -22,6 +22,7 @@ import { AuditService } from '../audit/audit.service';
 import { SubscriptionService } from '../billing/subscription.service';
 import { PointsService } from '../billing/points.service';
 import { LimitService } from '../billing/limit.service';
+import { QuotaService } from '../billing/quota.service';
 import { TrialTaxRegistrationService } from '../billing/trial-tax-registration.service';
 import { isTrialAlreadyUsedException } from '../billing/trial-errors';
 import { loadEnv } from '../config/env';
@@ -45,6 +46,8 @@ export class TenantService implements OnModuleInit {
     private readonly points: PointsService,
     @Inject(forwardRef(() => LimitService))
     private readonly limits: LimitService,
+    @Inject(forwardRef(() => QuotaService))
+    private readonly quota: QuotaService,
     @Inject(forwardRef(() => TrialTaxRegistrationService))
     private readonly trialTax: TrialTaxRegistrationService,
   ) {}
@@ -209,6 +212,17 @@ export class TenantService implements OnModuleInit {
           });
           existingAccountId = parent?.accountId ?? null;
         }
+      }
+    }
+
+    if (!isFirst && opts.activation !== 'active' && existingAccountId) {
+      const anyTenant = await this.prisma.tenant.findFirst({
+        where: { accountId: existingAccountId },
+        select: { id: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (anyTenant) {
+        await this.quota.assertWithinLimits(anyTenant.id, 'branches');
       }
     }
 
@@ -393,7 +407,7 @@ export class TenantService implements OnModuleInit {
     });
     await this.prisma.account.update({
       where: { id: accountId },
-      data: { trialEndsAt, extraUsers: 0, extraCompanies: 0 },
+      data: { trialEndsAt, extraUsers: 0, extraCompanies: 0, extraBranches: 0, extraDevices: 0 },
     });
     await this.points.grantTrialPointsIfNeeded(tenantId, userId);
   }

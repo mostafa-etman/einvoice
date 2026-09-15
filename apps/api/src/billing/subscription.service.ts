@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import type { BillingProviderId, Subscription, SubscriptionStatus } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -6,6 +6,7 @@ import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { BILLING_AUDIT_ACTIONS } from './billing-audit';
 import { isTrialExpired } from './points-errors';
 import { loadAccountBilling, requireTenantAccount } from './account-scope';
+import { QuotaService } from './quota.service';
 
 export type SubscriptionView = {
   status: SubscriptionStatus;
@@ -39,6 +40,8 @@ export type SubscriptionView = {
   sendBlockedReason: 'TRIAL_ENDED' | 'INSUFFICIENT_POINTS' | null;
   extraUsers: number;
   extraCompanies: number;
+  extraBranches: number;
+  extraDevices: number;
 };
 
 export type AssignPlanOpts = {
@@ -65,6 +68,8 @@ export class SubscriptionService {
     private readonly prisma: PrismaService,
     private readonly tenantPrisma: TenantPrismaService,
     private readonly audit: AuditService,
+    @Inject(forwardRef(() => QuotaService))
+    private readonly quota: QuotaService,
   ) {}
 
   /** Idempotent: creates an ACTIVE Free subscription for the tenant's account if one doesn't already exist. */
@@ -193,17 +198,12 @@ export class SubscriptionService {
     await this.ensureFreeSubscription(tenantId);
 
     const { accountId } = await requireTenantAccount(this.prisma, tenantId);
-    const [subscription, account, override] = await Promise.all([
+    const [subscription, account, entitlements] = await Promise.all([
       this.tenantPrisma.withTenant(tenantId, (tx) =>
         tx.subscription.findUniqueOrThrow({ where: { accountId }, include: { plan: true } }),
       ),
       loadAccountBilling(this.prisma, tenantId).then((r) => r.account),
-      this.tenantPrisma.withTenant(tenantId, (tx) =>
-        tx.quotaOverride.findFirst({
-          where: { tenantId, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
-          orderBy: { createdAt: 'desc' },
-        }),
-      ),
+      this.quota.getEffectiveEntitlements(tenantId),
     ]);
     const tenant = await this.prisma.tenant.findUnique({
       where: { id: tenantId },
@@ -250,10 +250,10 @@ export class SubscriptionService {
       },
       graceEndsAt: subscription.graceEndsAt?.toISOString() ?? null,
       entitlements: {
-        documentQuota: override?.documentQuota ?? subscription.plan.documentQuota,
-        branchQuota: override?.branchQuota ?? subscription.plan.branchQuota,
-        deviceQuota: override?.deviceQuota ?? subscription.plan.deviceQuota,
-        overrideActive: Boolean(override),
+        documentQuota: entitlements.documentQuota,
+        branchQuota: entitlements.branchQuota,
+        deviceQuota: entitlements.deviceQuota,
+        overrideActive: entitlements.overrideActive,
       },
       accessMode,
       pointsBalance: account.pointsBalance,
@@ -263,6 +263,8 @@ export class SubscriptionService {
       sendBlockedReason,
       extraUsers: account.extraUsers,
       extraCompanies: account.extraCompanies,
+      extraBranches: account.extraBranches,
+      extraDevices: account.extraDevices,
     };
   }
 }

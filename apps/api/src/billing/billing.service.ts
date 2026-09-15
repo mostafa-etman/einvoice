@@ -8,6 +8,7 @@ import { QuotaService } from './quota.service';
 import { SubscriptionService } from './subscription.service';
 import { LimitService } from './limit.service';
 import { toAddonView, toPlanView } from './pricing-view';
+import { loadAccountBilling } from './account-scope';
 
 export type StartCheckoutInput = {
   planCode: string;
@@ -129,11 +130,12 @@ export class BillingService {
       throw new BadRequestException('unknown_plan');
     }
 
+    const { account } = await loadAccountBilling(this.prisma, tenantId);
     const usage = await this.quota.getUsage(tenantId);
     if (
       usage.documents > targetPlan.documentQuota ||
-      usage.branches > targetPlan.branchQuota ||
-      usage.devices > targetPlan.deviceQuota
+      usage.branches > targetPlan.branchQuota + account.extraBranches ||
+      usage.devices > targetPlan.deviceQuota + account.extraDevices
     ) {
       throw new ConflictException('usage_exceeds_target_plan_quotas');
     }

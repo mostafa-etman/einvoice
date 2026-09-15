@@ -15,8 +15,11 @@ describe('platform admin page smoke', () => {
     expect(en.admin.accountCompanies).toBeTruthy();
     expect(en.admin.sharedPoints).toBeTruthy();
     expect(ar.admin.accountCompanies).toBeTruthy();
-    expect(en.billing.sharedPointsHint).toBeTruthy();
-    expect(ar.billing.sharedPointsHint).toBeTruthy();
+    expect(en.admin.extraUsers).toBeTruthy();
+    expect(en.admin.extraBranches).toBeTruthy();
+    expect(ar.admin.extraBranches).toContain('فروع');
+    expect(en.admin.branchQuota).toContain('branch');
+    expect(ar.admin.deviceQuota).toContain('أجهزة');
     expect(en.admin.isActive).toBeTruthy();
     expect(en.admin.hideFromCustomers).toBeTruthy();
     expect(en.admin.tabTrials).toBeTruthy();

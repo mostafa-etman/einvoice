@@ -8,6 +8,8 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { TenantPrismaService } from '../src/prisma/tenant-prisma.service';
 import { PointsService } from '../src/billing/points.service';
 import { InsufficientPointsHttpException } from '../src/billing/points-errors';
+import { QuotaService } from '../src/billing/quota.service';
+import { QuotaExceededHttpException } from '../src/billing/quota-errors';
 
 async function registerUser(app: INestApplication, suffix: string) {
   const email = `acct_${suffix}@example.com`;
@@ -67,7 +69,7 @@ describe('Account-level subscription and shared points', () => {
     const assigned = await request(app.getHttpServer())
       .post(`/platform-admin/tenants/${first.body.id}/plan`)
       .set('Authorization', `Bearer ${user.token}`)
-      .send({ planCode: 'BASIC', extraCompanies: 3, extraUsers: 2, reason: 'account-share' });
+      .send({ planCode: 'BASIC', extraCompanies: 3, extraUsers: 2, extraBranches: 3, extraDevices: 2, reason: 'account-share' });
     expect([200, 201]).toContain(assigned.status);
 
     const second = await request(app.getHttpServer())
@@ -199,7 +201,7 @@ describe('Account-level subscription and shared points', () => {
     const assigned = await request(app.getHttpServer())
       .post(`/platform-admin/tenants/${first.body.id}/plan`)
       .set('Authorization', `Bearer ${user.token}`)
-      .send({ planCode: 'BASIC', extraCompanies: 2, reason: 'ignore-plan-code' });
+      .send({ planCode: 'BASIC', extraCompanies: 2, extraBranches: 2, reason: 'ignore-plan-code' });
     expect([200, 201]).toContain(assigned.status);
 
     const parent = await prisma.tenant.findUniqueOrThrow({
@@ -268,5 +270,69 @@ describe('Account-level subscription and shared points', () => {
         }),
       ),
     ).rejects.toBeInstanceOf(InsufficientPointsHttpException);
+  });
+
+  it('pools branches and devices across companies and blocks at the account cap', async () => {
+    if (!dbAvailable) return;
+    const t = `pool${Date.now()}`;
+    const user = await registerUser(app, t);
+    const prisma = app.get(PrismaService);
+    await prisma.user.update({
+      where: { id: user.userId },
+      data: { isPlatformOperator: true },
+    });
+
+    const first = await request(app.getHttpServer())
+      .post('/tenants')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ name: `Pool parent ${t}` })
+      .expect(201);
+
+    const assigned = await request(app.getHttpServer())
+      .post(`/platform-admin/tenants/${first.body.id}/plan`)
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({
+        planCode: 'BASIC',
+        extraCompanies: 1,
+        extraBranches: 1,
+        extraDevices: 0,
+        reason: 'pool-branches',
+      });
+    expect([200, 201]).toContain(assigned.status);
+
+    const second = await request(app.getHttpServer())
+      .post('/tenants')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ name: `Pool child ${t}` })
+      .expect(201);
+
+    const quota = app.get(QuotaService);
+    const parentSnap = await quota.getQuotaSnapshot(first.body.id);
+    const childSnap = await quota.getQuotaSnapshot(second.body.id);
+    expect(parentSnap.branches.used).toBe(2);
+    expect(parentSnap.branches.limit).toBe(2);
+    expect(childSnap.branches.used).toBe(2);
+    expect(childSnap.branches.limit).toBe(2);
+    expect(parentSnap.devices.limit).toBe(1);
+
+    await expect(quota.assertWithinLimits(first.body.id, 'branches')).rejects.toBeInstanceOf(
+      QuotaExceededHttpException,
+    );
+    await expect(quota.assertWithinLimits(second.body.id, 'branches')).rejects.toBeInstanceOf(
+      QuotaExceededHttpException,
+    );
+
+    const usage = await request(app.getHttpServer())
+      .get(`/platform-admin/tenants/${first.body.id}/usage`)
+      .set('Authorization', `Bearer ${user.token}`)
+      .expect(200);
+    expect(usage.body.quotas.branches).toEqual({ used: 2, limit: 2 });
+    expect(usage.body.accountUsage.branches).toBe(2);
+    expect(usage.body.accountUsage.companies).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ tenantId: first.body.id, branches: 1 }),
+        expect.objectContaining({ tenantId: second.body.id, branches: 1 }),
+      ]),
+    );
   });
 });

@@ -9,6 +9,8 @@ export type AccountBilling = {
   trialEndsAt: Date | null;
   extraUsers: number;
   extraCompanies: number;
+  extraBranches: number;
+  extraDevices: number;
 };
 
 const accountBillingSelect = {
@@ -18,6 +20,8 @@ const accountBillingSelect = {
   trialEndsAt: true,
   extraUsers: true,
   extraCompanies: true,
+  extraBranches: true,
+  extraDevices: true,
 } as const;
 
 export async function requireTenantAccount(

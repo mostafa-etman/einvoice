@@ -238,6 +238,8 @@ export class PlatformAdminController {
       companyQuota?: number | null;
       extraUsers?: number;
       extraCompanies?: number;
+      extraBranches?: number;
+      extraDevices?: number;
       trialEndsAt?: string | null;
       reason: string;
     },
