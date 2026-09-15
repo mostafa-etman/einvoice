@@ -180,6 +180,61 @@ describe('Account-level subscription and shared points', () => {
     expect(usage.body.pointsBalance).toBe(fromParent.balanceAfter);
   });
 
+  it('ignores planCode on extra companies and never opens a second subscription', async () => {
+    if (!dbAvailable) return;
+    const t = `ignore${Date.now()}`;
+    const user = await registerUser(app, t);
+    const prisma = app.get(PrismaService);
+    await prisma.user.update({
+      where: { id: user.userId },
+      data: { isPlatformOperator: true },
+    });
+
+    const first = await request(app.getHttpServer())
+      .post('/tenants')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ name: `Parent ${t}` })
+      .expect(201);
+
+    const assigned = await request(app.getHttpServer())
+      .post(`/platform-admin/tenants/${first.body.id}/plan`)
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ planCode: 'BASIC', extraCompanies: 2, reason: 'ignore-plan-code' });
+    expect([200, 201]).toContain(assigned.status);
+
+    const parent = await prisma.tenant.findUniqueOrThrow({
+      where: { id: first.body.id },
+      select: { accountId: true },
+    });
+
+    const withTrialCode = await request(app.getHttpServer())
+      .post('/tenants')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ name: `Child trial code ${t}`, planCode: 'TRIAL' })
+      .expect(201);
+    expect(withTrialCode.body.accountId).toBe(parent.accountId);
+
+    const withUnknown = await request(app.getHttpServer())
+      .post('/tenants')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ name: `Child unknown ${t}`, planCode: 'NOT_A_PLAN' })
+      .expect(201);
+    expect(withUnknown.body.accountId).toBe(parent.accountId);
+
+    const childSub = await request(app.getHttpServer())
+      .get('/billing/subscription')
+      .set('Authorization', `Bearer ${user.token}`)
+      .set('X-Tenant-Id', withUnknown.body.id)
+      .expect(200);
+    expect(childSub.body.plan.code).toBe('BASIC');
+
+    const tenantPrisma = app.get(TenantPrismaService);
+    const subCount = await tenantPrisma.withTenant(first.body.id, (tx) =>
+      tx.subscription.count({ where: { accountId: parent.accountId } }),
+    );
+    expect(subCount).toBe(1);
+  });
+
   it('blocks send against the shared account balance with the existing 402', async () => {
     if (!dbAvailable) return;
     const t = `low${Date.now()}`;

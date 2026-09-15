@@ -42,13 +42,15 @@ export function TenantSwitcher() {
           {roleName}
         </span>
       ) : null}
-      <Link
-        href={`/${locale}/onboarding`}
-        className="text-token-sm text-brand underline"
-        data-testid="tenant-switcher-create"
-      >
-        {t('createCompany')}
-      </Link>
+      {memberships.some((m) => m.role.name === 'Owner') ? (
+        <Link
+          href={`/${locale}/companies/new`}
+          className="text-token-sm text-brand underline"
+          data-testid="tenant-switcher-create"
+        >
+          {t('createCompany')}
+        </Link>
+      ) : null}
     </div>
   );
 }

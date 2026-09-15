@@ -133,6 +133,12 @@ export class TenantService implements OnModuleInit {
     });
   }
 
+  /**
+   * Two flows:
+   * - First company (new signup): optional planCode / trial, new account + subscription.
+   * - Extra company (existing owner): attach to the current account, inherit plan +
+   *   shared points, ignore planCode, never open a new subscription or points pool.
+   */
   async createTenant(
     userId: string,
     name: string,
@@ -148,7 +154,9 @@ export class TenantService implements OnModuleInit {
     const ownerCount = await this.countOwnerTenants(userId);
     const isFirst = ownerCount === 0;
     const autoApprove = loadEnv().SIGNUP_AUTO_APPROVE;
-    const planCode = opts.planCode?.trim() || undefined;
+    // Sub-companies inherit the account plan + shared points. A plan choice is
+    // only valid on the first company (new-signup onboarding).
+    const planCode = isFirst ? opts.planCode?.trim() || undefined : undefined;
     let selectedPlan: { code: string; isTrial: boolean; isActive: boolean } | null = null;
     if (planCode) {
       const plan = await this.prisma.plan.findUnique({ where: { code: planCode } });
@@ -275,19 +283,23 @@ export class TenantService implements OnModuleInit {
         throw err;
       }
     } else {
+      // Idempotent: first company gets FREE (or a paid plan below). Extra
+      // companies attach to the existing account subscription — this returns
+      // that row and never opens a second points pool.
       await this.subscriptions.ensureFreeSubscription(result.tenant.id);
-      const mayAssignSelectedPaid =
-        isFirst &&
-        Boolean(selectedPlan && !selectedPlan.isTrial) &&
-        (autoApprove || opts.activation === 'active');
-      if (mayAssignSelectedPaid && planCode && planCode !== 'FREE') {
-        await this.subscriptions.assignPlan(result.tenant.id, planCode, {
-          actorUserId: userId,
-          reason: 'signup_plan',
-        });
-      }
-      if (activationStatus === 'ACTIVE' && isFirst) {
-        await this.points.grantPlanPointsIfNeeded(result.tenant.id, userId);
+      if (isFirst) {
+        const mayAssignSelectedPaid =
+          Boolean(selectedPlan && !selectedPlan.isTrial) &&
+          (autoApprove || opts.activation === 'active');
+        if (mayAssignSelectedPaid && planCode && planCode !== 'FREE') {
+          await this.subscriptions.assignPlan(result.tenant.id, planCode, {
+            actorUserId: userId,
+            reason: 'signup_plan',
+          });
+        }
+        if (activationStatus === 'ACTIVE') {
+          await this.points.grantPlanPointsIfNeeded(result.tenant.id, userId);
+        }
       }
     }
 
@@ -300,8 +312,9 @@ export class TenantService implements OnModuleInit {
       resourceId: result.tenant.id,
       metadata: {
         activationStatus,
-        planCode: startTrial ? 'TRIAL' : (planCode ?? 'FREE'),
+        planCode: startTrial ? 'TRIAL' : (planCode ?? (isFirst ? 'FREE' : 'inherited')),
         trial: startTrial,
+        inheritedAccountPlan: !isFirst,
         accountId: result.tenant.accountId,
       },
     });

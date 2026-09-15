@@ -170,6 +170,7 @@ describe('app shell smoke', () => {
     expect(await screen.findByLabelText('Language')).toBeInTheDocument();
     expect(screen.getByTestId('shell-eta-env-badge')).toBeInTheDocument();
     expect(screen.getByTestId('tenant-switcher')).toBeInTheDocument();
+    expect(screen.getByTestId('tenant-switcher-create')).toHaveAttribute('href', '/en/companies/new');
     expect(screen.getByTestId('branch-switcher')).toBeInTheDocument();
   });
 

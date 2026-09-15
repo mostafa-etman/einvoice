@@ -9,7 +9,7 @@ import LoginPage from './login/page';
 import RegisterPage from './register/page';
 import OnboardingPage from './onboarding/page';
 import { establishTenantContext } from '@/lib/establish-tenant-context';
-import { createTenant } from '@/lib/api/tenants';
+import { createTenant, listMyTenants } from '@/lib/api/tenants';
 import { fetchCatalog } from '@/lib/api/billing';
 import { ApiError } from '@/lib/api/client';
 import en from '@/messages/en.json';
@@ -24,10 +24,15 @@ jest.mock('next/navigation', () => ({
   useParams: jest.fn(() => ({ locale: 'en' })),
 }));
 
+const mockAuthState: { ready: boolean; user: { id: string } | null } = {
+  ready: true,
+  user: null,
+};
+
 jest.mock('@/lib/auth-provider', () => ({
   useAuth: () => ({
-    ready: true,
-    user: null,
+    ready: mockAuthState.ready,
+    user: mockAuthState.user,
     login: mockLogin,
     register: mockRegister,
     logout: jest.fn(),
@@ -40,6 +45,7 @@ jest.mock('@/lib/establish-tenant-context', () => ({
 
 jest.mock('@/lib/api/tenants', () => ({
   createTenant: jest.fn(),
+  listMyTenants: jest.fn(async () => []),
 }));
 
 jest.mock('@/lib/api/billing', () => ({
@@ -99,9 +105,13 @@ describe('auth pages smoke', () => {
   beforeEach(() => {
     mockLogin.mockReset();
     mockRegister.mockReset();
+    mockAuthState.user = null;
+    mockAuthState.ready = true;
     (establishTenantContext as jest.Mock).mockReset();
     (establishTenantContext as jest.Mock).mockResolvedValue({ needsOnboarding: false, promptEtaSetup: false });
     (createTenant as jest.Mock).mockReset();
+    (listMyTenants as jest.Mock).mockReset();
+    (listMyTenants as jest.Mock).mockResolvedValue([]);
     (fetchCatalog as jest.Mock).mockReset();
     (fetchCatalog as jest.Mock).mockResolvedValue({
       trialDays: 7,
@@ -240,6 +250,19 @@ describe('auth pages smoke', () => {
       expect(createTenant).toHaveBeenCalledWith('Acme', { planCode: 'TRIAL', taxRegistrationNumber: undefined }),
     );
     await waitFor(() => expect(push).toHaveBeenCalledWith('/en/settings/eta-credentials'));
+  });
+
+  it('sends an existing owner away from plan selection to create-company', async () => {
+    const replace = jest.fn();
+    (useRouter as jest.Mock).mockReturnValue({ push: jest.fn(), replace });
+    mockAuthState.user = { id: 'u1' };
+    (listMyTenants as jest.Mock).mockResolvedValue([
+      { tenant: { id: 't1', name: 'Parent' }, role: { name: 'Owner' } },
+    ]);
+    renderAuth(<OnboardingPage />, 'en', '/en/onboarding');
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/en/companies/new'));
+    expect(screen.queryByRole('heading', { name: en.auth.choosePlan })).not.toBeInTheDocument();
+    expect(createTenant).not.toHaveBeenCalled();
   });
 
   it('keeps trial-already-used and company-limit errors', async () => {

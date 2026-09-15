@@ -5,9 +5,9 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { createTenant } from '@/lib/api/tenants';
+import { createTenant, listMyTenants } from '@/lib/api/tenants';
 import { fetchCatalog, type PlanView } from '@/lib/api/billing';
 import { ApiError } from '@/lib/api/client';
 import { trialAlreadyUsedMessage } from '@/lib/api/trial-already-used';
@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { BuildingIcon } from '@/components/auth/auth-icons';
 import { useMutationToast } from '@/components/ui/use-mutation-toast';
+import { useAuth } from '@/lib/auth-provider';
 
 const schema = z.object({
   name: z.string().min(2),
@@ -27,12 +28,15 @@ type FormValues = z.infer<typeof schema>;
 export default function OnboardingPage() {
   const t = useTranslations('auth');
   const tb = useTranslations('billing');
+  const tStates = useTranslations('common.states');
   const locale = useLocale();
   const router = useRouter();
   const queryClient = useQueryClient();
   const toast = useMutationToast();
+  const { user, ready } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [choosing, setChoosing] = useState(false);
+  const [existingAccount, setExistingAccount] = useState<boolean | null>(() => (user ? null : false));
   const catalogQuery = useQuery({ queryKey: ['signup-catalog'], queryFn: fetchCatalog });
   const {
     register,
@@ -45,6 +49,31 @@ export default function OnboardingPage() {
   });
   const { ref: nameRef, ...nameField } = register('name');
   const { ref: taxRef, ...taxField } = register('taxRegistrationNumber');
+
+  useEffect(() => {
+    if (!ready) return;
+    if (!user) {
+      setExistingAccount(false);
+      return;
+    }
+    let cancelled = false;
+    void listMyTenants()
+      .then((rows) => {
+        if (cancelled) return;
+        if (rows.length > 0) {
+          setExistingAccount(true);
+          router.replace(`/${locale}/companies/new`);
+          return;
+        }
+        setExistingAccount(false);
+      })
+      .catch(() => {
+        if (!cancelled) setExistingAccount(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, user, locale, router]);
 
   const busy = isSubmitting || choosing;
 
@@ -92,6 +121,16 @@ export default function OnboardingPage() {
     const trial = catalogQuery.data?.plans.find((p) => p.isTrial);
     await startCompany(trial);
   });
+
+  if (user && existingAccount !== false) {
+    return (
+      <main>
+        <p className="text-token-sm text-foreground-muted" role="status" aria-busy="true">
+          {tStates('loading')}
+        </p>
+      </main>
+    );
+  }
 
   return (
     <main>
