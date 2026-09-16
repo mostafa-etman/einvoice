@@ -4,7 +4,12 @@
 set -euo pipefail
 
 RID="${1:-osx-x64}"
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$(dirname "${0}")" && pwd)"
 
-"$ROOT/package-macos-app.sh" "$RID"
-"$ROOT/make-dmg.sh" "$RID"
+if [[ "${RID}" != "osx-x64" && "${RID}" != "osx-arm64" ]]; then
+  echo "Usage: ${0} [osx-x64|osx-arm64]"
+  exit 1
+fi
+
+"${ROOT}/package-macos-app.sh" "${RID}"
+"${ROOT}/make-dmg.sh" "${RID}"
