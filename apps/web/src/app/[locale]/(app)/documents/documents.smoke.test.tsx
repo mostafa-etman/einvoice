@@ -33,6 +33,8 @@ describe('documents smoke', () => {
     expect(en.documents.importedFromEta).toBeTruthy();
     expect(en.documents.readOnlyValidBadge).toBeTruthy();
     expect(ar.documents.readOnlyValidBadge).toBeTruthy();
+    expect(en.documents.signedEditRevertedToDraft).toBeTruthy();
+    expect(ar.documents.signedEditRevertedToDraft).toBeTruthy();
     expect(en.documents.save).toBeTruthy();
     expect(ar.documents.taxModeNone).toBeTruthy();
     expect(ar.documents.serviceDeliveryDate).toBeTruthy();

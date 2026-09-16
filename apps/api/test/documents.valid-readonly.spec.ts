@@ -194,4 +194,143 @@ describe('VALID documents are read-only', () => {
     expect(updated.body.etaPayload?.receiver?.name).toBe('Updated Buyer');
     expect(updated.body.status).toBe('DRAFT');
   });
+
+  it('rejects PUT on SUBMITTED', async () => {
+    const ctx = await ownerCtx(app, `s${Date.now()}`);
+    const created = await request(app.getHttpServer())
+      .post('/documents')
+      .set('Authorization', `Bearer ${ctx.token}`)
+      .set('X-Tenant-Id', ctx.tenantId)
+      .send(draftBody(ctx.branchId, `INV-SUB-${Date.now()}`))
+      .expect(201);
+
+    await tenantPrisma.withTenant(ctx.tenantId, (tx) =>
+      tx.document.update({
+        where: { id: created.body.id },
+        data: { status: 'SUBMITTED' },
+      }),
+    );
+
+    const put = await request(app.getHttpServer())
+      .put(`/documents/${created.body.id}`)
+      .set('Authorization', `Bearer ${ctx.token}`)
+      .set('X-Tenant-Id', ctx.tenantId)
+      .send({
+        ...draftBody(ctx.branchId, created.body.internalId),
+        version: created.body.version,
+        receiver: { type: 'B', name: 'Hacked Buyer' },
+      })
+      .expect(403);
+    expect(put.body.code).toBe('DOCUMENT_NOT_EDITABLE');
+    expect(put.body.message).toBe(DOCUMENT_NOT_EDITABLE_MESSAGE);
+  });
+
+  it('rejects PUT on CANCELLED', async () => {
+    const ctx = await ownerCtx(app, `c${Date.now()}`);
+    const created = await request(app.getHttpServer())
+      .post('/documents')
+      .set('Authorization', `Bearer ${ctx.token}`)
+      .set('X-Tenant-Id', ctx.tenantId)
+      .send(draftBody(ctx.branchId, `INV-CAN-${Date.now()}`))
+      .expect(201);
+
+    await tenantPrisma.withTenant(ctx.tenantId, (tx) =>
+      tx.document.update({
+        where: { id: created.body.id },
+        data: { status: 'CANCELLED' },
+      }),
+    );
+
+    await request(app.getHttpServer())
+      .put(`/documents/${created.body.id}`)
+      .set('Authorization', `Bearer ${ctx.token}`)
+      .set('X-Tenant-Id', ctx.tenantId)
+      .send({
+        ...draftBody(ctx.branchId, created.body.internalId),
+        version: created.body.version,
+        receiver: { type: 'B', name: 'Hacked Buyer' },
+      })
+      .expect(403);
+  });
+
+  it('reverts SIGNED to DRAFT and clears the signature on edit; submit then requires a fresh sign', async () => {
+    const ctx = await ownerCtx(app, `g${Date.now()}`);
+    const created = await request(app.getHttpServer())
+      .post('/documents')
+      .set('Authorization', `Bearer ${ctx.token}`)
+      .set('X-Tenant-Id', ctx.tenantId)
+      .send(draftBody(ctx.branchId, `INV-SG-${Date.now()}`))
+      .expect(201);
+
+    await tenantPrisma.withTenant(ctx.tenantId, (tx) =>
+      tx.document.update({
+        where: { id: created.body.id },
+        data: {
+          status: 'SIGNED',
+          signedAt: new Date(),
+          signaturesJson: [{ signatureType: 'I', value: 'old-cades' }],
+        },
+      }),
+    );
+
+    const auth = {
+      Authorization: `Bearer ${ctx.token}`,
+      'X-Tenant-Id': ctx.tenantId,
+    };
+
+    const updated = await request(app.getHttpServer())
+      .put(`/documents/${created.body.id}`)
+      .set(auth)
+      .send({
+        ...draftBody(ctx.branchId, created.body.internalId),
+        version: created.body.version,
+        receiver: { type: 'B', name: 'Corrected Buyer' },
+      })
+      .expect(200);
+    expect(updated.body.status).toBe('DRAFT');
+    expect(updated.body.etaPayload?.receiver?.name).toBe('Corrected Buyer');
+    expect(updated.body.signaturesJson).toBeNull();
+    expect(updated.body.signedAt).toBeNull();
+
+    const submit = await request(app.getHttpServer())
+      .post(`/documents/${created.body.id}/submit`)
+      .set(auth)
+      .expect(400);
+    expect(String(submit.body.message ?? '')).toMatch(/SIGNED/i);
+  });
+
+  it('allows editing a REJECTED document so it can be re-signed and re-submitted', async () => {
+    const ctx = await ownerCtx(app, `r${Date.now()}`);
+    const created = await request(app.getHttpServer())
+      .post('/documents')
+      .set('Authorization', `Bearer ${ctx.token}`)
+      .set('X-Tenant-Id', ctx.tenantId)
+      .send(draftBody(ctx.branchId, `INV-RJ-${Date.now()}`))
+      .expect(201);
+
+    await tenantPrisma.withTenant(ctx.tenantId, (tx) =>
+      tx.document.update({
+        where: { id: created.body.id },
+        data: {
+          status: 'REJECTED',
+          signaturesJson: [{ signatureType: 'I', value: 'stale-cades' }],
+          signedAt: new Date(),
+        },
+      }),
+    );
+
+    const updated = await request(app.getHttpServer())
+      .put(`/documents/${created.body.id}`)
+      .set('Authorization', `Bearer ${ctx.token}`)
+      .set('X-Tenant-Id', ctx.tenantId)
+      .send({
+        ...draftBody(ctx.branchId, created.body.internalId),
+        version: created.body.version,
+        receiver: { type: 'B', name: 'Fixed Buyer' },
+      })
+      .expect(200);
+    expect(updated.body.status).toBe('DRAFT');
+    expect(updated.body.etaPayload?.receiver?.name).toBe('Fixed Buyer');
+    expect(updated.body.signaturesJson).toBeNull();
+  });
 });

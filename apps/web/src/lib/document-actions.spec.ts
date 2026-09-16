@@ -13,17 +13,15 @@ describe('canPrepareDocumentForSubmit', () => {
     expect(canPrepareDocumentForSubmit('LOCAL', 'PENDING_SIGNATURE')).toBe(true);
   });
 
-  it('hides pre-submission actions after submit / acceptance / cancel', () => {
-    for (const status of [
-      'SIGNED',
-      'SUBMITTED',
-      'VALID',
-      'INVALID',
-      'CANCELLED',
-      'REJECTED',
-    ]) {
+  it('hides pre-submission actions after sign / submit / acceptance / cancel', () => {
+    for (const status of ['SIGNED', 'SUBMITTED', 'VALID', 'CANCELLED']) {
       expect(canPrepareDocumentForSubmit('LOCAL', status)).toBe(false);
     }
+  });
+
+  it('allows prepare (re-sign) after ETA reject or invalid', () => {
+    expect(canPrepareDocumentForSubmit('LOCAL', 'REJECTED')).toBe(true);
+    expect(canPrepareDocumentForSubmit('LOCAL', 'INVALID')).toBe(true);
   });
 
   it('never shows pre-submission actions on historical ETA imports', () => {
@@ -33,20 +31,20 @@ describe('canPrepareDocumentForSubmit', () => {
 });
 
 describe('canEditDocument', () => {
-  it('allows draft and ready local documents', () => {
+  it('allows draft, ready, signed, rejected, and invalid local documents', () => {
     expect(canEditDocument('LOCAL', 'DRAFT')).toBe(true);
     expect(canEditDocument('LOCAL', 'READY')).toBe(true);
+    expect(canEditDocument('LOCAL', 'SIGNED')).toBe(true);
+    expect(canEditDocument('LOCAL', 'REJECTED')).toBe(true);
+    expect(canEditDocument('LOCAL', 'INVALID')).toBe(true);
     expect(canEditDocument('FILE_IMPORT', 'DRAFT')).toBe(true);
   });
 
-  it('locks VALID, submitted, cancelled, rejected, and signed documents', () => {
+  it('locks VALID, submitted, cancelled, and pending-signature documents', () => {
     for (const status of [
-      'SIGNED',
       'SUBMITTED',
       'VALID',
-      'INVALID',
       'CANCELLED',
-      'REJECTED',
       'PENDING_SIGNATURE',
     ]) {
       expect(canEditDocument('LOCAL', status)).toBe(false);

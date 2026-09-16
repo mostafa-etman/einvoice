@@ -437,6 +437,7 @@ export default function DocumentEditorPage() {
     status: string;
   } | null>(null);
   const [sendingSignature, setSendingSignature] = useState(false);
+  const [revertedToDraft, setRevertedToDraft] = useState(false);
 
   const cooldownActive = Boolean(cooldownUntil && new Date(cooldownUntil).getTime() > nowMs);
   const displayStatus = resolveDocumentStatus(docStatus, etaStatusRaw);
@@ -1183,6 +1184,10 @@ export default function DocumentEditorPage() {
             ) : documentReadOnly ? (
               <p className="text-warning" role="status">
                 {t('readOnlyFinalBanner')}
+              </p>
+            ) : revertedToDraft ? (
+              <p className="text-warning" role="status">
+                {t('signedEditRevertedToDraft')}
               </p>
             ) : null}
             {submissionUuid ? (
@@ -2293,11 +2298,20 @@ export default function DocumentEditorPage() {
                   toast.saved();
                   router.replace(`/${locale}/documents/${String(created.id)}`);
                 } else {
+                  const previousStatus = docStatus;
                   const updated = await updateDocument(params.id, body());
                   setVersion(Number(updated.version));
                   setCanonical(String(updated.canonicalString ?? ''));
                   setEtaJson(JSON.stringify(updated.etaPayload, null, 2));
                   setTotals(updated.totals as Record<string, unknown>);
+                  setDocStatus(String(updated.status ?? 'DRAFT'));
+                  if (
+                    previousStatus === 'SIGNED' ||
+                    previousStatus === 'REJECTED' ||
+                    previousStatus === 'INVALID'
+                  ) {
+                    setRevertedToDraft(true);
+                  }
                   toast.saved();
                 }
               } catch (e) {
@@ -2336,63 +2350,29 @@ export default function DocumentEditorPage() {
           </Button>
           ) : null}
           {offlineHint ? <span className="text-token-sm text-warning">{offlineHint}</span> : null}
-          {!isNew ? (
-            <>
-              {canPrepareForSubmit && !documentReadOnly ? (
-              <>
-              <Button
-                variant="secondary"
-                disabled={readOnlyHistorical}
-                onClick={async () => {
-                  const res = await validateDocument(params.id);
-                  const nextErrors: Record<string, string> = {};
-                  for (const issue of res.issues) {
-                    if (issue.severity === 'warning') continue;
-                    const path = issue.path || issue.code;
-                    nextErrors[path] = issue.message;
-                  }
-                  setFieldErrors(nextErrors);
-                  const settingsIssue = res.issues.find(
-                    (i) => i.severity !== 'warning' && i.fixIn === 'settings',
-                  );
-                  setSettingsFixArea(
-                    settingsIssue ? (settingsIssue.settingsArea ?? 'branches') : null,
-                  );
-                  const warnings = res.issues.filter((i) => i.severity === 'warning');
-                  const errors = res.issues.filter((i) => i.severity !== 'warning');
-                  if (res.ok && warnings.length) {
-                    setIssues([
-                      t('validationOkWithWarnings'),
-                      ...warnings.map(
-                        (i) => `${i.code}${i.path ? ` @ ${i.path}` : ''}: ${i.message}`,
-                      ),
-                    ]);
-                  } else if (res.ok) {
-                    setIssues([t('validationOk')]);
-                  } else {
-                    setIssues(
-                      errors.map((i) => `${i.code}${i.path ? ` @ ${i.path}` : ''}: ${i.message}`),
-                    );
-                  }
-                }}
-              >
-                {t('validate')}
-              </Button>
-              {docStatus === 'DRAFT' || docStatus === 'READY' ? (
+          {!isNew && !documentReadOnly ? (
                   <Button
                     type="button"
                     variant="secondary"
                     title={t('recalculateTotalsHint')}
-                    disabled={readOnlyHistorical}
+                    disabled={readOnlyHistorical || submitting}
                   onClick={async () => {
                     try {
                       setError(null);
+                      const previousStatus = docStatus;
                       const updated = await recalculateDocumentTotals(params.id);
                       setVersion(Number(updated.version));
                       setDocStatus(String(updated.status ?? docStatus));
                       setCanonical(String(updated.canonicalString ?? ''));
                       setEtaJson(JSON.stringify(updated.etaPayload, null, 2));
                       setTotals(updated.totals as Record<string, unknown>);
+                      if (
+                        previousStatus === 'SIGNED' ||
+                        previousStatus === 'REJECTED' ||
+                        previousStatus === 'INVALID'
+                      ) {
+                        setRevertedToDraft(true);
+                      }
                       const docLines = updated.lines as Array<Record<string, unknown>>;
                       if (docLines?.length) {
                         setLines(
@@ -2437,13 +2417,57 @@ export default function DocumentEditorPage() {
                 >
                   {t('recalculateTotals')}
                 </Button>
-              ) : null}
+          ) : null}
+          {!isNew ? (
+            <>
+              {canPrepareForSubmit && !documentReadOnly ? (
+              <>
+              <Button
+                variant="secondary"
+                disabled={readOnlyHistorical}
+                onClick={async () => {
+                  const res = await validateDocument(params.id);
+                  const nextErrors: Record<string, string> = {};
+                  for (const issue of res.issues) {
+                    if (issue.severity === 'warning') continue;
+                    const path = issue.path || issue.code;
+                    nextErrors[path] = issue.message;
+                  }
+                  setFieldErrors(nextErrors);
+                  const settingsIssue = res.issues.find(
+                    (i) => i.severity !== 'warning' && i.fixIn === 'settings',
+                  );
+                  setSettingsFixArea(
+                    settingsIssue ? (settingsIssue.settingsArea ?? 'branches') : null,
+                  );
+                  const warnings = res.issues.filter((i) => i.severity === 'warning');
+                  const errors = res.issues.filter((i) => i.severity !== 'warning');
+                  if (res.ok && warnings.length) {
+                    setIssues([
+                      t('validationOkWithWarnings'),
+                      ...warnings.map(
+                        (i) => `${i.code}${i.path ? ` @ ${i.path}` : ''}: ${i.message}`,
+                      ),
+                    ]);
+                  } else if (res.ok) {
+                    setIssues([t('validationOk')]);
+                  } else {
+                    setIssues(
+                      errors.map((i) => `${i.code}${i.path ? ` @ ${i.path}` : ''}: ${i.message}`),
+                    );
+                  }
+                }}
+              >
+                {t('validate')}
+              </Button>
               <Button
                 variant="secondary"
                 disabled={readOnlyHistorical}
                 onClick={async () => {
                   try {
                     await markDocumentReady(params.id);
+                    setDocStatus('READY');
+                    setRevertedToDraft(false);
                     setIssues([t('validationOk')]);
                   } catch (e) {
                     setError(e instanceof Error ? e.message : t('validationFailed'));

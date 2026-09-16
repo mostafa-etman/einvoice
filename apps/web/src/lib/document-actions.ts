@@ -7,14 +7,24 @@ export function canPrepareDocumentForSubmit(
 ): boolean {
   if (origin === 'ETA_SYNC') return false;
   return (
-    status === 'DRAFT' || status === 'READY' || status === 'PENDING_SIGNATURE'
+    status === 'DRAFT' ||
+    status === 'READY' ||
+    status === 'PENDING_SIGNATURE' ||
+    status === 'REJECTED' ||
+    status === 'INVALID'
   );
 }
 
-/** Content edits (header, lines, taxes, totals, save, mark-ready). */
+/** Content edits (header, lines, taxes, totals, save). SIGNED reverts to DRAFT on save. */
 export function canEditDocument(origin: string, status: string): boolean {
   if (origin === 'ETA_SYNC') return false;
-  return status === 'DRAFT' || status === 'READY';
+  return (
+    status === 'DRAFT' ||
+    status === 'READY' ||
+    status === 'SIGNED' ||
+    status === 'REJECTED' ||
+    status === 'INVALID'
+  );
 }
 
 /** Credit-note return is only valid against an accepted invoice with an ETA UUID. */

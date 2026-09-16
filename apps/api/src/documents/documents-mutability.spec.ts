@@ -9,23 +9,20 @@ import {
 } from './documents-mutability';
 
 describe('document mutability guard', () => {
-  it('allows DRAFT and READY', () => {
-    expect(isDocumentEditableStatus('DRAFT')).toBe(true);
-    expect(isDocumentEditableStatus('READY')).toBe(true);
-    expect(() => assertDocumentEditable('DRAFT')).not.toThrow();
-    expect(() => assertDocumentEditable('READY')).not.toThrow();
-    expect(() => assertDocumentCanMutate('LOCAL', 'DRAFT')).not.toThrow();
+  it('allows DRAFT, READY, SIGNED, REJECTED, and INVALID', () => {
+    for (const status of ['DRAFT', 'READY', 'SIGNED', 'REJECTED', 'INVALID']) {
+      expect(isDocumentEditableStatus(status)).toBe(true);
+      expect(() => assertDocumentEditable(status)).not.toThrow();
+      expect(() => assertDocumentCanMutate('LOCAL', status)).not.toThrow();
+    }
     expect(() => assertDocumentCanMutate('FILE_IMPORT', 'READY')).not.toThrow();
   });
 
-  it('rejects VALID and other final / post-sign statuses', () => {
+  it('rejects VALID, SUBMITTED, CANCELLED, and PENDING_SIGNATURE', () => {
     for (const status of [
       'VALID',
       'SUBMITTED',
       'CANCELLED',
-      'REJECTED',
-      'INVALID',
-      'SIGNED',
       'PENDING_SIGNATURE',
     ]) {
       expect(isDocumentEditableStatus(status)).toBe(false);
@@ -54,6 +51,9 @@ describe('document mutability guard', () => {
       BadRequestException,
     );
     expect(() => assertDocumentCanMutate('ETA_SYNC', 'VALID')).toThrow(
+      BadRequestException,
+    );
+    expect(() => assertDocumentCanMutate('ETA_SYNC', 'SIGNED')).toThrow(
       BadRequestException,
     );
   });

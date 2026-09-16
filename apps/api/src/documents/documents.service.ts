@@ -25,7 +25,7 @@ import {
   type JsonObject,
   type LineInput,
 } from '@einvoice/eta-core';
-import type { DocumentKind, DocumentOrigin, DocumentStatus, Prisma } from '@prisma/client';
+import { Prisma, type DocumentKind, type DocumentOrigin, type DocumentStatus } from '@prisma/client';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { QuotaService } from '../billing/quota.service';
@@ -881,6 +881,11 @@ export class DocumentsService {
       });
       await tx.documentLine.deleteMany({ where: { documentId: id } });
 
+      await tx.signatureJob.updateMany({
+        where: { documentId: id, status: { in: ['PENDING', 'CLAIMED'] } },
+        data: { status: 'CANCELLED', completedAt: new Date() },
+      });
+
       return tx.document.update({
         where: { id },
         data: {
@@ -910,6 +915,10 @@ export class DocumentsService {
           etaPayloadJson: built.etaPayload as Prisma.InputJsonValue,
           etaPayloadText: payloadText,
           canonicalPreview: canonical,
+          // Content changed: any prior CAdES is invalid for these bytes.
+          signaturesJson: Prisma.DbNull,
+          signedAt: null,
+          signedByDeviceId: null,
           version: { increment: 1 },
           // New bytes are not the payload ETA flagged as duplicate, so any
           // pending duplicate cooldown no longer applies to this document.
@@ -1190,12 +1199,16 @@ export class DocumentsService {
   }
 
   /**
-   * Statuses that may be recalculated. Signed/submitted payloads must not be
-   * mutated — their digests are already bound to the stored totals.
+   * Statuses that may be recalculated. VALID / SUBMITTED / CANCELLED stay locked
+   * by assertDocumentCanMutate. Recalc of a signed payload clears the signature
+   * and reverts to DRAFT (same as a content edit).
    */
   private static readonly RECALCULABLE_STATUSES: DocumentStatus[] = [
     'DRAFT',
     'READY',
+    'SIGNED',
+    'REJECTED',
+    'INVALID',
   ];
 
   async recalculateTotals(tenantId: string, actorUserId: string, id: string) {
@@ -1209,14 +1222,9 @@ export class DocumentsService {
       if (!existing) throw new NotFoundException('Document not found');
       assertDocumentCanMutate(existing.origin, existing.status);
 
-      if (
-        !DocumentsService.RECALCULABLE_STATUSES.includes(existing.status) ||
-        existing.signedAt ||
-        (Array.isArray(existing.signaturesJson) &&
-          (existing.signaturesJson as unknown[]).length > 0)
-      ) {
+      if (!DocumentsService.RECALCULABLE_STATUSES.includes(existing.status)) {
         throw new BadRequestException(
-          'Only draft/ready unsigned documents can have totals recalculated',
+          'Only editable documents can have totals recalculated',
         );
       }
 
@@ -1244,9 +1252,15 @@ export class DocumentsService {
       });
       await tx.documentLine.deleteMany({ where: { documentId: id } });
 
+      await tx.signatureJob.updateMany({
+        where: { documentId: id, status: { in: ['PENDING', 'CLAIMED'] } },
+        data: { status: 'CANCELLED', completedAt: new Date() },
+      });
+
       return tx.document.update({
         where: { id },
         data: {
+          status: 'DRAFT',
           exchangeRate: binding.exchangeRate,
           extraDiscountAmount: built.totals.extraDiscountAmount,
           totalSalesAmount: built.totals.totalSalesAmount,
@@ -1258,6 +1272,9 @@ export class DocumentsService {
           etaPayloadJson: built.etaPayload as Prisma.InputJsonValue,
           etaPayloadText: payloadText,
           canonicalPreview: canonical,
+          signaturesJson: Prisma.DbNull,
+          signedAt: null,
+          signedByDeviceId: null,
           version: { increment: 1 },
           updatedByUserId: actorUserId,
           lines: {

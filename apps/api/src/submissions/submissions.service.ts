@@ -267,9 +267,7 @@ export class SubmissionsService implements OnModuleDestroy {
         if (
           doc.status === 'VALID' ||
           doc.status === 'SUBMITTED' ||
-          doc.status === 'CANCELLED' ||
-          doc.status === 'REJECTED' ||
-          doc.status === 'INVALID'
+          doc.status === 'CANCELLED'
         ) {
           throw documentNotEditableException();
         }
