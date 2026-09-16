@@ -32,6 +32,21 @@ public static class TokenAutoDetect
         "cryptoVisionPKCS11.dll",
     ];
 
+    /// <summary>Feitian / Egypt Trust Castle PKCS#11 on macOS (POC-validated: libcastle.1.0.0.dylib).</summary>
+    public const string DefaultMacLibraryPath = "/usr/local/lib/libcastle.1.0.0.dylib";
+
+    public static readonly string[] MacLibraryCandidatePaths =
+    [
+        DefaultMacLibraryPath,
+        "/usr/local/lib/libcastle.dylib",
+        "/usr/local/lib/libcastle_v2.1.0.0.dylib",
+        "/usr/local/lib/libeps2003csp11.dylib",
+        "/usr/local/lib/pkcs11/libeps2003csp11.dylib",
+        "/usr/lib/libeps2003csp11.dylib",
+        "/Library/OpenSC/lib/opensc-pkcs11.dylib",
+        "/usr/local/lib/opensc-pkcs11.dylib",
+    ];
+
     public static IReadOnlyList<DetectedPkcs11Library> ScanLibraries()
     {
         var found = new List<DetectedPkcs11Library>();
@@ -147,6 +162,13 @@ public static class TokenAutoDetect
         var env = Environment.GetEnvironmentVariable("EINVOICE_PKCS11_LIBRARY");
         if (!string.IsNullOrWhiteSpace(env))
             yield return env;
+
+        if (OperatingSystem.IsMacOS())
+        {
+            foreach (var path in MacLibraryCandidatePaths)
+                yield return path;
+            yield break;
+        }
 
         var system = Environment.SystemDirectory;
         var sysWow = Path.Combine(

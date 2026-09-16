@@ -1,25 +1,30 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Einvoice.Agent.Platform;
 
 namespace Einvoice.Agent.Config;
 
 /// <summary>
-/// Optional local PIN cache. PIN ciphertext is DPAPI-protected
-/// (<see cref="DataProtectionScope.CurrentUser"/>) — bound to the Windows user+machine.
-/// Never syncs to the cloud. Disabled unless the user explicitly opts in.
+/// Optional local PIN cache. Ciphertext is DPAPI-protected on Windows and
+/// Keychain-wrapped on macOS. Never syncs to the cloud. Disabled unless the
+/// user explicitly opts in.
 /// </summary>
 public static class PinVault
 {
-    public const string FileName = "pin.dpapi";
+    public static string FileName =>
+        OperatingSystem.IsWindows() ? "pin.dpapi" : "pin.vault.json";
 
     public static string DefaultPath =>
         Path.Combine(LocalAgentConfig.DefaultDirectory, FileName);
+
+    private const string Purpose = "Einvoice.Agent.PinVault.v1";
 
     private sealed class Envelope
     {
         public DateTimeOffset ExpiresUtc { get; set; }
         public string CipherBase64 { get; set; } = "";
+        public string Protection { get; set; } = LocalSecretProtector.DpapiProtection;
     }
 
     public static void Save(
@@ -28,8 +33,6 @@ public static class PinVault
         string? path = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(pin);
-        if (!OperatingSystem.IsWindows())
-            throw new PlatformNotSupportedException("PIN remember requires Windows DPAPI.");
 
         path ??= DefaultPath;
         var dir = Path.GetDirectoryName(path);
@@ -39,10 +42,7 @@ public static class PinVault
         var plain = Encoding.UTF8.GetBytes(pin);
         try
         {
-            var protectedBytes = ProtectedData.Protect(
-                plain,
-                optionalEntropy: Encoding.UTF8.GetBytes("Einvoice.Agent.PinVault.v1"),
-                scope: DataProtectionScope.CurrentUser);
+            var (protection, cipher) = LocalSecretProtector.Protect(plain, Purpose);
 
             var expires = lifetime <= TimeSpan.Zero
                 ? DateTimeOffset.MaxValue
@@ -51,7 +51,8 @@ public static class PinVault
             var envelope = new Envelope
             {
                 ExpiresUtc = expires,
-                CipherBase64 = Convert.ToBase64String(protectedBytes),
+                CipherBase64 = cipher,
+                Protection = protection,
             };
             File.WriteAllText(path, JsonSerializer.Serialize(envelope));
         }
@@ -64,7 +65,7 @@ public static class PinVault
     public static string? TryLoad(string? path = null)
     {
         path ??= DefaultPath;
-        if (!File.Exists(path) || !OperatingSystem.IsWindows())
+        if (!File.Exists(path))
             return null;
 
         try
@@ -79,11 +80,14 @@ public static class PinVault
                 return null;
             }
 
-            var protectedBytes = Convert.FromBase64String(envelope.CipherBase64);
-            var plain = ProtectedData.Unprotect(
-                protectedBytes,
-                optionalEntropy: Encoding.UTF8.GetBytes("Einvoice.Agent.PinVault.v1"),
-                scope: DataProtectionScope.CurrentUser);
+            var plain = LocalSecretProtector.Unprotect(
+                string.IsNullOrWhiteSpace(envelope.Protection)
+                    ? LocalSecretProtector.DpapiProtection
+                    : envelope.Protection,
+                envelope.CipherBase64,
+                Purpose);
+            if (plain is null)
+                return null;
             try
             {
                 return Encoding.UTF8.GetString(plain);

@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- macOS tray agent. Reuses Einvoice.Agent signing/pairing/worker. Does not replace the Windows desktop project. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Einvoice.Agent.Mac</RootNamespace>
+    <AssemblyName>Einvoice.Agent.Mac</AssemblyName>
+    <Product>eInvoice Signing Agent</Product>
+    <Company>Einvoice</Company>
+    <Version>0.1.0</Version>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <RollForward>LatestMinor</RollForward>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\agent\src\Einvoice.Agent\Einvoice.Agent.csproj" />
+    <PackageReference Include="Avalonia" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.3" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+</Project>

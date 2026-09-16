@@ -4,7 +4,9 @@ using System.Text.Json.Serialization;
 namespace Einvoice.Agent.Config;
 
 /// <summary>
-/// Non-secret agent preferences stored under %LocalAppData%\Einvoice.Agent\agent.config.json.
+/// Non-secret agent preferences stored under the per-user agent directory
+/// (Windows: %LocalAppData%\Einvoice.Agent\agent.config.json;
+/// macOS: ~/Library/Application Support/Einvoice.Agent/agent.config.json).
 /// Never stores the eSeal PIN (see <see cref="PinVault"/>).
 /// </summary>
 public sealed class LocalAgentConfig
@@ -52,6 +54,16 @@ public sealed class LocalAgentConfig
     {
         get
         {
+            if (OperatingSystem.IsMacOS())
+            {
+                var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                if (string.IsNullOrWhiteSpace(home))
+                    home = Environment.GetEnvironmentVariable("HOME");
+                if (string.IsNullOrWhiteSpace(home))
+                    home = ".";
+                return Path.Combine(home, "Library", "Application Support", "Einvoice.Agent");
+            }
+
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             if (string.IsNullOrWhiteSpace(local))
                 local = Environment.GetEnvironmentVariable("LOCALAPPDATA");

@@ -1,3 +1,4 @@
+using Einvoice.Agent.Platform;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -7,9 +8,10 @@ using System.Text.RegularExpressions;
 namespace Einvoice.Agent.Config;
 
 /// <summary>
-/// Long-lived pairing record stored under %LocalAppData%\Einvoice.Agent.
-/// The device token is DPAPI-protected on Windows (CurrentUser). The eSeal PIN
-/// is never stored here (see <see cref="PinVault"/>).
+/// Long-lived pairing record stored under the per-user agent directory
+/// (%LocalAppData%\Einvoice.Agent on Windows; ~/Library/Application Support/Einvoice.Agent on macOS).
+/// The device token is DPAPI-protected on Windows and Keychain-wrapped on macOS.
+/// The eSeal PIN is never stored here (see <see cref="PinVault"/>).
 /// </summary>
 public sealed class PersistedPairing
 {
@@ -238,57 +240,31 @@ public static class DeviceTokenStore
         var plain = Encoding.UTF8.GetBytes(token);
         try
         {
-            if (OperatingSystem.IsWindows())
-            {
-                var protectedBytes = ProtectedData.Protect(
-                    plain,
-                    optionalEntropy: Encoding.UTF8.GetBytes(DpapiEntropy),
-                    scope: DataProtectionScope.CurrentUser);
-                return ("dpapi", Convert.ToBase64String(protectedBytes));
-            }
+            return LocalSecretProtector.Protect(plain, DpapiEntropy);
         }
         catch
         {
-            // Fall through to base64 (still local-disk only; PIN is never stored here).
+            return (LocalSecretProtector.NoneProtection, Convert.ToBase64String(Encoding.UTF8.GetBytes(token)));
         }
         finally
         {
             CryptographicOperations.ZeroMemory(plain);
         }
-
-        return ("none", Convert.ToBase64String(Encoding.UTF8.GetBytes(token)));
     }
 
     private static string? UnprotectToken(string? protection, string cipherBase64)
     {
-        byte[] bytes;
+        var plain = LocalSecretProtector.Unprotect(protection, cipherBase64, DpapiEntropy);
+        if (plain is null)
+            return null;
         try
         {
-            bytes = Convert.FromBase64String(cipherBase64);
+            return Encoding.UTF8.GetString(plain);
         }
-        catch
+        finally
         {
-            return null;
+            CryptographicOperations.ZeroMemory(plain);
         }
-
-        if (string.Equals(protection, "dpapi", StringComparison.OrdinalIgnoreCase)
-            && OperatingSystem.IsWindows())
-        {
-            try
-            {
-                var plain = ProtectedData.Unprotect(
-                    bytes,
-                    optionalEntropy: Encoding.UTF8.GetBytes(DpapiEntropy),
-                    scope: DataProtectionScope.CurrentUser);
-                return Encoding.UTF8.GetString(plain);
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        return Encoding.UTF8.GetString(bytes);
     }
 
     private static bool LooksLikeDeviceToken(string text) =>

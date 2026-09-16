@@ -122,6 +122,15 @@ public class DeviceTokenStoreTests
         var dir = LocalAgentConfig.DefaultDirectory;
         Assert.Contains("Einvoice.Agent", dir, StringComparison.Ordinal);
         Assert.False(dir.StartsWith(AppContext.BaseDirectory, StringComparison.OrdinalIgnoreCase));
+        if (OperatingSystem.IsMacOS())
+        {
+            Assert.Contains(
+                Path.Combine("Library", "Application Support", "Einvoice.Agent"),
+                dir,
+                StringComparison.Ordinal);
+            return;
+        }
+
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (!string.IsNullOrWhiteSpace(local))
             Assert.StartsWith(local, dir, StringComparison.OrdinalIgnoreCase);

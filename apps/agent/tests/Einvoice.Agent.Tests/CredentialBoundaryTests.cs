@@ -89,6 +89,13 @@ public class CredentialBoundaryTests
     }
 
     [Fact]
+    public void TokenAutoDetect_mac_candidates_include_validated_castle_dylib()
+    {
+        Assert.Equal("/usr/local/lib/libcastle.1.0.0.dylib", TokenAutoDetect.DefaultMacLibraryPath);
+        Assert.Contains(TokenAutoDetect.DefaultMacLibraryPath, TokenAutoDetect.MacLibraryCandidatePaths);
+    }
+
+    [Fact]
     public void PreferEsealCertificate_prefers_sealing_issuer()
     {
         var certs = new[]

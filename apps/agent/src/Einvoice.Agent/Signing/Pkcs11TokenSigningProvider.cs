@@ -89,21 +89,36 @@ public sealed class Pkcs11TokenSigningProvider : ISigningProvider
             }
         }
 
-        try
+        if (OperatingSystem.IsWindows())
         {
-            return SignViaCsp(contentUtf8, pin);
+            try
+            {
+                return SignViaCsp(contentUtf8, pin);
+            }
+            catch (Exception cspEx)
+            {
+                var msg =
+                    $"{HardwarePendingMarker}: PKCS#11 and CSP signing both failed (UNVERIFIED hardware path).";
+                if (pkcs11Error is not null)
+                    msg += $" PKCS#11: {pkcs11Error.Message}.";
+                else if (string.IsNullOrWhiteSpace(lib))
+                    msg += " PKCS#11 library not found (set EINVOICE_PKCS11_LIBRARY).";
+                msg += $" CSP: {cspEx.Message}";
+                throw new InvalidOperationException(msg, cspEx);
+            }
         }
-        catch (Exception cspEx)
+
+        if (pkcs11Error is not null)
         {
-            var msg =
-                $"{HardwarePendingMarker}: PKCS#11 and CSP signing both failed (UNVERIFIED hardware path).";
-            if (pkcs11Error is not null)
-                msg += $" PKCS#11: {pkcs11Error.Message}.";
-            else if (string.IsNullOrWhiteSpace(lib))
-                msg += " PKCS#11 library not found (set EINVOICE_PKCS11_LIBRARY).";
-            msg += $" CSP: {cspEx.Message}";
-            throw new InvalidOperationException(msg, cspEx);
+            throw new InvalidOperationException(
+                $"{HardwarePendingMarker}: PKCS#11 signing failed. {pkcs11Error.Message}",
+                pkcs11Error);
         }
+
+        throw new InvalidOperationException(
+            $"{HardwarePendingMarker}: PKCS#11 library not found. " +
+            "Install Egypt Trust / ePass macOS middleware and set EINVOICE_PKCS11_LIBRARY " +
+            $"(typical: {TokenAutoDetect.DefaultMacLibraryPath}).");
     }
 
     private SigningOutcome SignViaPkcs11(byte[] contentUtf8, string pin, string libraryPath)

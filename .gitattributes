@@ -1,1 +1,3 @@
-scripts/*.sh text eol=lf
+# Shell scripts must be LF so they run on macOS after a Windows checkout
+# (CRLF causes `$'\r': command not found` / `set: pipefail`).
+*.sh text eol=lf
