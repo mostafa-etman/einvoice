@@ -177,6 +177,8 @@ describe('invoice numbering + credit note references', () => {
 
     expect(created.body.etaPayload.references).toEqual([picked, manual]);
     expect(created.body.etaPayload.documentType).toBe('C');
+    expect(created.body.etaPayload.receiver.type).toBe('B');
+    expect(created.body.etaPayload.receiver).not.toHaveProperty('branch');
 
     await request(app.getHttpServer())
       .post(`/documents/${created.body.id}/mark-ready`)

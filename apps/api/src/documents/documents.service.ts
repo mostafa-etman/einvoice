@@ -20,6 +20,8 @@ import {
   isIssuerNameComplete,
   serializeEtaDocument,
   validateDocument,
+  compactEtaReceiver,
+  receiverFromStoredDocument,
   type DocumentKind as EtaDocumentKind,
   type IssuerAddress,
   type JsonObject,
@@ -154,6 +156,8 @@ export type DocumentUpsertDto = {
     id?: string;
     name?: string;
     address?: AddressDto;
+    /** Optional; not an ETA receiver field — omit when blank/null. */
+    branch?: string | null;
   };
   payment?: {
     bankName?: string;
@@ -224,6 +228,34 @@ export class DocumentsService {
       if (mapped) return mapped as DocumentStatus;
     }
     return status;
+  }
+
+  /** Persist the same receiver we put on the ETA payload (never a blank/invalid type). */
+  private receiverColumnsFromPayload(payload: JsonObject): {
+    receiverType: string | undefined;
+    receiverId: string | undefined;
+    receiverName: string | undefined;
+    receiverAddressJson: Prisma.InputJsonValue | undefined;
+  } {
+    const recv = payload.receiver;
+    if (!recv || typeof recv !== 'object' || Array.isArray(recv)) {
+      return {
+        receiverType: undefined,
+        receiverId: undefined,
+        receiverName: undefined,
+        receiverAddressJson: undefined,
+      };
+    }
+    const r = recv as JsonObject;
+    return {
+      receiverType: typeof r.type === 'string' ? r.type : undefined,
+      receiverId: typeof r.id === 'string' ? r.id : undefined,
+      receiverName: typeof r.name === 'string' ? r.name : undefined,
+      receiverAddressJson:
+        r.address && typeof r.address === 'object'
+          ? (r.address as Prisma.InputJsonValue)
+          : undefined,
+    };
   }
 
   private lineInputs(dto: DocumentUpsertDto): LineInput[] {
@@ -352,23 +384,15 @@ export class DocumentsService {
     taxpayerActivityCode: string,
   ) {
     const lines = this.lineInputs(dto);
-    const isExport = dto.kind.startsWith('EXPORT');
-    const receiverType =
-      dto.receiver?.type ?? (isExport ? 'F' : 'B');
 
     return buildByKind(dto.kind as EtaDocumentKind, {
       documentTypeVersion,
       dateTimeIssued: formatEtaDateTimeIssued(dto.issueDateTime),
       internalID: dto.internalId,
       issuer: issuerSnapshot,
-      receiver: {
-        type: receiverType,
-        id: dto.receiver?.id ?? '',
-        name: dto.receiver?.name ?? '',
-        ...(dto.receiver?.address
-          ? { address: dto.receiver.address as JsonObject }
-          : {}),
-      },
+      receiver: compactEtaReceiver(dto.receiver, {
+        isExport: dto.kind.startsWith('EXPORT'),
+      }),
       lines,
       extraDiscountAmount: dto.extraDiscountAmount ?? '0.00',
       references: (dto.references as string[] | JsonObject | null | undefined) ?? null,
@@ -756,10 +780,7 @@ export class DocumentsService {
           etaDocumentType: binding.etaDocumentType,
           etaDocumentTypeVersion: binding.etaDocumentTypeVersion,
           typeVersionFetchedAt: binding.typeVersionFetchedAt,
-          receiverType: dto.receiver?.type,
-          receiverId: dto.receiver?.id,
-          receiverName: dto.receiver?.name,
-          receiverAddressJson: dto.receiver?.address as Prisma.InputJsonValue | undefined,
+          ...this.receiverColumnsFromPayload(built.etaPayload),
           issuerSnapshotJson: binding.issuerSnapshot as Prisma.InputJsonValue,
           referencesJson: (dto.references as Prisma.InputJsonValue) ?? undefined,
           extraDiscountAmount: built.totals.extraDiscountAmount,
@@ -899,10 +920,7 @@ export class DocumentsService {
           etaDocumentType: binding.etaDocumentType,
           etaDocumentTypeVersion: binding.etaDocumentTypeVersion,
           typeVersionFetchedAt: binding.typeVersionFetchedAt,
-          receiverType: dto.receiver?.type,
-          receiverId: dto.receiver?.id,
-          receiverName: dto.receiver?.name,
-          receiverAddressJson: dto.receiver?.address as Prisma.InputJsonValue | undefined,
+          ...this.receiverColumnsFromPayload(built.etaPayload),
           issuerSnapshotJson: binding.issuerSnapshot as Prisma.InputJsonValue,
           referencesJson: (dto.references as Prisma.InputJsonValue) ?? undefined,
           extraDiscountAmount: built.totals.extraDiscountAmount,
@@ -1524,12 +1542,14 @@ export class DocumentsService {
         typeof payload.serviceDeliveryDate === 'string'
           ? payload.serviceDeliveryDate
           : undefined,
-      receiver: {
-        type: doc.receiverType ?? undefined,
-        id: doc.receiverId ?? undefined,
-        name: doc.receiverName ?? undefined,
-        address: (doc.receiverAddressJson as AddressDto | null) ?? undefined,
-      },
+      receiver: receiverFromStoredDocument({
+        kind: doc.kind,
+        receiverType: doc.receiverType,
+        receiverId: doc.receiverId,
+        receiverName: doc.receiverName,
+        receiverAddressJson: doc.receiverAddressJson,
+        etaPayloadJson: doc.etaPayloadJson,
+      }) as DocumentUpsertDto['receiver'],
       payment: (payload.payment as DocumentUpsertDto['payment']) ?? null,
       delivery: (payload.delivery as DocumentUpsertDto['delivery']) ?? null,
       references:
@@ -1651,6 +1671,7 @@ export class DocumentsService {
         'issuer.address.street',
         'issuer.address.buildingNumber',
         'receiver',
+        'receiver.type',
         'invoiceLines',
         'internalID',
         'taxpayerActivityCode',
@@ -1763,6 +1784,8 @@ export class DocumentsService {
                     : i.code === 'ETA_TOTAL_AMOUNT_MISMATCH' ||
                         i.code === 'ETA_NET_AMOUNT_MISMATCH'
                     ? `${i.path} must be ${i.params?.expected ?? ''} but is ${i.params?.actual ?? ''}`
+                    : i.code === 'RECEIVER_TYPE_INVALID'
+                    ? `receiver.type must be ${i.params?.allowed ?? 'B, P, or F'} (got ${i.params?.got ?? ''})`
                     : i.code === 'FIXED_TAX_AMOUNT_REQUIRED'
                     ? `Fixed-amount tax ${i.params?.taxType ?? ''} requires an explicit amount`
                     : i.code === 'FIXED_TAX_RATE_MUST_BE_ZERO'

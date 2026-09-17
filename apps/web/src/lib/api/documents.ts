@@ -48,6 +48,8 @@ export type DocumentUpsert = {
     id?: string;
     name?: string;
     address?: AddressInput;
+    /** Optional; omit when blank. Not an ETA-required receiver field. */
+    branch?: string;
   };
   payment?: {
     bankName?: string;

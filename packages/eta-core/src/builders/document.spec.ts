@@ -151,5 +151,37 @@ describe('builders', () => {
     });
     expect(etaPayload.documentType).toBe('C');
     expect(etaPayload.references).toBeTruthy();
+    expect(etaPayload.receiver).toEqual({ type: 'B', name: 'Buyer' });
+  });
+
+  it('omits null receiver.branch and never sends an invalid type', () => {
+    const { etaPayload } = buildCreditNote({
+      documentTypeVersion: '1.0',
+      dateTimeIssued: '2026-01-01T00:00:00Z',
+      internalID: 'CN-2',
+      issuer: { name: 'Issuer' },
+      receiver: {
+        type: 'C',
+        name: 'Buyer',
+        id: '123456789',
+        branch: null,
+        address: { country: 'EG', governate: 'Cairo', branchID: null },
+      },
+      references: ['TZRKK8MFZCPSTW9XCYWBMKME11'],
+      lines: [
+        {
+          description: 'Item',
+          itemType: 'EGS',
+          itemCode: 'X',
+          unitType: 'EA',
+          quantity: '1',
+          unitPrice: '10.00',
+        },
+      ],
+    });
+    const recv = etaPayload.receiver as Record<string, unknown>;
+    expect(recv.type).toBe('B');
+    expect(recv).not.toHaveProperty('branch');
+    expect(recv.address).toEqual({ country: 'EG', governate: 'Cairo' });
   });
 });

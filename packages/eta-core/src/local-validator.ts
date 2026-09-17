@@ -8,6 +8,7 @@ import {
 import { KIND_TO_ETA_TYPE, type DocumentKind } from './builders/document.js';
 import { isValidEtaDateTimeIssued } from './eta-formats.js';
 import { add, formatMoney, sub } from './money.js';
+import { isEtaReceiverType } from './receiver.js';
 import {
   documentKindTypicallyRequiresTax,
   findDuplicateTaxTypes,
@@ -333,6 +334,28 @@ export function validateDocument(params: {
       severity: 'error',
       messageKey: 'documents.validation.exchangeRate',
     });
+  }
+
+  const receiver = document.receiver;
+  if (receiver && typeof receiver === 'object' && !Array.isArray(receiver)) {
+    const recv = receiver as JsonObject;
+    if ('type' in recv || 'Type' in recv) {
+      const raw = String(recv.type ?? recv.Type ?? '').trim().toUpperCase();
+      const exportNeedsF = kind.startsWith('EXPORT');
+      if (!isEtaReceiverType(raw) || (exportNeedsF && raw !== 'F')) {
+        issues.push({
+          code: 'RECEIVER_TYPE_INVALID',
+          path: 'receiver.type',
+          severity: 'error',
+          messageKey: 'documents.validation.receiverType',
+          params: {
+            path: 'receiver.type',
+            got: String(recv.type ?? recv.Type ?? ''),
+            allowed: exportNeedsF ? 'F' : 'B, P, F',
+          },
+        });
+      }
+    }
   }
 
   const isNote = kind.includes('CREDIT') || kind.includes('DEBIT');

@@ -155,4 +155,27 @@ describe('LocalValidator', () => {
     });
     expect(issues.some((i) => i.code === 'DUPLICATE_TAX_TYPE')).toBe(true);
   });
+
+  it('rejects an invalid receiver.type (not B/P/F)', () => {
+    const issues = validateDocument({
+      kind: 'CREDIT_NOTE',
+      document: {
+        documentType: 'C',
+        documentTypeVersion: '1.0',
+        dateTimeIssued: '2026-01-01T00:00:00Z',
+        issuer: {},
+        receiver: { type: 'C', name: 'Buyer' },
+        invoiceLines: [],
+        internalID: 'CN-1',
+      },
+      typeVersionSchema: { documentType: 'C', documentTypeVersion: '1.0' },
+      refs: {
+        branchOk: true,
+        currencyOk: true,
+        itemCodesOk: true,
+        originalDocumentOk: true,
+      },
+    });
+    expect(issues.some((i) => i.code === 'RECEIVER_TYPE_INVALID')).toBe(true);
+  });
 });

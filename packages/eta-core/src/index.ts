@@ -132,6 +132,15 @@ export {
   type IssuerType,
 } from './issuer-identity.js';
 export {
+  ETA_RECEIVER_TYPES,
+  compactEtaAddress,
+  compactEtaReceiver,
+  isEtaReceiverType,
+  normalizeEtaReceiverType,
+  receiverFromStoredDocument,
+  type EtaReceiverType,
+} from './receiver.js';
+export {
   ETA_INTERNAL_ID_MAX_LENGTH,
   ETA_INTERNAL_ID_PATTERN,
   ETA_DOCUMENT_UUID_PATTERN,

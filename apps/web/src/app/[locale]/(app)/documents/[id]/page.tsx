@@ -71,8 +71,10 @@ import {
   sortEtaCodeEntries,
   subtypesForTaxType,
   taxesForMode,
+  compactEtaReceiver,
   formatEtaIntakeError,
   formatEtaIntakeErrorSummary,
+  normalizeEtaReceiverType,
   type LineTaxMode,
 } from '@einvoice/eta-core';
 import { LineTaxesEditor, taxRowSummary } from './line-taxes-editor';
@@ -372,6 +374,7 @@ export default function DocumentEditorPage() {
     id: string;
     name: string;
     address: AddressInput;
+    branch?: string;
   }>({
     type: 'B',
     id: '',
@@ -776,12 +779,26 @@ export default function DocumentEditorPage() {
         });
 
         const recv = (payload.receiver ?? {}) as Record<string, unknown>;
-        const recvAddr = (recv.address ?? {}) as AddressInput;
+        const recvAddr = (recv.address ?? recv.Address ?? {}) as AddressInput;
+        const exportRecv = isExportKind(String(doc.kind));
+        const cleanedRecv = compactEtaReceiver(
+          {
+            ...recv,
+            type: recv.type ?? recv.Type ?? doc.receiverType,
+            id: recv.id ?? recv.Id ?? doc.receiverId,
+            name: recv.name ?? recv.Name ?? doc.receiverName,
+            address: recvAddr,
+          },
+          { isExport: exportRecv },
+        );
         setReceiver({
-          type: String(recv.type ?? doc.receiverType ?? 'B'),
-          id: String(recv.id ?? doc.receiverId ?? ''),
-          name: String(recv.name ?? doc.receiverName ?? ''),
-          address: { ...emptyAddress(), ...recvAddr },
+          type: String(cleanedRecv.type ?? (exportRecv ? 'F' : 'B')),
+          id: String(cleanedRecv.id ?? ''),
+          name: String(cleanedRecv.name ?? ''),
+          address: { ...emptyAddress(), ...((cleanedRecv.address as AddressInput) ?? {}) },
+          ...(typeof cleanedRecv.branch === 'string'
+            ? { branch: cleanedRecv.branch }
+            : {}),
         });
 
         const pay = (payload.payment ?? {}) as typeof payment;
@@ -906,7 +923,9 @@ export default function DocumentEditorPage() {
       serviceDeliveryDate: serviceDeliveryDate || undefined,
       extraDiscountAmount,
       issuer,
-      receiver,
+      receiver: compactEtaReceiver(receiver, {
+        isExport: isExportKind(kind),
+      }) as DocumentUpsert['receiver'],
       payment: showPayment ? payment : null,
       delivery: showDelivery ? delivery : null,
       references: refs.length ? refs : null,
@@ -1418,7 +1437,13 @@ export default function DocumentEditorPage() {
             <select
               className={fieldClass()}
               value={kind}
-              onChange={(e) => setKind(e.target.value as DocumentUpsert['kind'])}
+              onChange={(e) => {
+                const next = e.target.value as DocumentUpsert['kind'];
+                setKind(next);
+                if (next.startsWith('EXPORT')) {
+                  setReceiver((r) => (r.type === 'F' ? r : { ...r, type: 'F' }));
+                }
+              }}
             >
               <option value="INVOICE">{t('kindInvoice')}</option>
               <option value="CREDIT_NOTE">{t('kindCreditNote')}</option>
@@ -1690,7 +1715,7 @@ export default function DocumentEditorPage() {
                   disabled={documentReadOnly}
                   onPick={(next) => {
                     setReceiver({
-                      type: next.type || 'B',
+                      type: normalizeEtaReceiverType(next.type || 'B'),
                       id: next.id || '',
                       name: next.name || '',
                       address: { ...emptyAddress(), ...next.address },
@@ -1701,8 +1726,19 @@ export default function DocumentEditorPage() {
                   {t('receiverType')}
                   <select
                     className={fieldClass()}
-                    value={receiver.type}
-                    onChange={(e) => setReceiver({ ...receiver, type: e.target.value })}
+                    value={
+                      receiver.type === 'B' || receiver.type === 'P' || receiver.type === 'F'
+                        ? receiver.type
+                        : isExportKind(kind)
+                          ? 'F'
+                          : 'B'
+                    }
+                    onChange={(e) =>
+                      setReceiver({
+                        ...receiver,
+                        type: normalizeEtaReceiverType(e.target.value, isExportKind(kind) ? 'F' : 'B'),
+                      })
+                    }
                     disabled={isExportKind(kind)}
                   >
                     <option value="B">{t('partyTypeB')}</option>

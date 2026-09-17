@@ -5,6 +5,7 @@ import {
 } from '../calculate-totals.js';
 import type { JsonObject } from '../canonical-serialize.js';
 import { formatEtaDateTimeIssued, toEtaDecimalNumber } from '../eta-formats.js';
+import { compactEtaReceiver } from '../receiver.js';
 
 export type DocumentKind =
   | 'INVOICE'
@@ -123,7 +124,9 @@ export function buildDocumentPayload(ctx: BuildContext): BuiltDocument {
 
   const etaPayload: JsonObject = {
     issuer: ctx.issuer,
-    receiver: ctx.receiver,
+    receiver: compactEtaReceiver(ctx.receiver, {
+      isExport: ctx.kind.startsWith('EXPORT'),
+    }),
     documentType: KIND_TO_ETA_TYPE[ctx.kind],
     documentTypeVersion: ctx.documentTypeVersion,
     dateTimeIssued: formatEtaDateTimeIssued(ctx.dateTimeIssued),
