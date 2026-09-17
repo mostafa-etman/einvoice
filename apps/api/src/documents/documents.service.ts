@@ -20,7 +20,6 @@ import {
   isIssuerNameComplete,
   serializeEtaDocument,
   validateDocument,
-  compactEtaReceiver,
   receiverFromStoredDocument,
   type DocumentKind as EtaDocumentKind,
   type IssuerAddress,
@@ -390,9 +389,7 @@ export class DocumentsService {
       dateTimeIssued: formatEtaDateTimeIssued(dto.issueDateTime),
       internalID: dto.internalId,
       issuer: issuerSnapshot,
-      receiver: compactEtaReceiver(dto.receiver, {
-        isExport: dto.kind.startsWith('EXPORT'),
-      }),
+      receiver: (dto.receiver ?? {}) as JsonObject,
       lines,
       extraDiscountAmount: dto.extraDiscountAmount ?? '0.00',
       references: (dto.references as string[] | JsonObject | null | undefined) ?? null,
@@ -1385,6 +1382,9 @@ export class DocumentsService {
   /**
    * Create a DRAFT credit note prefilled from a VALID invoice.
    * Does not sign or submit — caller uses the existing credit-note flow.
+   * Debit notes have no Return endpoint; they use the same receiver helper
+   * (`receiverFromStoredDocument` + `etaReceiverForDocument` in the builder)
+   * when created manually or when a referenced invoice is picked.
    */
   async createReturnCreditNote(
     tenantId: string,

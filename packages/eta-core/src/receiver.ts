@@ -1,14 +1,15 @@
 /**
  * ETA receiver (buyer) payload helpers.
  *
- * Official credit-note / invoice schema (sdk.invoicing.eta.gov.eg):
- *   type  — required, B | P | F
+ * Official invoice / credit-note / debit-note schema (sdk.invoicing.eta.gov.eg):
+ *   type  — required, B | P | F  (same for I, C, and D)
  *   id    — conditional (registration / national ID / VAT ID)
  *   name  — conditional
  *   address — conditional; same address fields as issuer EXCEPT branchId
  *
  * `branch` / `branchId` is an **issuer.address** field, not a receiver field.
  * Sending `receiver.branch: null` (or an empty/invalid `type`) fails ETA intake.
+ * Credit notes, debit notes, and invoices share this helper so they cannot drift.
  */
 
 import type { JsonObject } from './canonical-serialize.js';
@@ -151,6 +152,16 @@ export function compactEtaReceiver(
   return out;
 }
 
+/**
+ * Single entry point for every issued document kind (I / C / D / EI / EC / ED).
+ * Derives export vs domestic from `kind` so callers cannot forget.
+ */
+export function etaReceiverForDocument(kind: string, raw: unknown): JsonObject {
+  return compactEtaReceiver(raw, {
+    isExport: String(kind).startsWith('EXPORT'),
+  });
+}
+
 /** Merge stored columns + original etaPayload.receiver (payload wins, extras kept). */
 export function receiverFromStoredDocument(doc: {
   kind?: string | null;
@@ -170,7 +181,5 @@ export function receiverFromStoredDocument(doc: {
     address:
       pickField(fromPayload, 'address', 'Address') ?? doc.receiverAddressJson,
   };
-  return compactEtaReceiver(merged, {
-    isExport: String(doc.kind ?? '').startsWith('EXPORT'),
-  });
+  return etaReceiverForDocument(String(doc.kind ?? ''), merged);
 }

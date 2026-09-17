@@ -1,4 +1,4 @@
-import { buildCreditNote, buildInvoice } from './document.js';
+import { buildByKind, buildCreditNote, buildDebitNote, buildInvoice } from './document.js';
 import { exemptTax, zeroRatedTax } from '../tax-modes.js';
 
 describe('builders', () => {
@@ -183,5 +183,44 @@ describe('builders', () => {
     expect(recv.type).toBe('B');
     expect(recv).not.toHaveProperty('branch');
     expect(recv.address).toEqual({ country: 'EG', governate: 'Cairo' });
+  });
+
+  it('debit note uses the same compact receiver as credit note', () => {
+    const dirty = {
+      type: 'C',
+      name: 'Buyer',
+      id: '123456789',
+      branch: null,
+      address: { country: 'EG', governate: 'Cairo', branchID: null },
+    };
+    const line = {
+      description: 'Item',
+      itemType: 'EGS',
+      itemCode: 'X',
+      unitType: 'EA',
+      quantity: '1',
+      unitPrice: '10.00',
+    };
+    const ctx = {
+      documentTypeVersion: '1.0',
+      dateTimeIssued: '2026-01-01T00:00:00Z',
+      issuer: { name: 'Issuer' },
+      receiver: dirty,
+      references: ['TZRKK8MFZCPSTW9XCYWBMKME11'],
+      lines: [line],
+    };
+    const credit = buildCreditNote({ ...ctx, internalID: 'CN-3' });
+    const debit = buildDebitNote({ ...ctx, internalID: 'DN-3' });
+    const invoice = buildInvoice({
+      ...ctx,
+      internalID: 'INV-3',
+      references: undefined,
+    });
+    expect(debit.etaPayload.documentType).toBe('D');
+    expect(debit.etaPayload.receiver).toEqual(credit.etaPayload.receiver);
+    expect(invoice.etaPayload.receiver).toEqual(credit.etaPayload.receiver);
+    expect(buildByKind('DEBIT_NOTE', { ...ctx, internalID: 'DN-4' }).etaPayload.receiver).toEqual(
+      credit.etaPayload.receiver,
+    );
   });
 });

@@ -1,5 +1,6 @@
 import {
   compactEtaReceiver,
+  etaReceiverForDocument,
   isEtaReceiverType,
   normalizeEtaReceiverType,
   receiverFromStoredDocument,
@@ -71,6 +72,39 @@ describe('compactEtaReceiver', () => {
   });
 });
 
+describe('etaReceiverForDocument', () => {
+  const dirty = {
+    type: 'C',
+    name: 'Buyer',
+    id: '123456789',
+    branch: null,
+    address: { country: 'EG', governate: 'Cairo', branchID: null },
+  };
+
+  it('is identical for credit notes, debit notes, and invoices', () => {
+    const credit = etaReceiverForDocument('CREDIT_NOTE', dirty);
+    const debit = etaReceiverForDocument('DEBIT_NOTE', dirty);
+    const invoice = etaReceiverForDocument('INVOICE', dirty);
+    expect(debit).toEqual(credit);
+    expect(invoice).toEqual(credit);
+    expect(credit).toEqual({
+      type: 'B',
+      id: '123456789',
+      name: 'Buyer',
+      address: { country: 'EG', governate: 'Cairo' },
+    });
+  });
+
+  it('forces F for export debit and export credit notes', () => {
+    expect(etaReceiverForDocument('EXPORT_DEBIT_NOTE', { type: 'B', name: 'X' }).type).toBe(
+      'F',
+    );
+    expect(etaReceiverForDocument('EXPORT_CREDIT_NOTE', { type: 'P', name: 'X' }).type).toBe(
+      'F',
+    );
+  });
+});
+
 describe('receiverFromStoredDocument', () => {
   it('copies the original payload receiver and drops null branch', () => {
     const receiver = receiverFromStoredDocument({
@@ -112,12 +146,12 @@ describe('receiverFromStoredDocument', () => {
 
   it('falls back to stored columns when payload has no receiver', () => {
     const receiver = receiverFromStoredDocument({
-      kind: 'CREDIT_NOTE',
+      kind: 'DEBIT_NOTE',
       receiverType: 'B',
       receiverId: '111111111',
       receiverName: 'From columns',
       receiverAddressJson: { country: 'EG', governate: 'Cairo' },
-      etaPayloadJson: { documentType: 'C' },
+      etaPayloadJson: { documentType: 'D' },
     });
     expect(receiver).toEqual({
       type: 'B',

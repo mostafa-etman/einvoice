@@ -67,7 +67,7 @@ function line() {
   };
 }
 
-describe('Credit note ETA receiver payload', () => {
+describe('Credit and debit note ETA receiver payload', () => {
   let app: INestApplication;
   let tenantPrisma: TenantPrismaService;
 
@@ -85,38 +85,105 @@ describe('Credit note ETA receiver payload', () => {
     await app.close();
   });
 
-  it('manual credit note omits null branch and never sends an invalid type', async () => {
-    const ctx = await ownerCtx(app, `m${Date.now()}`);
+  it.each(['CREDIT_NOTE', 'DEBIT_NOTE'] as const)(
+    'manual %s omits null branch and never sends an invalid type',
+    async (kind) => {
+      const ctx = await ownerCtx(app, `m${kind[0]}${Date.now()}`);
+      const prefix = kind === 'DEBIT_NOTE' ? 'DN' : 'CN';
+      const created = await request(app.getHttpServer())
+        .post('/documents')
+        .set('Authorization', `Bearer ${ctx.token}`)
+        .set('X-Tenant-Id', ctx.tenantId)
+        .send({
+          kind,
+          branchId: ctx.branchId,
+          currencyCode: 'EGP',
+          issueDateTime: new Date().toISOString(),
+          internalId: `${prefix}-MAN-${Date.now()}`,
+          version: 0,
+          taxpayerActivityCode: '4620',
+          receiver: {
+            type: kind === 'DEBIT_NOTE' ? 'D' : 'C',
+            id: '111111111',
+            name: 'Buyer Co',
+            branch: null,
+            address: { ...COMPLETE_ADDRESS, branchID: null },
+          },
+          references: ['TZRKK8MFZCPSTW9XCYWBMKME11'],
+          lines: [line()],
+        })
+        .expect(201);
+
+      const recv = created.body.etaPayload?.receiver as Record<string, unknown>;
+      expect(created.body.etaPayload.documentType).toBe(
+        kind === 'DEBIT_NOTE' ? 'D' : 'C',
+      );
+      expect(recv.type).toBe('B');
+      expect(recv.id).toBe('111111111');
+      expect(recv.name).toBe('Buyer Co');
+      expect(recv).not.toHaveProperty('branch');
+      expect(recv.address).toEqual(COMPLETE_ADDRESS);
+    },
+  );
+
+  it('debit note from an invoice copies a compacted original receiver', async () => {
+    const ctx = await ownerCtx(app, `dn${Date.now()}`);
+    const invoice = await request(app.getHttpServer())
+      .post('/documents')
+      .set('Authorization', `Bearer ${ctx.token}`)
+      .set('X-Tenant-Id', ctx.tenantId)
+      .send({
+        kind: 'INVOICE',
+        branchId: ctx.branchId,
+        currencyCode: 'EGP',
+        issueDateTime: new Date().toISOString(),
+        internalId: `INV-DN-${Date.now()}`,
+        version: 0,
+        taxpayerActivityCode: '4620',
+        receiver: {
+          type: 'B',
+          id: '987654321',
+          name: 'Original Buyer',
+          address: COMPLETE_ADDRESS,
+        },
+        lines: [line()],
+      })
+      .expect(201);
+
+    const dirtyInvoiceReceiver = {
+      Type: 'B',
+      id: '987654321',
+      name: 'Original Buyer',
+      address: { ...COMPLETE_ADDRESS, branchID: null, branch: null },
+      branch: null,
+    };
+
     const created = await request(app.getHttpServer())
       .post('/documents')
       .set('Authorization', `Bearer ${ctx.token}`)
       .set('X-Tenant-Id', ctx.tenantId)
       .send({
-        kind: 'CREDIT_NOTE',
+        kind: 'DEBIT_NOTE',
         branchId: ctx.branchId,
         currencyCode: 'EGP',
         issueDateTime: new Date().toISOString(),
-        internalId: `CN-MAN-${Date.now()}`,
+        internalId: `DN-FROM-${Date.now()}`,
         version: 0,
         taxpayerActivityCode: '4620',
-        receiver: {
-          type: 'C',
-          id: '111111111',
-          name: 'Buyer Co',
-          branch: null,
-          address: { ...COMPLETE_ADDRESS, branchID: null },
-        },
+        receiver: dirtyInvoiceReceiver,
         references: ['TZRKK8MFZCPSTW9XCYWBMKME11'],
         lines: [line()],
       })
       .expect(201);
 
     const recv = created.body.etaPayload?.receiver as Record<string, unknown>;
+    expect(created.body.etaPayload.documentType).toBe('D');
     expect(recv.type).toBe('B');
-    expect(recv.id).toBe('111111111');
-    expect(recv.name).toBe('Buyer Co');
+    expect(recv.id).toBe('987654321');
+    expect(recv.name).toBe('Original Buyer');
     expect(recv).not.toHaveProperty('branch');
     expect(recv.address).toEqual(COMPLETE_ADDRESS);
+    expect(invoice.body.etaPayload?.receiver?.type).toBe('B');
   });
 
   it('return copies the original invoice receiver and drops null branch', async () => {

@@ -178,4 +178,27 @@ describe('LocalValidator', () => {
     });
     expect(issues.some((i) => i.code === 'RECEIVER_TYPE_INVALID')).toBe(true);
   });
+
+  it('rejects an invalid receiver.type on debit notes too', () => {
+    const issues = validateDocument({
+      kind: 'DEBIT_NOTE',
+      document: {
+        documentType: 'D',
+        documentTypeVersion: '1.0',
+        dateTimeIssued: '2026-01-01T00:00:00Z',
+        issuer: {},
+        receiver: { type: 'D', name: 'Buyer' },
+        invoiceLines: [],
+        internalID: 'DN-1',
+      },
+      typeVersionSchema: { documentType: 'D', documentTypeVersion: '1.0' },
+      refs: {
+        branchOk: true,
+        currencyOk: true,
+        itemCodesOk: true,
+        originalDocumentOk: true,
+      },
+    });
+    expect(issues.some((i) => i.code === 'RECEIVER_TYPE_INVALID')).toBe(true);
+  });
 });

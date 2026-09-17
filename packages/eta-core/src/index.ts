@@ -135,6 +135,7 @@ export {
   ETA_RECEIVER_TYPES,
   compactEtaAddress,
   compactEtaReceiver,
+  etaReceiverForDocument,
   isEtaReceiverType,
   normalizeEtaReceiverType,
   receiverFromStoredDocument,

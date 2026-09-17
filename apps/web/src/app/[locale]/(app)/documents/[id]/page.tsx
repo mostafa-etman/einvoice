@@ -71,7 +71,7 @@ import {
   sortEtaCodeEntries,
   subtypesForTaxType,
   taxesForMode,
-  compactEtaReceiver,
+  etaReceiverForDocument,
   formatEtaIntakeError,
   formatEtaIntakeErrorSummary,
   normalizeEtaReceiverType,
@@ -104,6 +104,25 @@ const emptyAddress = (): AddressInput => ({
   street: '',
   buildingNumber: '',
 });
+
+type ReceiverFormState = {
+  type: string;
+  id: string;
+  name: string;
+  address: AddressInput;
+  branch?: string;
+};
+
+function receiverFormFromEta(kind: string, raw: unknown): ReceiverFormState {
+  const cleaned = etaReceiverForDocument(kind, raw);
+  return {
+    type: String(cleaned.type ?? (kind.startsWith('EXPORT') ? 'F' : 'B')),
+    id: String(cleaned.id ?? ''),
+    name: String(cleaned.name ?? ''),
+    address: { ...emptyAddress(), ...((cleaned.address as AddressInput) ?? {}) },
+    ...(typeof cleaned.branch === 'string' ? { branch: cleaned.branch } : {}),
+  };
+}
 
 const emptyLine = (currency = 'EGP'): Line => ({
   description: '',
@@ -369,13 +388,7 @@ export default function DocumentEditorPage() {
     name: '',
     address: { ...emptyAddress(), branchId: '0' },
   });
-  const [receiver, setReceiver] = useState<{
-    type: string;
-    id: string;
-    name: string;
-    address: AddressInput;
-    branch?: string;
-  }>({
+  const [receiver, setReceiver] = useState<ReceiverFormState>({
     type: 'B',
     id: '',
     name: '',
@@ -780,26 +793,15 @@ export default function DocumentEditorPage() {
 
         const recv = (payload.receiver ?? {}) as Record<string, unknown>;
         const recvAddr = (recv.address ?? recv.Address ?? {}) as AddressInput;
-        const exportRecv = isExportKind(String(doc.kind));
-        const cleanedRecv = compactEtaReceiver(
-          {
+        setReceiver(
+          receiverFormFromEta(String(doc.kind), {
             ...recv,
             type: recv.type ?? recv.Type ?? doc.receiverType,
             id: recv.id ?? recv.Id ?? doc.receiverId,
             name: recv.name ?? recv.Name ?? doc.receiverName,
             address: recvAddr,
-          },
-          { isExport: exportRecv },
+          }),
         );
-        setReceiver({
-          type: String(cleanedRecv.type ?? (exportRecv ? 'F' : 'B')),
-          id: String(cleanedRecv.id ?? ''),
-          name: String(cleanedRecv.name ?? ''),
-          address: { ...emptyAddress(), ...((cleanedRecv.address as AddressInput) ?? {}) },
-          ...(typeof cleanedRecv.branch === 'string'
-            ? { branch: cleanedRecv.branch }
-            : {}),
-        });
 
         const pay = (payload.payment ?? {}) as typeof payment;
         setPayment({
@@ -923,9 +925,7 @@ export default function DocumentEditorPage() {
       serviceDeliveryDate: serviceDeliveryDate || undefined,
       extraDiscountAmount,
       issuer,
-      receiver: compactEtaReceiver(receiver, {
-        isExport: isExportKind(kind),
-      }) as DocumentUpsert['receiver'],
+      receiver: etaReceiverForDocument(kind, receiver) as DocumentUpsert['receiver'],
       payment: showPayment ? payment : null,
       delivery: showDelivery ? delivery : null,
       references: refs.length ? refs : null,
@@ -1803,6 +1803,32 @@ export default function DocumentEditorPage() {
                         return [...lines, c.etaUuid].join('\n');
                       });
                       setReferenceFormatHint(null);
+                      void getDocument(c.id)
+                        .then((doc) => {
+                          const payload = (doc.etaPayload ?? {}) as Record<
+                            string,
+                            unknown
+                          >;
+                          const recv = (payload.receiver ?? {}) as Record<
+                            string,
+                            unknown
+                          >;
+                          setReceiver(
+                            receiverFormFromEta(kind, {
+                              ...recv,
+                              type:
+                                recv.type ??
+                                recv.Type ??
+                                doc.receiverType,
+                              id: recv.id ?? recv.Id ?? doc.receiverId,
+                              name:
+                                recv.name ?? recv.Name ?? doc.receiverName,
+                              address: recv.address ?? recv.Address,
+                            }),
+                          );
+                          setShowReceiver(true);
+                        })
+                        .catch(() => undefined);
                     }}
                   >
                     <span className="font-medium">{c.internalId}</span>
