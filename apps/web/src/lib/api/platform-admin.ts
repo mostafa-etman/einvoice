@@ -386,3 +386,144 @@ export function endImpersonation(sessionId: string) {
     body: {},
   });
 }
+
+export type FeedbackStatus = 'NEW' | 'REVIEWED' | 'RESOLVED';
+
+export type FeedbackItem = {
+  id: string;
+  tenantId: string;
+  tenantName: string;
+  authorUserId: string;
+  authorEmail: string;
+  authorName: string | null;
+  screenKey: string;
+  routePath: string;
+  note: string;
+  status: FeedbackStatus;
+  createdAt: string;
+  updatedAt: string;
+  reviewedAt: string | null;
+  reviewedByUserId: string | null;
+};
+
+export function getFeedbackSummary() {
+  return apiFetch<{ newCount: number }>('/platform-admin/feedback/summary');
+}
+
+export function listFeedback(params?: {
+  tenantId?: string;
+  screen?: string;
+  status?: FeedbackStatus;
+  q?: string;
+  cursor?: string;
+  limit?: number;
+}) {
+  const qs = new URLSearchParams();
+  if (params?.tenantId) qs.set('tenantId', params.tenantId);
+  if (params?.screen) qs.set('screen', params.screen);
+  if (params?.status) qs.set('status', params.status);
+  if (params?.q) qs.set('q', params.q);
+  if (params?.cursor) qs.set('cursor', params.cursor);
+  if (params?.limit) qs.set('limit', String(params.limit));
+  const query = qs.toString();
+  return apiFetch<{ items: FeedbackItem[]; nextCursor: string | null }>(
+    `/platform-admin/feedback${query ? `?${query}` : ''}`,
+  );
+}
+
+export function setFeedbackStatus(id: string, status: FeedbackStatus) {
+  return apiFetch<FeedbackItem>(`/platform-admin/feedback/${id}`, {
+    method: 'PATCH',
+    body: { status },
+  });
+}
+
+export type PaymentPurpose = 'PLAN' | 'RENEWAL' | 'POINTS_TOPUP' | 'ADDON' | 'OTHER';
+
+export type ManualBillingStatus = 'PAID' | 'PARTIALLY_PAID' | 'UNPAID' | 'DUE_SOON' | 'OVERDUE';
+
+export type PaymentRow = {
+  id: string;
+  amountEgp: number;
+  currency: string;
+  paidAt: string;
+  purpose: PaymentPurpose;
+  method: string | null;
+  reference: string | null;
+  notes: string | null;
+  createdByUserId: string;
+  createdAt: string;
+};
+
+export type AccountPaymentSummary = {
+  accountId: string;
+  ownerEmail: string | null;
+  ownerName: string | null;
+  companies: Array<{ id: string; name: string }>;
+  planCode: string | null;
+  planNameEn: string | null;
+  planNameAr: string | null;
+  planPriceEgp: number;
+  periodStart: string | null;
+  periodEnd: string | null;
+  amountDueEgp: number;
+  amountPaidEgp: number;
+  outstandingEgp: number;
+  lastPaymentAt: string | null;
+  dueDate: string | null;
+  status: ManualBillingStatus;
+};
+
+export type PaymentsSummary = {
+  totalCollectedEgp: number;
+  totalOutstandingEgp: number;
+  overdueCount: number;
+};
+
+export function listPayments(params?: { q?: string; status?: string }) {
+  const qs = new URLSearchParams();
+  if (params?.q) qs.set('q', params.q);
+  if (params?.status) qs.set('status', params.status);
+  const query = qs.toString();
+  return apiFetch<{ items: AccountPaymentSummary[]; summary: PaymentsSummary }>(
+    `/platform-admin/payments${query ? `?${query}` : ''}`,
+  );
+}
+
+export function getPaymentAccount(accountId: string) {
+  return apiFetch<AccountPaymentSummary & { payments: PaymentRow[] }>(
+    `/platform-admin/payments/${accountId}`,
+  );
+}
+
+export function addPayment(
+  accountId: string,
+  input: {
+    amountEgp: number;
+    paidAt?: string;
+    purpose: PaymentPurpose;
+    method?: string;
+    reference?: string;
+    notes?: string;
+  },
+) {
+  return apiFetch<AccountPaymentSummary & { payments: PaymentRow[] }>(
+    `/platform-admin/payments/${accountId}`,
+    { method: 'POST', body: input },
+  );
+}
+
+export function updatePaymentBilling(
+  accountId: string,
+  input: {
+    amountDueEgp?: number;
+    dueDate?: string | null;
+    periodStart?: string | null;
+    periodEnd?: string | null;
+  },
+) {
+  return apiFetch<AccountPaymentSummary & { payments: PaymentRow[] }>(
+    `/platform-admin/payments/${accountId}/billing`,
+    { method: 'PATCH', body: input },
+  );
+}

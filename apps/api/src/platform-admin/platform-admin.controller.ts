@@ -16,7 +16,9 @@ import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PointsService } from '../billing/points.service';
 import type { TenantLifecycleStatus } from '../billing/tenant-lifecycle-status';
+import { FeedbackService } from '../feedback/feedback.service';
 import { ImpersonationService } from './impersonation.service';
+import { PaymentsService } from './payments.service';
 import { PlatformAdminGuard } from './platform-admin.guard';
 import { TenantLifecycleService } from './tenant-lifecycle.service';
 import { TrialTaxRegistrationService } from '../billing/trial-tax-registration.service';
@@ -30,6 +32,8 @@ export class PlatformAdminController {
     private readonly impersonation: ImpersonationService,
     private readonly points: PointsService,
     private readonly trialTax: TrialTaxRegistrationService,
+    private readonly feedback: FeedbackService,
+    private readonly payments: PaymentsService,
   ) {}
 
   @Get('tenants')
@@ -173,6 +177,85 @@ export class PlatformAdminController {
   @Get('document-costs')
   getDocumentCosts() {
     return this.points.getEffectiveCosts();
+  }
+
+  @Get('feedback/summary')
+  feedbackSummary() {
+    return this.feedback.summary();
+  }
+
+  @Get('feedback')
+  listFeedback(
+    @Query('tenantId') tenantId?: string,
+    @Query('screen') screen?: string,
+    @Query('status') status?: 'NEW' | 'REVIEWED' | 'RESOLVED',
+    @Query('q') q?: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.feedback.list({
+      tenantId,
+      screenKey: screen,
+      status,
+      q,
+      cursor,
+      limit: limit ? Number(limit) : undefined,
+    });
+  }
+
+  @Patch('feedback/:id')
+  setFeedbackStatus(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() body: { status: 'NEW' | 'REVIEWED' | 'RESOLVED' },
+  ) {
+    if (!body?.status) {
+      throw new BadRequestException('status_required');
+    }
+    return this.feedback.setStatus(id, body.status, user.userId);
+  }
+
+  @Get('payments')
+  listPayments(@Query('q') q?: string, @Query('status') status?: string) {
+    return this.payments.list({ q, status });
+  }
+
+  @Get('payments/:accountId')
+  getPaymentAccount(@Param('accountId') accountId: string) {
+    return this.payments.getAccount(accountId);
+  }
+
+  @Post('payments/:accountId')
+  @HttpCode(201)
+  addPayment(
+    @Param('accountId') accountId: string,
+    @CurrentUser() user: AuthUser,
+    @Body()
+    body: {
+      amountEgp: number;
+      paidAt?: string;
+      purpose: 'PLAN' | 'RENEWAL' | 'POINTS_TOPUP' | 'ADDON' | 'OTHER';
+      method?: string;
+      reference?: string;
+      notes?: string;
+    },
+  ) {
+    return this.payments.addPayment(accountId, user.userId, body);
+  }
+
+  @Patch('payments/:accountId/billing')
+  updatePaymentBilling(
+    @Param('accountId') accountId: string,
+    @CurrentUser() user: AuthUser,
+    @Body()
+    body: {
+      amountDueEgp?: number;
+      dueDate?: string | null;
+      periodStart?: string | null;
+      periodEnd?: string | null;
+    },
+  ) {
+    return this.payments.updateBilling(accountId, user.userId, body);
   }
 
   @Put('document-costs')

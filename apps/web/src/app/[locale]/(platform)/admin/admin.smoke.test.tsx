@@ -25,6 +25,12 @@ describe('platform admin page smoke', () => {
     expect(en.admin.isActive).toBeTruthy();
     expect(en.admin.hideFromCustomers).toBeTruthy();
     expect(en.admin.tabTrials).toBeTruthy();
+    expect(en.admin.tabFeedback).toContain('Feedback');
+    expect(ar.admin.tabFeedback).toContain('ملاحظات');
+    expect(en.admin.tabPayments).toBeTruthy();
+    expect(ar.admin.tabPayments).toContain('مدفوعات');
+    expect(en.feedback.button).toBeTruthy();
+    expect(ar.feedback.button).toContain('ملاحظات');
     expect(en.admin.etaTutorialVideoUrl).toContain('video');
     expect(ar.admin.etaTutorialVideoUrl).toBeTruthy();
     expect(en.admin.resetTrial).toBeTruthy();

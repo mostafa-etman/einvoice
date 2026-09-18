@@ -11,6 +11,10 @@ import {
   getTenantUsage,
   listAdminPlans,
   listTenants,
+  getFeedbackSummary,
+  listFeedback,
+  listPayments,
+  setFeedbackStatus,
   provisionTenant,
   rejectTenant,
   startImpersonation,
@@ -29,6 +33,13 @@ jest.mock('@/lib/api/platform-admin', () => {
     getDocumentCosts: jest.fn(),
     getSettings: jest.fn(),
     listTrialTaxRegistrations: jest.fn(),
+    getFeedbackSummary: jest.fn(),
+    listFeedback: jest.fn(),
+    setFeedbackStatus: jest.fn(),
+    listPayments: jest.fn(),
+    getPaymentAccount: jest.fn(),
+    addPayment: jest.fn(),
+    updatePaymentBilling: jest.fn(),
     provisionTenant: jest.fn(),
     getTenant: jest.fn(),
     getTenantUsage: jest.fn(),
@@ -152,6 +163,12 @@ describe('platform admin page', () => {
       reason: 'support',
       expiresAt: '2026-08-01T01:00:00.000Z',
       accessToken: 'token',
+    });
+    (getFeedbackSummary as jest.Mock).mockResolvedValue({ newCount: 0 });
+    (listFeedback as jest.Mock).mockResolvedValue({ items: [], nextCursor: null });
+    (listPayments as jest.Mock).mockResolvedValue({
+      items: [],
+      summary: { totalCollectedEgp: 0, totalOutstandingEgp: 0, overdueCount: 0 },
     });
   });
 
@@ -286,6 +303,8 @@ describe('platform admin page', () => {
     expect(await screen.findByRole('tab', { name: en.admin.tabTenants })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: en.admin.tabPlans })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: en.admin.tabTrials })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: en.admin.tabFeedback })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: en.admin.tabPayments })).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: /audit/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: /^users$/i })).not.toBeInTheDocument();
   });
@@ -305,5 +324,67 @@ describe('platform admin page', () => {
     renderPage('ar');
     expect(await screen.findByRole('heading', { level: 1, name: ar.admin.title })).toBeInTheDocument();
     expect(await screen.findByText('owner@acme.test')).toHaveAttribute('dir', 'ltr');
+  });
+
+  it('lists tenant feedback and lets the operator mark it reviewed', async () => {
+    (getFeedbackSummary as jest.Mock).mockResolvedValue({ newCount: 9 });
+    (listFeedback as jest.Mock).mockResolvedValue({
+      items: [
+        {
+          id: 'fb-1',
+          tenantId: 'tenant-1',
+          tenantName: 'Acme Co',
+          authorUserId: 'user-1',
+          authorEmail: 'owner@acme.test',
+          authorName: 'Owner',
+          screenKey: 'documents',
+          routePath: '/documents',
+          note: 'Need denser rows',
+          status: 'NEW',
+          createdAt: '2026-09-18T10:00:00.000Z',
+          updatedAt: '2026-09-18T10:00:00.000Z',
+          reviewedAt: null,
+          reviewedByUserId: null,
+        },
+      ],
+      nextCursor: null,
+    });
+    (setFeedbackStatus as jest.Mock).mockResolvedValue({ status: 'REVIEWED' });
+    renderPage();
+    expect(await screen.findByRole('tab', { name: /feedback/i })).toHaveTextContent('9');
+    fireEvent.click(screen.getByRole('tab', { name: /feedback/i }));
+    expect(await screen.findByText('Need denser rows')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: en.admin.markReviewed }));
+    await waitFor(() => expect(setFeedbackStatus).toHaveBeenCalledWith('fb-1', 'REVIEWED'));
+  });
+
+  it('lists overdue accounts on the payments tab', async () => {
+    (listPayments as jest.Mock).mockResolvedValue({
+      items: [
+        {
+          accountId: 'acc-1',
+          ownerEmail: 'owner@acme.test',
+          ownerName: 'Owner',
+          companies: [{ id: 'tenant-1', name: 'Acme Co' }],
+          planCode: 'BASIC',
+          planNameEn: 'Basic',
+          planNameAr: 'أساسي',
+          planPriceEgp: 250,
+          periodStart: null,
+          periodEnd: null,
+          amountDueEgp: 400,
+          amountPaidEgp: 0,
+          outstandingEgp: 400,
+          lastPaymentAt: null,
+          dueDate: '2026-09-01T00:00:00.000Z',
+          status: 'OVERDUE',
+        },
+      ],
+      summary: { totalCollectedEgp: 0, totalOutstandingEgp: 400, overdueCount: 1 },
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole('tab', { name: en.admin.tabPayments }));
+    expect(await screen.findByText('Acme Co')).toBeInTheDocument();
+    expect(screen.getAllByText(en.admin.payStatus.OVERDUE).length).toBeGreaterThan(1);
   });
 });

@@ -184,3 +184,10 @@ export function isReservedRoleName(name: string): boolean {
 export function isSystemOwnerRole(role: { name: string; isSystem: boolean }): boolean {
   return role.isSystem && role.name === SYSTEM_OWNER_NAME;
 }
+
+export const TENANT_ADMIN_ROLE_NAMES = ['Owner', 'Admin'] as const;
+
+/** Tenant Owner or Admin (system roles). Used to gate per-screen feedback. */
+export function isTenantAdminRole(role: { name: string }): boolean {
+  return (TENANT_ADMIN_ROLE_NAMES as readonly string[]).includes(role.name);
+}

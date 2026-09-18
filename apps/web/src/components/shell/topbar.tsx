@@ -7,6 +7,7 @@ import { LocaleSwitcher } from './locale-switcher';
 import { ThemeToggle } from './theme-toggle';
 import { UserMenu } from './user-menu';
 import { ShellBreadcrumbs } from './shell-breadcrumbs';
+import { TenantFeedbackButton } from '@/components/feedback/tenant-feedback-button';
 import { useTranslations } from 'next-intl';
 
 export function Topbar({
@@ -62,6 +63,7 @@ export function Topbar({
           </button>
           <ThemeToggle />
           <LocaleSwitcher />
+          <TenantFeedbackButton />
           <UserMenu compact tone="on-light" />
         </div>
       </div>

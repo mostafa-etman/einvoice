@@ -6,6 +6,7 @@
 --   accounts           — billing parent (plan/points/trial); RLS scoped to session tenant's account
 --   permissions, plans, platform_settings, document_point_costs, addons — platform catalogs
 --   trial_used_tax_registrations — platform trial-abuse registry (RLS: no tenant_id / platform_operator)
+--   account_payments — platform-operator manual billing ledger (tenant sessions cannot read/write)
 --   currencies, eta_code_catalogs, eta_code_entries — shared ETA reference data
 --   refresh_sessions, billing_webhook_events — non-tenant or provider-scoped
 
@@ -338,6 +339,8 @@ CREATE POLICY account_isolation_accounts ON accounts
   );
 
 -- SaaS layer (013) — subscription is per account, visible to every company in it.
+-- Unscoped PrismaService (tenant GUC unset) is the same pattern as accounts:
+-- onboarding + platform-admin. Tenant HTTP always sets app.tenant_id.
 ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE subscriptions FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_subscriptions ON subscriptions;
@@ -347,12 +350,14 @@ CREATE POLICY tenant_isolation_subscriptions ON subscriptions
       SELECT t.account_id FROM tenants t
       WHERE t.id::text = NULLIF(current_setting('app.tenant_id', true), '')
     )
+    OR NULLIF(current_setting('app.tenant_id', true), '') IS NULL
   )
   WITH CHECK (
     account_id IN (
       SELECT t.account_id FROM tenants t
       WHERE t.id::text = NULLIF(current_setting('app.tenant_id', true), '')
     )
+    OR NULLIF(current_setting('app.tenant_id', true), '') IS NULL
   );
 
 ALTER TABLE quota_overrides ENABLE ROW LEVEL SECURITY;
@@ -470,3 +475,39 @@ CREATE POLICY trial_used_tax_registrations_platform ON trial_used_tax_registrati
     NULLIF(current_setting('app.tenant_id', true), '') IS NULL
     OR NULLIF(current_setting('app.platform_operator', true), '') = '1'
   );
+
+-- Tenant-admin screen feedback: a tenant session may SELECT/INSERT only its own
+-- rows. Status updates are platform-operator (unscoped PrismaService / GUC unset).
+ALTER TABLE tenant_screen_feedback ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_screen_feedback FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_tenant_screen_feedback_select ON tenant_screen_feedback;
+CREATE POLICY tenant_isolation_tenant_screen_feedback_select ON tenant_screen_feedback
+  FOR SELECT
+  USING (
+    tenant_id::text = NULLIF(current_setting('app.tenant_id', true), '')
+    OR NULLIF(current_setting('app.tenant_id', true), '') IS NULL
+  );
+DROP POLICY IF EXISTS tenant_isolation_tenant_screen_feedback_insert ON tenant_screen_feedback;
+CREATE POLICY tenant_isolation_tenant_screen_feedback_insert ON tenant_screen_feedback
+  FOR INSERT
+  WITH CHECK (
+    tenant_id::text = NULLIF(current_setting('app.tenant_id', true), '')
+  );
+DROP POLICY IF EXISTS tenant_isolation_tenant_screen_feedback_update ON tenant_screen_feedback;
+CREATE POLICY tenant_isolation_tenant_screen_feedback_update ON tenant_screen_feedback
+  FOR UPDATE
+  USING (NULLIF(current_setting('app.tenant_id', true), '') IS NULL)
+  WITH CHECK (NULLIF(current_setting('app.tenant_id', true), '') IS NULL);
+DROP POLICY IF EXISTS tenant_isolation_tenant_screen_feedback_delete ON tenant_screen_feedback;
+CREATE POLICY tenant_isolation_tenant_screen_feedback_delete ON tenant_screen_feedback
+  FOR DELETE
+  USING (NULLIF(current_setting('app.tenant_id', true), '') IS NULL);
+
+-- Manual payments ledger is platform-operator only. Tenant sessions
+-- (app.tenant_id set) cannot see or write rows.
+ALTER TABLE account_payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE account_payments FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS platform_only_account_payments ON account_payments;
+CREATE POLICY platform_only_account_payments ON account_payments
+  USING (NULLIF(current_setting('app.tenant_id', true), '') IS NULL)
+  WITH CHECK (NULLIF(current_setting('app.tenant_id', true), '') IS NULL);

@@ -5,6 +5,7 @@ import {
   ROLE_PERMISSION_MATRIX,
   isReservedRoleName,
   isSystemOwnerRole,
+  isTenantAdminRole,
 } from './permissions.js';
 
 describe('permission catalog', () => {
@@ -51,5 +52,12 @@ describe('permission catalog', () => {
     expect(isSystemOwnerRole({ name: 'Owner', isSystem: true })).toBe(true);
     expect(isSystemOwnerRole({ name: 'Owner', isSystem: false })).toBe(false);
     expect(isSystemOwnerRole({ name: 'Admin', isSystem: true })).toBe(false);
+  });
+
+  it('treats Owner and Admin as tenant admins', () => {
+    expect(isTenantAdminRole({ name: 'Owner' })).toBe(true);
+    expect(isTenantAdminRole({ name: 'Admin' })).toBe(true);
+    expect(isTenantAdminRole({ name: 'Accountant' })).toBe(false);
+    expect(isTenantAdminRole({ name: 'Viewer' })).toBe(false);
   });
 });

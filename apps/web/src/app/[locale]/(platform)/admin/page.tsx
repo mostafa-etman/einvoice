@@ -13,6 +13,7 @@ import {
   listAdminPlans,
   listTenants,
   listTrialTaxRegistrations,
+  getFeedbackSummary,
   provisionTenant,
   rejectTenant,
   resetTrialTaxRegistration,
@@ -39,9 +40,12 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { TenantTable } from './_components/tenant-table';
 import { TenantDetailDrawer } from './_components/tenant-detail-drawer';
 import { ReasonDialog } from './_components/reason-dialog';
+import { FeedbackPanel } from './_components/feedback-panel';
+import { PaymentsPanel } from './_components/payments-panel';
 import { useMutationToast } from '@/components/ui/use-mutation-toast';
+import { Badge } from '@/components/ui/badge';
 
-type Tab = 'tenants' | 'plans' | 'addons' | 'costs' | 'settings' | 'trials';
+type Tab = 'tenants' | 'plans' | 'addons' | 'costs' | 'settings' | 'trials' | 'feedback' | 'payments';
 
 type LifecycleDialog =
   | { kind: 'approve'; tenant: TenantSummary }
@@ -128,6 +132,11 @@ export default function PlatformAdminPage() {
     queryFn: listTrialTaxRegistrations,
     enabled: tab === 'trials',
   });
+  const feedbackSummaryQuery = useQuery({
+    queryKey: ['platform-admin-feedback-summary'],
+    queryFn: getFeedbackSummary,
+    retry: false,
+  });
 
   useEffect(() => {
     const handle = window.setTimeout(() => setQDebounced(q.trim()), 250);
@@ -148,6 +157,7 @@ export default function PlatformAdminPage() {
   const refreshTenants = () => void qc.invalidateQueries({ queryKey: ['platform-admin-tenants'] });
   const plans = plansQuery.data?.plans ?? [];
   const tenantsBusy = tenantsQuery.isLoading;
+  const newFeedback = feedbackSummaryQuery.data?.newCount ?? 0;
   const accessDenied =
     tenantsQuery.error instanceof ApiError && tenantsQuery.error.status === 403;
 
@@ -812,6 +822,27 @@ export default function PlatformAdminPage() {
                 ) : null}
               </div>
             ),
+          },
+          {
+            id: 'feedback',
+            label: (
+              <span className="inline-flex items-center gap-token-xs">
+                {t('tabFeedback')}
+                {newFeedback > 0 ? (
+                  <Badge variant="warning">
+                    <span className="font-en tabular-nums" dir="ltr">
+                      {newFeedback}
+                    </span>
+                  </Badge>
+                ) : null}
+              </span>
+            ),
+            panel: <FeedbackPanel />,
+          },
+          {
+            id: 'payments',
+            label: t('tabPayments'),
+            panel: <PaymentsPanel />,
           },
         ]}
       />

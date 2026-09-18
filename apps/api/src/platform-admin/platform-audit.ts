@@ -22,6 +22,10 @@ export const PLATFORM_AUDIT_ACTIONS = {
   TENANT_LIMITS: 'platform.tenant.limits',
   TRIAL_TAX_REG_RESET: 'platform.trial_tax_reg.reset',
   PLAN_SET_ACTIVE: 'platform.plan.set_active',
+  FEEDBACK_SUBMIT: 'tenant.feedback.submit',
+  FEEDBACK_STATUS: 'platform.feedback.status',
+  PAYMENT_RECORD: 'platform.payment.record',
+  PAYMENT_BILLING_UPDATE: 'platform.payment.billing_update',
 } as const;
 
 export type PlatformAuditAction =
