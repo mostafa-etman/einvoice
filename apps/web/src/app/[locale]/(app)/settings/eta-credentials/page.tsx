@@ -43,6 +43,7 @@ const schema = z.object({
   taxpayerLegalName: z.string().min(1),
   issuerType: z.enum(['B', 'P', 'F']),
   syndicateLicenseNumber: z.string().optional(),
+  defaultReceiptType: z.enum(['s', 'r', 'SR']),
   activityCode: z.string().optional(),
   isIntermediary: z.boolean().optional(),
   onBehalfOfRegistrationNumber: z.string().optional(),
@@ -105,6 +106,7 @@ export default function EtaCredentialsPage() {
       taxpayerLegalName: query.data?.taxpayerLegalName ?? '',
       issuerType: (query.data?.issuerType as 'B' | 'P' | 'F') ?? 'B',
       syndicateLicenseNumber: query.data?.syndicateLicenseNumber ?? '',
+      defaultReceiptType: (query.data?.defaultReceiptType as 's' | 'r' | 'SR') ?? 's',
       activityCode: query.data?.activityCode ?? '',
       isIntermediary: query.data?.isIntermediary ?? false,
       onBehalfOfRegistrationNumber:
@@ -508,6 +510,15 @@ export default function EtaCredentialsPage() {
                     dir="ltr"
                     {...register('syndicateLicenseNumber')}
                   />
+                  <Select
+                    label={t('defaultReceiptType')}
+                    hint={t('defaultReceiptTypeHelp')}
+                    {...register('defaultReceiptType')}
+                  >
+                    <option value="s">{t('receiptTypeS')}</option>
+                    <option value="r">{t('receiptTypeR')}</option>
+                    <option value="SR">{t('receiptTypeSR')}</option>
+                  </Select>
                 </div>
               </fieldset>
 

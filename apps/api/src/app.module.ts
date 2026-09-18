@@ -29,6 +29,7 @@ import { EmailModule } from './email/email.module';
 import { PlatformAdminModule } from './platform-admin/platform-admin.module';
 import { CustomersModule } from './customers/customers.module';
 import { FeedbackModule } from './feedback/feedback.module';
+import { ReceiptsModule } from './receipts/receipts.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { FeedbackModule } from './feedback/feedback.module';
     PlatformAdminModule,
     CustomersModule,
     FeedbackModule,
+    ReceiptsModule,
   ],
   providers: [
     {

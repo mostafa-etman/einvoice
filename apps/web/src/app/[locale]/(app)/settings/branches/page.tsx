@@ -16,6 +16,7 @@ import {
 import { useTenant } from '@/lib/tenant-provider';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -44,6 +45,7 @@ const schema = z
     etaBranchCode: z.string().optional(),
     activityCode: z.string().optional(),
     syndicateLicenseNumber: z.string().optional(),
+    defaultReceiptType: z.enum(['s', 'r', 'SR', '']).optional(),
     isDefault: z.boolean().optional(),
     receiptsEnabled: z.boolean().optional(),
     address: addressSchema,
@@ -171,6 +173,16 @@ export default function BranchesSettingsPage() {
               dir="ltr"
               {...register('syndicateLicenseNumber')}
             />
+            <Select
+              label={t('defaultReceiptType')}
+              hint={t('defaultReceiptTypeHelp')}
+              {...register('defaultReceiptType')}
+            >
+              <option value="">{t('receiptTypeInherit')}</option>
+              <option value="s">{t('receiptTypeS')}</option>
+              <option value="r">{t('receiptTypeR')}</option>
+              <option value="SR">{t('receiptTypeSR')}</option>
+            </Select>
           </div>
           <Checkbox label={t('default')} {...register('isDefault')} />
           <Checkbox
@@ -330,6 +342,7 @@ function BranchEditor({
       etaBranchCode: branch.etaBranchCode ?? '',
       activityCode: branch.activityCode ?? '',
       syndicateLicenseNumber: branch.syndicateLicenseNumber ?? '',
+      defaultReceiptType: (branch.defaultReceiptType as 's' | 'r' | 'SR' | '') ?? '',
       isDefault: branch.isDefault,
       receiptsEnabled: branch.receiptsEnabled,
       address: {
@@ -358,6 +371,7 @@ function BranchEditor({
             etaBranchCode: values.etaBranchCode || null,
             activityCode: values.activityCode || null,
             syndicateLicenseNumber: values.syndicateLicenseNumber || null,
+            defaultReceiptType: values.defaultReceiptType || null,
             isDefault: values.isDefault,
             receiptsEnabled: Boolean(values.receiptsEnabled),
             address: values.address,
@@ -389,6 +403,12 @@ function BranchEditor({
           dir="ltr"
           {...register('syndicateLicenseNumber')}
         />
+        <Select label={t('defaultReceiptType')} {...register('defaultReceiptType')}>
+          <option value="">{t('receiptTypeInherit')}</option>
+          <option value="s">{t('receiptTypeS')}</option>
+          <option value="r">{t('receiptTypeR')}</option>
+          <option value="SR">{t('receiptTypeSR')}</option>
+        </Select>
       </div>
       <Checkbox label={t('default')} {...register('isDefault')} />
       <Checkbox

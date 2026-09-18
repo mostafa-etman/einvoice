@@ -27,6 +27,13 @@ export function NavGlyph({ name }: { name: NavGlyphName }) {
           <path d="M14 3v5h5M9 13h6M9 17h6" />
         </svg>
       );
+    case 'receipts':
+      return (
+        <svg {...common}>
+          <path d="M6 3h12v18l-2-1-2 1-2-1-2 1-2-1-2 1z" />
+          <path d="M9 8h6M9 12h6M9 16h4" />
+        </svg>
+      );
     case 'customers':
       return (
         <svg {...common}>

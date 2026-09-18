@@ -1,6 +1,7 @@
 export type NavIcon =
   | 'home'
   | 'documents'
+  | 'receipts'
   | 'customers'
   | 'sync'
   | 'analytics'
@@ -34,6 +35,7 @@ export type NavGroup = {
 const PATH: Record<NavItemId, string | null> = {
   home: null,
   documents: 'documents',
+  receipts: 'receipts',
   customers: 'customers',
   purchases: 'purchases',
   imports: 'imports',
@@ -62,7 +64,7 @@ export function isNavActive(pathname: string, href: string, locale: string): boo
 
 /** Demo grouping (Sales / Operations / Insights & admin), with every existing route kept. */
 const GROUP_ITEMS: Record<NavSectionId, NavItemId[]> = {
-  sales: ['home', 'documents', 'customers'],
+  sales: ['home', 'documents', 'receipts', 'customers'],
   operations: ['purchases', 'imports', 'exports', 'sync', 'devices', 'backup'],
   insights: ['analytics', 'reports', 'billing', 'users', 'roles', 'settings'],
 };

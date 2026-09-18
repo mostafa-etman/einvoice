@@ -46,6 +46,7 @@ export class BranchesController {
       address?: BranchAddressInput;
       receiptsEnabled?: boolean;
       syndicateLicenseNumber?: string | null;
+      defaultReceiptType?: string | null;
     },
   ) {
     return this.branches.create(requireTenant(tenantHeader), user.userId, body);
@@ -68,6 +69,7 @@ export class BranchesController {
       address?: BranchAddressInput;
       receiptsEnabled?: boolean;
       syndicateLicenseNumber?: string | null;
+      defaultReceiptType?: string | null;
     },
   ) {
     return this.branches.update(

@@ -98,6 +98,7 @@ function credsFixture(
     taxpayerLegalName: 'Acme Corp',
     issuerType: 'B',
     syndicateLicenseNumber: null,
+    defaultReceiptType: 's',
     issuerIdentityComplete: true,
     lastValidatedAt: null,
     activeEnvironment: 'SANDBOX',

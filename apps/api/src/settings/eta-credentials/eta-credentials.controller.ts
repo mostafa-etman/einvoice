@@ -50,6 +50,7 @@ export class EtaCredentialsController {
       taxpayerLegalName?: string;
       issuerType?: string;
       syndicateLicenseNumber?: string | null;
+      defaultReceiptType?: string | null;
     },
   ) {
     return this.eta.upsert(requireTenant(tenantHeader), user.userId, body);

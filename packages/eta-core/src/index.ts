@@ -159,3 +159,44 @@ export {
   redactEtaLogJson,
   type EtaIntakeErrorLike,
 } from './eta-intake-error.js';
+export {
+  RECEIPT_TYPES,
+  RECEIPT_TYPE_VERSION,
+  RECEIPT_BUYER_ID_THRESHOLD_EGP,
+  RECEIPT_PAYMENT_METHODS,
+  RECEIPT_BUYER_TYPES,
+  MAX_RECEIPT_LINES,
+  isReceiptType,
+  normalizeReceiptType,
+  isReceiptPaymentMethod,
+  isReceiptBuyerType,
+  buyerIdentityRequired,
+  type ReceiptType,
+  type ReceiptPaymentMethod,
+  type ReceiptBuyerType,
+  type ReceiptDiscountEntry,
+  type ReceiptLineInput,
+  type ReceiptSellerInput,
+  type ReceiptBuyerInput,
+  type ReceiptExtraDiscount,
+  type ReceiptBuildInput,
+} from './receipts/types.js';
+export { canonicalSerializeReceipt } from './receipts/receipt-canonical.js';
+export type {
+  ReceiptJsonObject,
+  ReceiptJsonValue,
+} from './receipts/receipt-canonical.js';
+export {
+  computeReceiptUuid,
+  stampReceiptUuid,
+  receiptWithEmptyUuid,
+  previousUuidForPos,
+  isReceiptUuid,
+} from './receipts/receipt-uuid.js';
+export { buildReceipt, type BuiltReceipt } from './receipts/receipt-builder.js';
+export { validateReceipt, assertReceiptValid } from './receipts/receipt-validator.js';
+export {
+  calculateReceiptLine,
+  calculateReceiptDocumentTotals,
+  toInvoiceLineInput,
+} from './receipts/receipt-totals.js';

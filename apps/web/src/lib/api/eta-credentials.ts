@@ -18,6 +18,7 @@ export type EtaCredentialsView = {
   taxpayerLegalName: string | null;
   issuerType: string;
   syndicateLicenseNumber: string | null;
+  defaultReceiptType: string;
   issuerIdentityComplete: boolean;
   lastValidatedAt: string | null;
   activeEnvironment: EtaEnvironment;
@@ -49,6 +50,7 @@ export function upsertEtaCredentials(body: {
   taxpayerLegalName?: string;
   issuerType?: string;
   syndicateLicenseNumber?: string | null;
+  defaultReceiptType?: string;
 }) {
   return apiFetch<EtaCredentialsView>('/settings/eta-credentials', {
     method: 'PUT',

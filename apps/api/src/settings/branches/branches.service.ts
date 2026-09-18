@@ -13,6 +13,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { QuotaService } from '../../billing/quota.service';
 import { receiptBranchGaps } from '../receipts/receipt-readiness';
 import { normalizeSyndicateLicenseNumber } from '../receipts/syndicate-license';
+import { parseOptionalReceiptType } from '../receipts/receipt-type';
 
 export type BranchAddressInput = IssuerAddress;
 
@@ -44,6 +45,7 @@ export type BranchReceiptInput = {
   address?: BranchAddressInput;
   receiptsEnabled?: boolean;
   syndicateLicenseNumber?: string | null;
+  defaultReceiptType?: string | null;
 };
 
 export function branchAddressToIssuerAddress(
@@ -179,6 +181,7 @@ export class BranchesSettingsService {
           defaultCurrencyCode: input.defaultCurrencyCode,
           receiptsEnabled,
           syndicateLicenseNumber: syndicate,
+          defaultReceiptType: parseOptionalReceiptType(input.defaultReceiptType),
           ...addressToColumns({
             country: 'EG',
             ...(input.address ?? {}),
@@ -312,6 +315,9 @@ export class BranchesSettingsService {
           ...(input.receiptsEnabled !== undefined ? { receiptsEnabled } : {}),
           ...(input.syndicateLicenseNumber !== undefined
             ? { syndicateLicenseNumber: syndicate }
+            : {}),
+          ...(input.defaultReceiptType !== undefined
+            ? { defaultReceiptType: parseOptionalReceiptType(input.defaultReceiptType) }
             : {}),
           ...(input.address ? addressToColumns(input.address) : {}),
         },

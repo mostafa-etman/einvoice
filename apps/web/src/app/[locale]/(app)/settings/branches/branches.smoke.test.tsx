@@ -27,6 +27,8 @@ describe('settings branches smoke', () => {
       expect(messages.settingsBranches.syndicateLicense).toBeTruthy();
       expect(messages.settingsBranches.gapMissingEtaBranchCode).toBeTruthy();
       expect(messages.settingsBranches.managePos).toBeTruthy();
+      expect(messages.settingsBranches.defaultReceiptType).toBeTruthy();
+      expect(messages.settingsBranches.receiptTypeS).toBeTruthy();
     }
   });
 

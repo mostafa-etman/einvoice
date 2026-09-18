@@ -6,6 +6,7 @@ export type CompanyProfile = {
   legalName: string | null;
   issuerType: string;
   syndicateLicenseNumber: string | null;
+  defaultReceiptType: string;
   logo: {
     contentType: string | null;
     byteSize: number | null;

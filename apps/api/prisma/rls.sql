@@ -153,6 +153,13 @@ CREATE POLICY tenant_isolation_pos_devices ON pos_devices
   USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
   WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
 
+ALTER TABLE receipts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE receipts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_receipts ON receipts;
+CREATE POLICY tenant_isolation_receipts ON receipts
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''))
+  WITH CHECK (tenant_id::text = NULLIF(current_setting('app.tenant_id', true), ''));
+
 ALTER TABLE signature_jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE signature_jobs FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_signature_jobs ON signature_jobs;

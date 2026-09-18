@@ -1,0 +1,71 @@
+{
+  "header": {
+    "dateTimeIssued": "2026-02-13T14:00:00Z",
+    "receiptNumber": "POS-1-0001",
+    "uuid": "5e182370759427b9074223b3bb99eee655219a9597b5dc6de022bad03b84ffae",
+    "previousUUID": "",
+    "currency": "EGP",
+    "exchangeRate": 0
+  },
+  "documentType": {
+    "receiptType": "s",
+    "typeVersion": "1.2"
+  },
+  "seller": {
+    "rin": "200000000000003",
+    "companyTradeName": "Demo Taxpayer LLC",
+    "branchCode": "0",
+    "branchAddress": {
+      "country": "EG",
+      "governate": "Cairo",
+      "regionCity": "Nasr City",
+      "street": "Street 1",
+      "buildingNumber": "10",
+      "postalCode": "11765"
+    },
+    "deviceSerialNumber": "POS-VERIFY-001",
+    "activityCode": "6201",
+    "syndicateLicenseNumber": "C"
+  },
+  "buyer": {
+    "type": "P",
+    "id": "",
+    "name": ""
+  },
+  "itemData": [
+    {
+      "internalCode": "SKU-1",
+      "description": "Service hour",
+      "itemType": "EGS",
+      "itemCode": "EG-123456789-123456",
+      "unitType": "EA",
+      "quantity": 1,
+      "unitPrice": 100,
+      "netSale": 100,
+      "totalSale": 100,
+      "total": 114,
+      "taxableItems": [
+        {
+          "taxType": "T1",
+          "amount": 14,
+          "subType": "V009",
+          "rate": 14
+        }
+      ]
+    }
+  ],
+  "totalSales": 100,
+  "totalCommercialDiscount": 0,
+  "totalItemsDiscount": 0,
+  "netAmount": 100,
+  "feesAmount": 0,
+  "totalAmount": 114,
+  "taxTotals": [
+    {
+      "taxType": "T1",
+      "amount": 14
+    }
+  ],
+  "paymentMethod": "C",
+  "adjustment": 0
+}

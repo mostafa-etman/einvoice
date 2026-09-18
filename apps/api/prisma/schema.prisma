@@ -361,6 +361,8 @@ model Tenant {
   etaSetupPromptDismissedAt DateTime? @map("eta_setup_prompt_dismissed_at")
   /// ETA receipt seller.syndicateLicenseNumber default. Persons: ≥10 digit zero-padded; companies: "C" or omit.
   syndicateLicenseNumber String? @map("syndicate_license_number")
+  /// Tenant default ETA receipt type: s (sale), r (return), SR (retail). Branch may override.
+  defaultReceiptType String @default("s") @map("default_receipt_type") @db.VarChar(8)
   account              Account   @relation(fields: [accountId], references: [id], onDelete: Restrict)
   quotaOverrides       QuotaOverride[]
   paymentCustomers     PaymentCustomer[]
@@ -376,6 +378,7 @@ model Tenant {
   trialUsedTaxRegistrations TrialUsedTaxRegistration[]
   screenFeedback       TenantScreenFeedback[]
   posDevices           PosDevice[]
+  receipts             Receipt[]
 
   @@index([accountId])
   @@map("tenants")
@@ -394,6 +397,8 @@ model Branch {
   receiptsEnabled     Boolean  @default(false) @map("receipts_enabled")
   /// Optional override of Tenant.syndicateLicenseNumber for this branch.
   syndicateLicenseNumber String? @map("syndicate_license_number")
+  /// Optional override of Tenant.defaultReceiptType for this branch (s / r / SR).
+  defaultReceiptType  String?  @map("default_receipt_type") @db.VarChar(8)
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
@@ -416,6 +421,7 @@ model Branch {
   receivedDocuments     ReceivedDocument[]
   documentNumberSequences DocumentNumberSequence[]
   posDevices            PosDevice[]
+  receipts              Receipt[]
 
   @@index([tenantId])
   @@map("branches")
@@ -1114,12 +1120,63 @@ model PosDevice {
   tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch        Branch          @relation(fields: [branchId], references: [id], onDelete: Restrict)
   signingDevice SigningDevice?  @relation(fields: [signingDeviceId], references: [id], onDelete: SetNull)
+  receipts      Receipt[]
 
   @@unique([tenantId, serialNumber])
   @@index([tenantId])
   @@index([tenantId, branchId])
   @@index([tenantId, status])
   @@map("pos_devices")
+}
+
+enum ReceiptStatus {
+  DRAFT
+  READY
+}
+
+/// Local eReceipt draft/ready record. Submission and batch signing are later phases.
+model Receipt {
+  id               String        @id @default(uuid()) @db.Uuid
+  tenantId         String        @map("tenant_id") @db.Uuid
+  branchId         String        @map("branch_id") @db.Uuid
+  posDeviceId      String        @map("pos_device_id") @db.Uuid
+  status           ReceiptStatus @default(DRAFT)
+  receiptType      String        @map("receipt_type") @db.VarChar(8)
+  typeVersion      String        @default("1.2") @map("type_version")
+  receiptNumber    String        @map("receipt_number")
+  dateTimeIssued   DateTime      @map("date_time_issued") @db.Timestamptz
+  currencyCode     String        @default("EGP") @map("currency_code")
+  exchangeRate     String        @default("0") @map("exchange_rate")
+  uuid             String        @default("")
+  previousUuid     String        @default("") @map("previous_uuid")
+  referenceUuid    String?       @map("reference_uuid")
+  paymentMethod    String        @map("payment_method")
+  orderDeliveryMode String?      @map("order_delivery_mode")
+  buyerType        String        @map("buyer_type")
+  buyerId          String?       @map("buyer_id")
+  buyerName        String?       @map("buyer_name")
+  totalSales       String        @default("0.00") @map("total_sales")
+  netAmount        String        @default("0.00") @map("net_amount")
+  totalAmount      String        @default("0.00") @map("total_amount")
+  etaPayloadJson   Json          @map("eta_payload_json")
+  /// Exact JSON text with property order preserved for uuid hashing / later signing.
+  etaPayloadText   String        @map("eta_payload_text") @db.Text
+  uuidCanonical    String        @map("uuid_canonical") @db.Text
+  canonicalPreview String        @map("canonical_preview") @db.Text
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+  createdByUserId  String?       @map("created_by_user_id") @db.Uuid
+  updatedByUserId  String?       @map("updated_by_user_id") @db.Uuid
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch    Branch    @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  posDevice PosDevice @relation(fields: [posDeviceId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, posDeviceId, receiptNumber])
+  @@index([tenantId, dateTimeIssued])
+  @@index([tenantId, posDeviceId])
+  @@index([tenantId, uuid])
+  @@map("receipts")
 }
 
 model SignatureJob {

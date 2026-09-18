@@ -10,6 +10,7 @@ describe('app screens', () => {
   it('matches the most specific screen for a path', () => {
     expect(matchAppScreen('/en')).toBe('home');
     expect(matchAppScreen('/ar/documents')).toBe('documents');
+    expect(matchAppScreen('/en/receipts')).toBe('receipts');
     expect(matchAppScreen('/en/documents/abc')).toBe('documents.detail');
     expect(matchAppScreen('/en/settings/eta-credentials')).toBe('settings.eta-credentials');
     expect(matchAppScreen('/en/settings/pos-devices')).toBe('settings.pos-devices');

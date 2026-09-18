@@ -10,6 +10,7 @@ describe('CompanySettingsService logo upload', () => {
     legalName: 'Legal Co',
     issuerType: 'B',
     syndicateLicenseNumber: null,
+    defaultReceiptType: 's',
     logoObjectKey: null,
     logoContentType: null,
     logoByteSize: null,

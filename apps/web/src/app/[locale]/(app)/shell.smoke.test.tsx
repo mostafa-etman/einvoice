@@ -117,6 +117,7 @@ describe('app shell smoke', () => {
       expect.arrayContaining([
         '/en',
         '/en/documents',
+        '/en/receipts',
         '/en/customers',
         '/en/purchases',
         '/en/imports',
@@ -132,7 +133,7 @@ describe('app shell smoke', () => {
         '/en/settings',
       ]),
     );
-    expect(hrefs).toHaveLength(15);
+    expect(hrefs).toHaveLength(16);
   });
 
   it('renders grouped navigation and marks the active route', async () => {

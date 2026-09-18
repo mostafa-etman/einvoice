@@ -14,6 +14,7 @@ import { SecretsEncryptionService } from '../../crypto/secrets-encryption.servic
 import { PrismaService } from '../../prisma/prisma.service';
 import { TrialTaxRegistrationService } from '../../billing/trial-tax-registration.service';
 import { normalizeSyndicateLicenseNumber } from '../receipts/syndicate-license';
+import { parseReceiptType } from '../receipts/receipt-type';
 
 const MASK = '••••••••';
 
@@ -51,6 +52,8 @@ export type EtaCredentialsView = {
   issuerType: string;
   /** Tenant default for receipt seller.syndicateLicenseNumber. */
   syndicateLicenseNumber: string | null;
+  /** Tenant default receipt type: s, r, or SR. Branch may override. */
+  defaultReceiptType: string;
   /** False when legal name is blank (required before issuing). */
   issuerIdentityComplete: boolean;
   lastValidatedAt: string | null;
@@ -99,6 +102,7 @@ export class EtaCredentialsService {
         taxpayerLegalName: tenant.legalName,
         issuerType: tenant.issuerType || 'B',
         syndicateLicenseNumber: tenant.syndicateLicenseNumber,
+        defaultReceiptType: tenant.defaultReceiptType || 's',
         issuerIdentityComplete: isIssuerNameComplete(tenant.legalName),
         lastValidatedAt: null,
         activeEnvironment: tenant.activeEtaEnvironment,
@@ -110,6 +114,7 @@ export class EtaCredentialsService {
       tenant.issuerType ?? 'B',
       tenant.syndicateLicenseNumber,
       tenant.activeEtaEnvironment,
+      tenant.defaultReceiptType || 's',
     );
   }
 
@@ -129,6 +134,7 @@ export class EtaCredentialsService {
       taxpayerLegalName?: string;
       issuerType?: string;
       syndicateLicenseNumber?: string | null;
+      defaultReceiptType?: string | null;
     },
   ): Promise<EtaCredentialsView> {
     await this.crypto.ensureReady();
@@ -157,6 +163,10 @@ export class EtaCredentialsService {
       input.syndicateLicenseNumber !== undefined
         ? normalizeSyndicateLicenseNumber(input.syndicateLicenseNumber)
         : (tenantRow.syndicateLicenseNumber ?? null);
+    const defaultReceiptType =
+      input.defaultReceiptType !== undefined
+        ? parseReceiptType(input.defaultReceiptType)
+        : parseReceiptType(tenantRow.defaultReceiptType || 's');
     if (!isIssuerNameComplete(legalName)) {
       throw new BadRequestException({
         code: 'ISSUER_NAME_INCOMPLETE',
@@ -180,7 +190,7 @@ export class EtaCredentialsService {
 
     await this.prisma.tenant.update({
       where: { id: tenantId },
-      data: { legalName, issuerType, syndicateLicenseNumber },
+      data: { legalName, issuerType, syndicateLicenseNumber, defaultReceiptType },
     });
 
     const row = await this.tenantPrisma.withTenant(tenantId, async (tx) => {
@@ -269,6 +279,7 @@ export class EtaCredentialsService {
       issuerType,
       syndicateLicenseNumber,
       tenantRow.activeEtaEnvironment,
+      defaultReceiptType,
     );
   }
 
@@ -331,6 +342,7 @@ export class EtaCredentialsService {
       tenant.issuerType ?? 'B',
       tenant.syndicateLicenseNumber,
       tenant.activeEtaEnvironment,
+      tenant.defaultReceiptType || 's',
     );
   }
 
@@ -358,6 +370,7 @@ export class EtaCredentialsService {
     issuerType: string,
     syndicateLicenseNumber: string | null,
     activeEnvironment: EtaEnvironment,
+    defaultReceiptType: string,
   ): EtaCredentialsView {
     return {
       id: row.id,
@@ -374,6 +387,7 @@ export class EtaCredentialsService {
       taxpayerLegalName: legalName,
       issuerType: issuerType || 'B',
       syndicateLicenseNumber,
+      defaultReceiptType: defaultReceiptType || 's',
       issuerIdentityComplete: isIssuerNameComplete(legalName),
       lastValidatedAt: row.lastValidatedAt?.toISOString() ?? null,
       activeEnvironment,

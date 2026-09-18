@@ -18,6 +18,7 @@ export type Branch = {
   syndicateLicenseNumber: string | null;
   receiptsReady: boolean;
   receiptsGaps: string[];
+  defaultReceiptType: string | null;
 };
 
 export async function listBranches(): Promise<Branch[]> {
@@ -33,6 +34,7 @@ export async function createBranch(body: {
   address?: BranchAddress;
   receiptsEnabled?: boolean;
   syndicateLicenseNumber?: string | null;
+  defaultReceiptType?: string | null;
 }): Promise<Branch> {
   return apiFetch<Branch>('/branches', {
     method: 'POST',
@@ -53,6 +55,7 @@ export async function updateBranch(
     address: BranchAddress;
     receiptsEnabled: boolean;
     syndicateLicenseNumber: string | null;
+    defaultReceiptType: string | null;
   }>,
 ): Promise<Branch> {
   return apiFetch<Branch>(`/branches/${id}`, {
