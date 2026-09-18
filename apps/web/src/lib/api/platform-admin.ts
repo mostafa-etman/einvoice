@@ -120,6 +120,7 @@ export type PlanAdmin = {
   selfServe: boolean;
   isActive: boolean;
   sortOrder: number;
+  subscriberCount: number;
 };
 
 export type DocumentCostView = {
@@ -290,6 +291,12 @@ export function setPlanActive(code: string, isActive: boolean) {
   return apiFetch<PlanAdmin>(`/platform-admin/plans/${encodeURIComponent(code)}`, {
     method: 'PATCH',
     body: { isActive },
+  });
+}
+
+export function deletePlan(code: string) {
+  return apiFetch<{ ok: true; code: string }>(`/platform-admin/plans/${encodeURIComponent(code)}`, {
+    method: 'DELETE',
   });
 }
 

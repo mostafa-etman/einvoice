@@ -1,6 +1,11 @@
 import { randomBytes } from 'node:crypto';
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import type { Plan, Prisma, Subscription, SubscriptionStatus, Tenant } from '@prisma/client';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma, type Plan, type Subscription, type SubscriptionStatus, type Tenant } from '@prisma/client';
 import { PasswordService } from '../auth/password.service';
 import { QuotaService } from '../billing/quota.service';
 import { PointsService } from '../billing/points.service';
@@ -15,6 +20,7 @@ import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { TenantService } from '../tenant/tenant.service';
 import { TrialTaxRegistrationService } from '../billing/trial-tax-registration.service';
 import { PLATFORM_AUDIT_ACTIONS } from './platform-audit';
+import { planHasSubscribersBody } from './plan-has-subscribers';
 import { parseTutorialVideoUrl } from '../settings/eta-credentials/tutorial-video-url';
 
 const UUID_RE =
@@ -455,8 +461,13 @@ export class TenantLifecycleService {
   }
 
   async listPlans() {
-    const plans = await this.prisma.plan.findMany({ orderBy: { sortOrder: 'asc' } });
-    return { plans: plans.map((p) => this.toPlanAdmin(p)) };
+    const plans = await this.prisma.plan.findMany({
+      orderBy: { sortOrder: 'asc' },
+      include: { _count: { select: { subscriptions: true } } },
+    });
+    return {
+      plans: plans.map((p) => this.toPlanAdmin(p, p._count.subscriptions)),
+    };
   }
 
   async upsertPlan(
@@ -539,7 +550,7 @@ export class TenantLifecycleService {
       resourceId: plan.id,
       metadata: { code: plan.code },
     });
-    return this.toPlanAdmin(plan);
+    return this.toPlanAdmin(plan, await this.countPlanSubscribers(plan.id));
   }
 
   async setPlanActive(operatorUserId: string, code: string, isActive: boolean) {
@@ -558,7 +569,38 @@ export class TenantLifecycleService {
       resourceId: updated.id,
       metadata: { code: updated.code, isActive },
     });
-    return this.toPlanAdmin(updated);
+    return this.toPlanAdmin(updated, await this.countPlanSubscribers(updated.id));
+  }
+
+  async deletePlan(operatorUserId: string, code: string) {
+    const normalized = code.trim().toUpperCase();
+    const plan = await this.prisma.plan.findUnique({ where: { code: normalized } });
+    if (!plan) throw new NotFoundException('unknown_plan');
+
+    const subscriberCount = await this.countPlanSubscribers(plan.id);
+    if (subscriberCount > 0) {
+      throw new ConflictException(planHasSubscribersBody(subscriberCount));
+    }
+
+    try {
+      await this.prisma.plan.delete({ where: { id: plan.id } });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+        const n = await this.countPlanSubscribers(plan.id);
+        throw new ConflictException(planHasSubscribersBody(Math.max(n, 1)));
+      }
+      throw err;
+    }
+
+    await this.audit.write({
+      action: PLATFORM_AUDIT_ACTIONS.PLAN_DELETE,
+      outcome: 'success',
+      actorUserId: operatorUserId,
+      resourceType: 'plan',
+      resourceId: plan.id,
+      metadata: { code: plan.code },
+    });
+    return { ok: true as const, code: plan.code };
   }
 
   async getUsage(tenantId: string) {
@@ -792,7 +834,11 @@ export class TenantLifecycleService {
     };
   }
 
-  private toPlanAdmin(plan: Plan) {
+  private countPlanSubscribers(planId: string) {
+    return this.prisma.subscription.count({ where: { planId } });
+  }
+
+  private toPlanAdmin(plan: Plan, subscriberCount = 0) {
     return {
       id: plan.id,
       code: plan.code,
@@ -813,6 +859,7 @@ export class TenantLifecycleService {
       selfServe: plan.selfServe,
       isActive: plan.isActive,
       sortOrder: plan.sortOrder,
+      subscriberCount,
     };
   }
 }

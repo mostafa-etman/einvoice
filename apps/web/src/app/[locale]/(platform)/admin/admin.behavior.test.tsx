@@ -19,6 +19,7 @@ import {
   rejectTenant,
   startImpersonation,
   suspendTenant,
+  deletePlan,
   type TenantSummary,
 } from '@/lib/api/platform-admin';
 import PlatformAdminPage from './page';
@@ -55,6 +56,7 @@ jest.mock('@/lib/api/platform-admin', () => {
     endImpersonation: jest.fn(),
     upsertPlan: jest.fn(),
     setPlanActive: jest.fn(),
+    deletePlan: jest.fn(),
     upsertAddon: jest.fn(),
     setDocumentCosts: jest.fn(),
     updateSettings: jest.fn(),
@@ -120,6 +122,29 @@ describe('platform admin page', () => {
           selfServe: true,
           isActive: true,
           sortOrder: 0,
+          subscriberCount: 4,
+        },
+        {
+          id: 'plan-empty',
+          code: 'EMPTYDEL',
+          nameEn: 'Empty',
+          nameAr: 'فارغة',
+          descriptionEn: null,
+          descriptionAr: null,
+          documentQuota: 10,
+          branchQuota: 1,
+          deviceQuota: 1,
+          includedPoints: 0,
+          officialPriceEgp: 0,
+          discountedPriceEgp: 0,
+          maxUsers: 1,
+          maxCompanies: 1,
+          isTrial: false,
+          isPublic: false,
+          selfServe: true,
+          isActive: true,
+          sortOrder: 1,
+          subscriberCount: 0,
         },
       ],
     });
@@ -386,5 +411,36 @@ describe('platform admin page', () => {
     fireEvent.click(await screen.findByRole('tab', { name: en.admin.tabPayments }));
     expect(await screen.findByText('Acme Co')).toBeInTheDocument();
     expect(screen.getAllByText(en.admin.payStatus.OVERDUE).length).toBeGreaterThan(1);
+  });
+
+  it('shows subscriber counts and blocks delete when a plan has accounts', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('tab', { name: en.admin.tabPlans }));
+    const plansPanel = await screen.findByRole('tabpanel');
+    expect(plansPanel).toHaveTextContent(en.admin.planSubscribers.replace('{n}', '4'));
+    expect(plansPanel).toHaveTextContent(en.admin.planNoSubscribers);
+    expect(screen.getAllByRole('button', { name: en.admin.hideFromCustomers }).length).toBeGreaterThan(0);
+
+    const deleteButtons = screen.getAllByRole('button', { name: en.admin.deletePlan });
+    expect(deleteButtons[0]).toBeDisabled();
+    expect(deleteButtons[1]).not.toBeDisabled();
+
+    fireEvent.click(deleteButtons[1]);
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent(en.admin.deletePlanConfirm);
+    (deletePlan as jest.Mock).mockResolvedValue({ ok: true, code: 'EMPTYDEL' });
+    fireEvent.click(within(dialog).getByRole('button', { name: en.admin.deletePlan }));
+    await waitFor(() => expect(deletePlan).toHaveBeenCalledWith('EMPTYDEL'));
+  });
+
+  it('keeps the Arabic delete confirmation copy', async () => {
+    renderPage('ar');
+    fireEvent.click(await screen.findByRole('tab', { name: ar.admin.tabPlans }));
+    const enabledDelete = screen
+      .getAllByRole('button', { name: ar.admin.deletePlan })
+      .find((btn) => !(btn as HTMLButtonElement).disabled);
+    expect(enabledDelete).toBeTruthy();
+    fireEvent.click(enabledDelete!);
+    expect(await screen.findByText(ar.admin.deletePlanConfirm)).toBeInTheDocument();
   });
 });

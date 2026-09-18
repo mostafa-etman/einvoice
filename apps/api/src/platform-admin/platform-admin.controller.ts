@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -133,6 +134,11 @@ export class PlatformAdminController {
       throw new BadRequestException('isActive_required');
     }
     return this.tenants.setPlanActive(user.userId, code, body.isActive);
+  }
+
+  @Delete('plans/:code')
+  deletePlan(@CurrentUser() user: AuthUser, @Param('code') code: string) {
+    return this.tenants.deletePlan(user.userId, code);
   }
 
   @Get('trial-tax-registrations')

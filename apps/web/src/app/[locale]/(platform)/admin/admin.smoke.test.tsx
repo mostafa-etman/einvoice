@@ -24,6 +24,11 @@ describe('platform admin page smoke', () => {
     expect(ar.admin.devices).toContain('أجهزة');
     expect(en.admin.isActive).toBeTruthy();
     expect(en.admin.hideFromCustomers).toBeTruthy();
+    expect(en.admin.deletePlan).toBeTruthy();
+    expect(ar.admin.deletePlan).toContain('حذف');
+    expect(ar.admin.deletePlanConfirm).toContain('متأكد');
+    expect(en.admin.deletePlanBlocked).toContain('{n}');
+    expect(ar.admin.deletePlanBlocked).toContain('{n}');
     expect(en.admin.tabTrials).toBeTruthy();
     expect(en.admin.tabFeedback).toContain('Feedback');
     expect(ar.admin.tabFeedback).toContain('ملاحظات');

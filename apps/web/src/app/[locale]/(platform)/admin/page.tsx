@@ -1,12 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '@/lib/api/client';
 import {
   activateTenant,
   approveTenant,
+  deletePlan,
   getDocumentCosts,
   getSettings,
   listAdminAddons,
@@ -24,6 +25,7 @@ import {
   upsertAddon,
   upsertPlan,
   type LifecycleStatus,
+  type PlanAdmin,
   type TenantSummary,
 } from '@/lib/api/platform-admin';
 import { PageHeader } from '@/components/ui/page-header';
@@ -37,6 +39,7 @@ import { Tabs } from '@/components/ui/tabs';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { Tooltip } from '@/components/ui/tooltip';
 import { TenantTable } from './_components/tenant-table';
 import { TenantDetailDrawer } from './_components/tenant-detail-drawer';
 import { ReasonDialog } from './_components/reason-dialog';
@@ -44,6 +47,16 @@ import { FeedbackPanel } from './_components/feedback-panel';
 import { PaymentsPanel } from './_components/payments-panel';
 import { useMutationToast } from '@/components/ui/use-mutation-toast';
 import { Badge } from '@/components/ui/badge';
+
+function planDeleteErrorMessage(err: unknown, locale: string, fallback: string) {
+  if (err instanceof ApiError && err.body && typeof err.body === 'object') {
+    const body = err.body as { messageAr?: string; messageEn?: string; message?: string };
+    if (locale === 'ar' && body.messageAr) return body.messageAr;
+    if (body.messageEn) return body.messageEn;
+    if (body.message) return body.message;
+  }
+  return err instanceof Error && err.message ? err.message : fallback;
+}
 
 type Tab = 'tenants' | 'plans' | 'addons' | 'costs' | 'settings' | 'trials' | 'feedback' | 'payments';
 
@@ -55,6 +68,7 @@ type LifecycleDialog =
 export default function PlatformAdminPage() {
   const t = useTranslations('admin');
   const tUi = useTranslations('ui');
+  const locale = useLocale();
   const toast = useMutationToast();
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>('tenants');
@@ -65,6 +79,7 @@ export default function PlatformAdminPage() {
   const [showProvision, setShowProvision] = useState(false);
   const [lifecycleDialog, setLifecycleDialog] = useState<LifecycleDialog | null>(null);
   const [resetTax, setResetTax] = useState<string | null>(null);
+  const [planToDelete, setPlanToDelete] = useState<PlanAdmin | null>(null);
   const [form, setForm] = useState({
     name: '',
     ownerEmail: '',
@@ -450,7 +465,14 @@ export default function PlatformAdminPage() {
                                 {p.deviceQuota}
                               </span>{' '}
                               {t('devices')} ·{' '}
-                              {p.isActive ? t('planActive') : t('planInactive')}
+                              {p.isActive ? t('planActive') : t('planInactive')} ·{' '}
+                              {(p.subscriberCount ?? 0) > 0 ? (
+                                <span className="font-en tabular-nums" dir="ltr">
+                                  {t('planSubscribers', { n: p.subscriberCount })}
+                                </span>
+                              ) : (
+                                t('planNoSubscribers')
+                              )}
                             </p>
                           </div>
                           <div className="flex flex-wrap gap-token-xs">
@@ -495,6 +517,24 @@ export default function PlatformAdminPage() {
                             >
                               {p.isActive ? t('hideFromCustomers') : t('showToCustomers')}
                             </Button>
+                            {(p.subscriberCount ?? 0) > 0 ? (
+                              <Tooltip content={t('deletePlanBlocked', { n: p.subscriberCount })}>
+                                <span>
+                                  <Button type="button" variant="danger" size="sm" disabled>
+                                    {t('deletePlan')}
+                                  </Button>
+                                </span>
+                              </Tooltip>
+                            ) : (
+                              <Button
+                                type="button"
+                                variant="danger"
+                                size="sm"
+                                onClick={() => setPlanToDelete(p)}
+                              >
+                                {t('deletePlan')}
+                              </Button>
+                            )}
                           </div>
                         </div>
                       </Card>
@@ -915,6 +955,30 @@ export default function PlatformAdminPage() {
               qc.invalidateQueries({ queryKey: ['platform-admin-trial-tax-regs'] }),
             ),
           );
+        }}
+      />
+      <ConfirmDialog
+        open={planToDelete !== null}
+        onClose={() => setPlanToDelete(null)}
+        title={t('deletePlan')}
+        description={t('deletePlanConfirm')}
+        confirmLabel={t('deletePlan')}
+        danger
+        onConfirm={() => {
+          if (!planToDelete) return;
+          const code = planToDelete.code;
+          setPlanToDelete(null);
+          void deletePlan(code)
+            .then(() => {
+              if (planForm.code.toUpperCase() === code.toUpperCase()) {
+                setPlanForm((f) => ({ ...f, code: '' }));
+              }
+              void qc.invalidateQueries({ queryKey: ['platform-admin-plans'] });
+              toast.deleted();
+            })
+            .catch((err: unknown) => {
+              toast.error(undefined, planDeleteErrorMessage(err, locale, t('error')));
+            });
         }}
       />
     </div>
