@@ -1138,9 +1138,12 @@ model PosDevice {
 enum ReceiptStatus {
   DRAFT
   READY
+  SUBMITTED
+  VALID
+  INVALID
 }
 
-/// Local eReceipt draft/ready record. Submission and batch signing are later phases.
+/// Local eReceipt draft/ready/submitted record.
 model Receipt {
   id               String        @id @default(uuid()) @db.Uuid
   tenantId         String        @map("tenant_id") @db.Uuid
@@ -1169,6 +1172,20 @@ model Receipt {
   etaPayloadText   String        @map("eta_payload_text") @db.Text
   uuidCanonical    String        @map("uuid_canonical") @db.Text
   canonicalPreview String        @map("canonical_preview") @db.Text
+  etaStatus        String?       @map("eta_status")
+  etaLongId        String?       @map("eta_long_id")
+  etaEnvironment   EtaEnvironment? @map("eta_environment")
+  submissionUuid   String?       @map("submission_uuid")
+  etaStatusRaw     Json?         @map("eta_status_raw")
+  etaStatusUpdatedAt DateTime?   @map("eta_status_updated_at") @db.Timestamptz
+  submitCooldownUntil DateTime?  @map("submit_cooldown_until") @db.Timestamptz
+  submitCooldownPayloadHash String? @map("submit_cooldown_payload_hash")
+  submitInFlight   Boolean       @default(false) @map("submit_in_flight")
+  submitInFlightSince DateTime?  @map("submit_in_flight_since") @db.Timestamptz
+  submitAttemptCount Int         @default(0) @map("submit_attempt_count")
+  submitDuplicateRetryCount Int  @default(0) @map("submit_duplicate_retry_count")
+  lastErrorCode    String?       @map("last_error_code")
+  lastErrorMessage String?       @map("last_error_message")
   createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz
   createdByUserId  String?       @map("created_by_user_id") @db.Uuid

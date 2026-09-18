@@ -181,7 +181,7 @@ export {
   type ReceiptExtraDiscount,
   type ReceiptBuildInput,
 } from './receipts/types.js';
-export { canonicalSerializeReceipt } from './receipts/receipt-canonical.js';
+export { canonicalSerializeReceipt, canonicalSerializeReceiptBatch } from './receipts/receipt-canonical.js';
 export type {
   ReceiptJsonObject,
   ReceiptJsonValue,
@@ -200,3 +200,17 @@ export {
   calculateReceiptDocumentTotals,
   toInvoiceLineInput,
 } from './receipts/receipt-totals.js';
+export {
+  buildReceiptSignatures,
+  buildReceiptSubmitBody,
+  hashReceiptBatch,
+  placeholderIssuerSignature,
+  splitReceiptBatch,
+  ReceiptSignatureRequiredError,
+  RECEIPT_ISSUER_SIGNATURE_TYPE,
+  ETA_RECEIPT_MAX_PER_SUBMISSION,
+  ETA_RECEIPT_MAX_BYTES,
+  type ReceiptSubmitSignature,
+  type ReceiptCadesSigner,
+  type ReceiptSignatureOptions,
+} from './receipts/receipt-batch-signature.js';

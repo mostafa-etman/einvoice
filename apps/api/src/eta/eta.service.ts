@@ -15,6 +15,11 @@ import { EtaAuthClient } from './eta-auth.client';
 import { EtaTokenCache, type CachedToken } from './eta-token.cache';
 import { EtaDocTypesClient } from './eta-doc-types.client';
 import {
+  ETA_B2C_REQUIRED_CODE,
+  ETA_B2C_REQUIRED_MESSAGE,
+  jwtHasB2cTag,
+} from './eta-jwt-tags';
+import {
   ETA_SETTINGS_PATH,
   ETA_SETUP_CODE,
   type EtaConnectionStatus,
@@ -176,6 +181,107 @@ export class EtaService implements OnModuleDestroy {
       } satisfies CachedToken;
     });
     return entry.accessToken;
+  }
+
+  /**
+   * POS OAuth token for eReceipt submit. Cached per tenant + POS serial.
+   * Leaves invoice `getAccessToken` (Basic auth) untouched.
+   */
+  async getPosAccessToken(
+    tenantId: string,
+    posDeviceId: string,
+    opts?: { forceRefresh?: boolean; environment?: EtaEnvironment },
+  ): Promise<string> {
+    const hosts = await this.resolveHosts(tenantId, opts?.environment);
+    const creds = await this.loadCredentialMaterial(tenantId, hosts.environment);
+    if (!creds.ok) {
+      throw new BadRequestException({
+        code: ETA_SETUP_CODE,
+        message: creds.message,
+        settingsPath: ETA_SETTINGS_PATH,
+      });
+    }
+
+    await this.crypto.ensureReady();
+    const pos = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.posDevice.findFirst({ where: { id: posDeviceId, tenantId } }),
+    );
+    if (!pos) {
+      throw new BadRequestException({
+        code: 'POS_REQUIRED',
+        message: 'Select a POS device.',
+      });
+    }
+    if (pos.status !== 'ACTIVE') {
+      throw new BadRequestException({
+        code: 'POS_NOT_ACTIVE',
+        message:
+          'This POS is not active. Register or reactivate it in Settings → POS devices.',
+      });
+    }
+    const presharedKey = this.crypto.decrypt(
+      pos.preSharedKeyCiphertext,
+      pos.preSharedKeyNonce,
+    );
+
+    const identity = {
+      tenantId,
+      clientId: creds.clientId,
+      onBehalfOf: null as string | null,
+      environment: hosts.environment,
+      posSerial: pos.serialNumber,
+    };
+
+    if (opts?.forceRefresh) {
+      await this.tokens.invalidate(identity);
+    }
+
+    const auth = new EtaAuthClient(hosts.identityBaseUrl);
+    const entry = await this.tokens.getOrRefresh(identity, async () => {
+      const token = await auth.requestPosToken({
+        clientId: creds.clientId,
+        clientSecret: creds.clientSecret,
+        posSerial: pos.serialNumber,
+        posOsVersion: pos.osVersion,
+        posModelFramework: pos.modelFramework,
+        presharedKey,
+      });
+      return {
+        accessToken: token.access_token,
+        expiresIn: token.expires_in,
+        obtainedAt: Date.now(),
+        scope: token.scope,
+        tokenType: token.token_type,
+        clientId: creds.clientId,
+      } satisfies CachedToken;
+    });
+
+    if (!jwtHasB2cTag(entry.accessToken)) {
+      throw new BadRequestException({
+        code: ETA_B2C_REQUIRED_CODE,
+        message: ETA_B2C_REQUIRED_MESSAGE,
+      });
+    }
+    return entry.accessToken;
+  }
+
+  async withPosAccessToken<T>(
+    tenantId: string,
+    posDeviceId: string,
+    opts: { environment?: EtaEnvironment } | undefined,
+    fn: (accessToken: string) => Promise<T>,
+  ): Promise<T> {
+    const token = await this.getPosAccessToken(tenantId, posDeviceId, opts);
+    try {
+      return await fn(token);
+    } catch (err) {
+      if (!isEtaUnauthorized(err)) throw err;
+      const fresh = await this.getPosAccessToken(tenantId, posDeviceId, {
+        ...opts,
+        forceRefresh: true,
+      });
+      return await fn(fresh);
+    }
   }
 
   async withAccessToken<T>(

@@ -74,7 +74,10 @@ export class ReceiptsService {
         take: 100,
       }),
     );
-    return rows.map((row) => this.toListItem(row));
+    const previousOf = new Set(rows.map((r) => r.previousUuid).filter(Boolean));
+    return rows.map((row) =>
+      this.toListItem(row, previousOf.has(row.uuid) ? false : undefined),
+    );
   }
 
   async get(tenantId: string, id: string) {
@@ -85,7 +88,13 @@ export class ReceiptsService {
       }),
     );
     if (!row) throw new NotFoundException('Receipt not found');
-    return this.toDetail(row);
+    const child = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.receipt.findFirst({
+        where: { tenantId, posDeviceId: row.posDeviceId, previousUuid: row.uuid },
+        select: { id: true },
+      }),
+    );
+    return this.toDetail(row, !child);
   }
 
   async preview(tenantId: string, dto: ReceiptUpsertDto) {
@@ -145,7 +154,7 @@ export class ReceiptsService {
         posDeviceId: row.posDeviceId,
       },
     });
-    return this.toDetail(row);
+    return this.toDetail(row, true);
   }
 
   async update(
@@ -166,6 +175,12 @@ export class ReceiptsService {
           code: 'RECEIPT_NOT_CHAIN_TIP',
           message:
             'Only the latest receipt on this POS can be edited. Delete newer receipts first so the previousUUID chain stays valid.',
+        });
+      }
+      if (existing.status === 'VALID' || existing.status === 'SUBMITTED') {
+        throw new BadRequestException({
+          code: 'RECEIPT_LOCKED',
+          message: 'This receipt has already been sent to ETA and cannot be edited.',
         });
       }
 
@@ -208,7 +223,7 @@ export class ReceiptsService {
       resourceId: row.id,
       metadata: { uuid: row.uuid },
     });
-    return this.toDetail(row);
+    return this.toDetail(row, true);
   }
 
   async remove(tenantId: string, actorUserId: string, id: string) {
@@ -223,6 +238,12 @@ export class ReceiptsService {
           code: 'RECEIPT_NOT_CHAIN_TIP',
           message:
             'Only the latest receipt on this POS can be deleted, otherwise the previousUUID chain would break.',
+        });
+      }
+      if (existing.status === 'VALID' || existing.status === 'SUBMITTED') {
+        throw new BadRequestException({
+          code: 'RECEIPT_LOCKED',
+          message: 'This receipt has already been sent to ETA and cannot be deleted.',
         });
       }
       await tx.receipt.delete({ where: { id } });
@@ -717,25 +738,33 @@ export class ReceiptsService {
     };
   }
 
-  private toListItem(row: {
-    id: string;
-    status: string;
-    receiptType: string;
-    receiptNumber: string;
-    dateTimeIssued: Date;
-    uuid: string;
-    previousUuid: string;
-    totalAmount: string;
-    paymentMethod: string;
-    branchId: string;
-    posDeviceId: string;
-    buyerType: string;
-    buyerName: string | null;
-    posDevice?: { lastReceiptUuid: string } | null;
-  }) {
-    const isChainTip = row.posDevice
-      ? row.posDevice.lastReceiptUuid === row.uuid
-      : true;
+  private toListItem(
+    row: {
+      id: string;
+      status: string;
+      receiptType: string;
+      receiptNumber: string;
+      dateTimeIssued: Date;
+      uuid: string;
+      previousUuid: string;
+      totalAmount: string;
+      paymentMethod: string;
+      branchId: string;
+      posDeviceId: string;
+      buyerType: string;
+      buyerName: string | null;
+      posDevice?: { lastReceiptUuid: string } | null;
+      etaStatus?: string | null;
+      etaLongId?: string | null;
+      submissionUuid?: string | null;
+      lastErrorMessage?: string | null;
+      submitCooldownUntil?: Date | null;
+    },
+    chainTipOverride?: boolean,
+  ) {
+    const isChainTip =
+      chainTipOverride ??
+      (row.posDevice ? row.posDevice.lastReceiptUuid === row.uuid : true);
     return {
       id: row.id,
       status: row.status,
@@ -752,40 +781,54 @@ export class ReceiptsService {
       buyerName: row.buyerName,
       isChainTip,
       canReturn: row.receiptType !== 'r' && Boolean(row.uuid?.trim()),
+      etaStatus: row.etaStatus ?? null,
+      etaLongId: row.etaLongId ?? null,
+      submissionUuid: row.submissionUuid ?? null,
+      lastErrorMessage: row.lastErrorMessage ?? null,
+      submitCooldownUntil: row.submitCooldownUntil?.toISOString() ?? null,
     };
   }
 
-  private toDetail(row: {
-    id: string;
-    status: string;
-    receiptType: string;
-    typeVersion: string;
-    receiptNumber: string;
-    dateTimeIssued: Date;
-    currencyCode: string;
-    exchangeRate: string;
-    uuid: string;
-    previousUuid: string;
-    referenceUuid: string | null;
-    paymentMethod: string;
-    orderDeliveryMode: string | null;
-    buyerType: string;
-    buyerId: string | null;
-    buyerName: string | null;
-    totalSales: string;
-    netAmount: string;
-    totalAmount: string;
-    etaPayloadJson: Prisma.JsonValue;
-    etaPayloadText: string;
-    uuidCanonical: string;
-    canonicalPreview: string;
-    branchId: string;
-    posDeviceId: string;
-    posDevice?: { lastReceiptUuid: string } | null;
-  }) {
+  private toDetail(
+    row: {
+      id: string;
+      status: string;
+      receiptType: string;
+      typeVersion: string;
+      receiptNumber: string;
+      dateTimeIssued: Date;
+      currencyCode: string;
+      exchangeRate: string;
+      uuid: string;
+      previousUuid: string;
+      referenceUuid: string | null;
+      paymentMethod: string;
+      orderDeliveryMode: string | null;
+      buyerType: string;
+      buyerId: string | null;
+      buyerName: string | null;
+      totalSales: string;
+      netAmount: string;
+      totalAmount: string;
+      etaPayloadJson: Prisma.JsonValue;
+      etaPayloadText: string;
+      uuidCanonical: string;
+      canonicalPreview: string;
+      branchId: string;
+      posDeviceId: string;
+      posDevice?: { lastReceiptUuid: string } | null;
+      etaStatus?: string | null;
+      etaLongId?: string | null;
+      submissionUuid?: string | null;
+      lastErrorMessage?: string | null;
+      lastErrorCode?: string | null;
+      submitCooldownUntil?: Date | null;
+    },
+    chainTipOverride?: boolean,
+  ) {
     const form = this.upsertDtoFromStored(row);
     return {
-      ...this.toListItem(row),
+      ...this.toListItem(row, chainTipOverride),
       typeVersion: row.typeVersion,
       currencyCode: row.currencyCode,
       exchangeRate: row.exchangeRate,
@@ -798,6 +841,7 @@ export class ReceiptsService {
       etaPayloadText: row.etaPayloadText,
       uuidCanonicalString: row.uuidCanonical,
       canonicalString: row.canonicalPreview,
+      lastErrorCode: row.lastErrorCode ?? null,
       form,
     };
   }

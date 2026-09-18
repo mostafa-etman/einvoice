@@ -349,4 +349,17 @@ describe('Receipts document builder API', () => {
     expect(second.body.previousUuid).toBe(first.body.uuid);
     expect(second.body.posDeviceId).toBe(seeded.posDeviceId);
   });
+
+  it('exposes submit route and ETA status fields without requiring the invoice agent', async () => {
+    const ctx = await ownerCtx(app, `sub_${Date.now()}`);
+    const seeded = await seedReadyReceipt(app, ctx);
+    const got = await request(app.getHttpServer())
+      .get(`/receipts/${seeded.id}`)
+      .set('Authorization', `Bearer ${ctx.token}`)
+      .set('X-Tenant-Id', ctx.tenantId)
+      .expect(200);
+    expect(got.body).toHaveProperty('etaStatus');
+    expect(got.body).toHaveProperty('submissionUuid');
+    expect(got.body.status).toBe('DRAFT');
+  });
 });

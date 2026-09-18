@@ -37,6 +37,13 @@ describe('EtaTokenCache (mocked)', () => {
         environment: 'PRODUCTION',
       }),
     ).toBe('eta:token:t1:PRODUCTION:cid:_');
+    expect(
+      tokenCacheKey('t1', {
+        clientId: 'cid',
+        environment: 'SANDBOX',
+        posSerial: 'POS-9',
+      }),
+    ).toBe('eta:pos-token:t1:SANDBOX:cid:POS-9');
   });
 
   it('marks refresh-due at >= 80% of expires_in', () => {

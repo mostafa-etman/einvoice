@@ -7,7 +7,7 @@
  * without touching the invoice CAdES digest path.
  *
  * UUID hashing serializes ONE receipt with `header.uuid` empty.
- * Batch `{ receipts: [...] }` signing is a later phase — not this module.
+ * Batch `{ receipts: [...] }` CAdES uses `canonicalSerializeReceiptBatch`.
  */
 
 export type ReceiptJsonPrimitive = string | number | boolean | null;
@@ -66,4 +66,15 @@ function serializeObject(obj: ReceiptJsonObject): string {
 /** Canonicalize one receipt object (not the `{ receipts: [...] }` batch wrapper). */
 export function canonicalSerializeReceipt(receipt: ReceiptJsonObject): string {
   return serializeObject(receipt);
+}
+
+/**
+ * Canonicalize the receipt **submission batch** `{ receipts: [...] }`.
+ * Do not include `signatures` — they are attached after hashing.
+ * Independent of invoice `canonicalSerialize`.
+ */
+export function canonicalSerializeReceiptBatch(batch: {
+  receipts: ReceiptJsonObject[];
+}): string {
+  return serializeObject({ receipts: batch.receipts });
 }

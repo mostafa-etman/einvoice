@@ -7,6 +7,8 @@ describe('receipts smoke', () => {
       expect(messages.receipts.title).toBeTruthy();
       expect(messages.receipts.sectionExtra).toBeTruthy();
       expect(messages.receipts.returnReceipt).toBeTruthy();
+      expect(messages.receipts.send).toBeTruthy();
+      expect(messages.receipts.b2cRequired).toBeTruthy();
       expect(messages.receipts.previewPrint).toBeTruthy();
       expect(messages.receipts.paymentMethod).toBeTruthy();
       expect(messages.receipts.receiptTypeHelp).toBeTruthy();

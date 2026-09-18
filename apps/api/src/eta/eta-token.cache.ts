@@ -22,11 +22,17 @@ export function tokenCacheKey(
     onBehalfOf?: string | null;
     clientId?: string | null;
     environment?: string | null;
+    /** When set, uses a POS-token slot that never collides with invoice ERP tokens. */
+    posSerial?: string | null;
   },
 ): string {
   const client = opts?.clientId?.trim() || '_';
   const obo = opts?.onBehalfOf?.trim() || '_';
   const env = opts?.environment?.trim() || 'SANDBOX';
+  const pos = opts?.posSerial?.trim();
+  if (pos) {
+    return `eta:pos-token:${tenantId}:${env}:${client}:${pos}`;
+  }
   return `eta:token:${tenantId}:${env}:${client}:${obo}`;
 }
 
@@ -43,6 +49,7 @@ export type TokenCacheIdentity = {
   onBehalfOf?: string | null;
   /** SANDBOX | PRODUCTION — required so hosts never share tokens. */
   environment: string;
+  posSerial?: string | null;
 };
 
 export class EtaTokenCache {

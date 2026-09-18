@@ -33,6 +33,27 @@ function typeLabel(
   return t('typeS');
 }
 
+function statusLabel(
+  t: ReturnType<typeof useTranslations<'receipts'>>,
+  status: string,
+) {
+  if (status === 'VALID') return t('statusValid');
+  if (status === 'INVALID') return t('statusInvalid');
+  if (status === 'SUBMITTED') return t('statusSubmitted');
+  if (status === 'READY') return t('statusReady');
+  return t('statusDraft');
+}
+
+function statusVariant(
+  status: string,
+): 'draft' | 'submitted' | 'valid' | 'invalid' | 'neutral' {
+  if (status === 'VALID') return 'valid';
+  if (status === 'INVALID') return 'invalid';
+  if (status === 'SUBMITTED') return 'submitted';
+  if (status === 'READY') return 'valid';
+  return 'draft';
+}
+
 export default function ReceiptsListPage() {
   const t = useTranslations('receipts');
   const tNav = useTranslations('nav');
@@ -155,8 +176,8 @@ export default function ReceiptsListPage() {
                       <span dir="ltr">{formatMoneyDisplay(row.totalAmount)}</span>
                     </Td>
                     <Td>
-                      <Badge variant={row.status === 'READY' ? 'valid' : 'neutral'}>
-                        {row.status === 'READY' ? t('statusReady') : t('statusDraft')}
+                      <Badge variant={statusVariant(row.status)}>
+                        {statusLabel(t, row.status)}
                       </Badge>
                     </Td>
                     <Td>

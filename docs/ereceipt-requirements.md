@@ -1,7 +1,7 @@
 # ETA eReceipt (B2C) requirements — spec + implementation plan
 
-**Status**: spec only (no model / signing / submission code in this pass).  
-**Date**: 2026-09-18  
+**Status**: Phase 1 (branch/POS) and Phase 2 (document builder) are in the product. This revision is **spec + plan only** for receipt signing and submission — **do not implement until approved**.  
+**Date**: 2026-09-18 (signing correction: receipts do **not** use the USB eSeal token / desktop agent).  
 **SDK last update shown on homepage**: 08-12-2022 (document type pages were still served as of this review).  
 **Hard constraint**: do **not** change the existing e-Invoice signing / canonical / digest path.
 
@@ -21,6 +21,11 @@ Official sources (fetched):
 | Get receipt submission | https://sdk.invoicing.eta.gov.eg/ereceiptapi/06-get-receipt-submission/ |
 | Receipt batch signature | https://sdk.invoicing.eta.gov.eg/receipt-batch-signature-creation/ |
 | Document serialization | https://sdk.invoicing.eta.gov.eg/document-serialization-approach/ |
+| Integration toolkit (signing disabled) | https://sdk.invoicing.eta.gov.eg/toolkit/home/ |
+| Toolkit NuGet POS token | https://sdk.invoicing.eta.gov.eg/nugetoperation/02-toolkit-nuget-connect-token/ |
+| Toolkit NuGet usage (Authenticate + SubmitReceipts) | https://sdk.invoicing.eta.gov.eg/toolkit/nuget/usage/ |
+| Toolkit CLI usage | https://sdk.invoicing.eta.gov.eg/toolkit/cli/usage/ |
+| Toolkit local batch submit (ITIDA component) | https://sdk.invoicing.eta.gov.eg/toolkitapi/08-batch-submission/ |
 | Branch ID (portal, not API) | https://sdk.invoicing.eta.gov.eg/codes/branch/ |
 | Payment methods | https://sdk.invoicing.eta.gov.eg/codes/payment-methods/ |
 | ERP (invoice) login | https://sdk.invoicing.eta.gov.eg/api/01-login-as-taxpayer-system/ |
@@ -40,7 +45,7 @@ We already issue **B2B e-Invoices** (`I` / `C` / `D` / export variants) via:
 - `Branch.etaBranchCode` mapped to **invoice** `issuer.address.branchId`
 - account-pooled **branch quota** and **signing-device quota** (`QuotaService`)
 
-eReceipt is a **separate document family** (B2C). Same tax authority, same identity host, **different JSON shape, different identity fields, different digest root, different submit URL, extra POS auth headers**.
+eReceipt is a **separate document family** (B2C). Same tax authority, same identity host, **different JSON shape, different identity fields, different digest root, different submit URL, extra POS auth headers**. Receipt **signing does not use the USB eSeal token or the desktop agent** — see §6.
 
 Taxpayer prerequisite (ETA, not us): the issuer must have the **B2C tag** on their ETA profile. Without it, receipt submit is rejected.
 
@@ -277,7 +282,7 @@ New entity (name TBD: `PosDevice` / `EtaPosRegistration`), **many POS per branch
 | `etaStatus` | M | `ACTIVE` / `RETIRED` / `PERMANENTLY_RETIRED` | FAQ rule 27 |
 | `activatedAt` / `expiresAt` | O | datetime | portal dates + expiry notifications |
 | `lastReceiptUuid` | M after first receipt | 64 hex or empty | next receipt `previousUUID` |
-| `signingDeviceId` | O | FK `SigningDevice` | optional link: this till also runs the eSeal agent |
+| `signingDeviceId` | O | FK `SigningDevice` | **Not required for receipts.** Optional only if the same machine also invoices |
 
 Portal work the customer still does (we cannot API it): create branch IDs, register each POS serial, generate PSK, assign B2C tag, keep the POS activated.
 
@@ -295,52 +300,205 @@ Two different “devices”:
 | Auth to us | — | hashed device token |
 | On the receipt | `seller.deviceSerialNumber` | not sent |
 | Chain | `previousUUID` per POS serial | none |
-| Signing | Does not replace eSeal; POS auth ≠ document signature | Performs CAdES-BES with USB token |
+| Signing | **Not used for receipts.** PSK authenticates the POS; receipt batch CAdES (when produced) is **server-side**, not USB | Invoice-only: CAdES-BES with USB eSeal token |
 
-**Relation:** a physical cash register that both issues receipts and signs with eSeal should be **one PosDevice + one SigningDevice**, linked. Pairing the agent does **not** register the POS with ETA. Copying `machineFingerprint` into `deviceSerialNumber` is unsafe unless that string is exactly the serial registered on the portal (max 100 chars).
+**Relation:** pairing the invoice signing agent does **not** register the POS with ETA and is **not** required to issue or submit receipts. Copying `machineFingerprint` into `deviceSerialNumber` is unsafe unless that string is exactly the serial registered on the portal (max 100 chars).
 
-Do not overload `SigningDevice` with PSK/OS/model unless product explicitly wants one row for both jobs. Prefer a dedicated POS registration row so invoice-only signing agents stay unchanged.
+Do not overload `SigningDevice` with PSK/OS/model. Invoice-only signing agents stay unchanged. `PosDevice.signingDeviceId` may remain optional for operators who also invoice from the same machine; **receipts must not wait on that agent**.
 
 ---
 
-## 6. Signing / submission method — not HMAC of the receipt body
+## 6. Receipt signing (no token)
 
-### 6.1 What people confuse
+**Correction vs earlier draft:** invoice signing in this product uses a Windows agent + USB eSeal (PKCS#11). **eReceipt does not.** Tenants must be able to submit receipts from our cloud with **no desktop agent and no USB token**. Invoice `SignatureJob` / canonical-serialize / cades-digest stay frozen.
 
-| Mechanism | Used for | HMAC? |
+### 6.1 How receipts are signed without the USB token — exact SDK requirement
+
+**Not HMAC of the receipt using the POS PSK. Not a per-receipt MAC.**
+
+The POS pre-shared key is **only** an OAuth header on identity login. [Authenticate POS](https://sdk.invoicing.eta.gov.eg/ereceiptapi/01-authenticate-pos/) lists `presharedkey` with `posserial` / `pososversion` / `posmodelframework` as **`POST {identity}/connect/token` headers**. Errors include `invalid_presharedkey`. No SDK page hashes or HMACs the receipt body with that key.
+
+**Not “unsigned JSON” as the documented format**, either. [Submit Receipt](https://sdk.invoicing.eta.gov.eg/ereceiptapi/02-submit-receipt/) body:
+
+> `signatures` — Structure containing one or two digital signatures. **At least signature of the Issuer must be present.** Signature of the Service provider is optional.
+
+> `signatureType`: Issuer (`I`), ServiceProvider (`S`)  
+> `value`: **CAdES-BES standard Base64 encoded signature**
+
+[Receipt Batch Signature Creation](https://sdk.invoicing.eta.gov.eg/receipt-batch-signature-creation/) (the signing algorithm page):
+
+> 1. Create receipt batch JSON … individual receipts into separate `receipts` root-level array field elements.  
+> 2. Create canonical version of the JSON as per algorithm described  
+> 3. Apply sha256 hash on the byte array created from canonical JSON version (**using UTF-8**)  
+> 4. **Sign the hash, using CAdES-BES signature.**  
+> 5. Include **Base64 encoded CAdES-BES** signature into original document JSON `signatures` element.
+
+> After signing the hash value **using eSeal certificate** and creating CADES-BES signature …
+
+So the **documented** crypto is **CMS/CAdES-BES (RSA with an X.509 eSeal certificate) over SHA-256 of the canonical batch**, not HMAC-SHA256, not PSK.
+
+**Where the certificate lives:** [Getting started](https://sdk.invoicing.eta.gov.eg/start/) integration step 5 is:
+
+> Getting **eSeal X.509 certificate that needs to be configured in ERP and POS system** that is submitting digitally signed documents.
+
+That is **software configuration of a certificate in the ERP/POS**, not “insert the USB token at every till.” Our ERP is this cloud app; the private key therefore belongs **on the server** (PFX / software keystore), not on a PKCS#11 stick via the invoice agent.
+
+**ETA currently does not check the CAdES.** Same page, FAQ, and submit API all say:
+
+> The function to perform **signature validation will not be deployed at this point** until a decision is provided by ETA to test and deploy the component.
+
+[Integration Toolkit home](https://sdk.invoicing.eta.gov.eg/toolkit/home/) is explicit:
+
+> **Signing the submission is not required as this feature is disabled.**
+
+The optional ETA toolkit *can* sign locally with “ITIDA’s signature component” ([toolkit batch submission](https://sdk.invoicing.eta.gov.eg/toolkitapi/08-batch-submission/)); that is **not** a requirement on `POST /api/v1/receiptsubmissions`, and we **must not** adopt the toolkit / USB agent as our receipt path.
+
+| Mechanism | Used for | HMAC? | USB token? |
+| --- | --- | --- | --- |
+| POS **pre-shared key** | OAuth header `presharedkey` on `/connect/token` only | No — login secret | No |
+| Receipt **UUID** | Identity + `previousUUID` chain | SHA-256 of **one** canonical receipt with `uuid` empty — **hash, not a signature** | No |
+| Batch **`signatures[]`** | Documented integrity of the **submission** | **CAdES-BES / RSA + X.509**, SHA-256 of canonical `{ receipts: [...] }` | **No** — cert configured in ERP; our cloud holds a software cert. Invoice USB path is unrelated. |
+
+### 6.2 Exact input, algorithm, and where the signature goes
+
+**Input (the thing that is hashed for CAdES):** the **entire batch**, not each receipt.
+
+[Document Serialization Approach](https://sdk.invoicing.eta.gov.eg/document-serialization-approach/):
+
+> **eReceipt:** Receipts are grouped into batches. Every batch is processed as one submission. **Serialization is applied to the entire batch.** Batches in JSON format only, are supported.
+
+> **eInvoicing:** The root of the document is not the root of the entire submission. … Root is **not** the entire documents array of JSON.
+
+Canonical rules (same SerializeToken idea as invoices, **different root** — do not call invoice `canonicalSerialize` on a receipt batch):
+
+1. Recurse from the batch root `{ receipts: [ … ] }` (signatures **not** included in the bytes that are hashed).  
+2. Property names → culture-invariant uppercase.  
+3. Values copied as-is (`0.0` stays `0.0`).  
+4. Names and simple values wrapped in `"`.  
+5. Arrays: prefix the array name, then prefix **each** element with the same name.
+
+**Algorithm:**
+
+1. `canonical = Serialize({ receipts: [...] })`  
+2. `hash = SHA-256(UTF-8 bytes of canonical)` → 32 bytes  
+3. `cms = CAdES-BES(hash)` using the eSeal **X.509 certificate + RSA private key**  
+4. `value = Base64(cms)`
+
+**Not:** HMAC-SHA256(PSK, body). **Not:** SHA-256 of each receipt (that is `uuid` only). **Not:** invoice per-document digest.
+
+**Where it is placed** — once on the **HTTP body**, not inside each receipt:
+
+```json
+{
+  "receipts": [ { /* receipt 1, including uuid */ }, { /* receipt 2 */ } ],
+  "signatures": [
+    { "signatureType": "I", "value": "<Base64 CAdES-BES of the batch hash>" }
+  ]
+}
+```
+
+Invoice submit is `{ "documents": [ { …invoice, "signatures": [...] }, … ] }` — signature on **each** invoice. Receipt signature is **one** top-level array covering the whole `receipts` list. Optional second entry `signatureType: "S"` for a service provider.
+
+(The batch-signature page’s leftover sentence about putting documents into a `documents` array is invoice copy-paste. [Submit Receipt](https://sdk.invoicing.eta.gov.eg/ereceiptapi/02-submit-receipt/) is authoritative: `receipts` + `signatures`.)
+
+### 6.3 Where it runs — entirely server-side; no receipt agent
+
+**Yes: receipt signing and submission run in our cloud. Tenants do not need the desktop agent for receipts at all.**
+
+| Step | Where | Needs USB / agent? |
 | --- | --- | --- |
-| POS **pre-shared key** | OAuth **headers** on `POST /connect/token` | PSK is a shared secret for **login**, not a receipt MAC |
-| Receipt **UUID** | Identity + POS chain | SHA-256 of **canonical receipt text** with uuid empty — **hash, not a signature** |
-| Batch **`signatures[]`** | Integrity of the **submission** | **CAdES-BES** over SHA-256 of the **canonical batch**, eSeal X.509 — **same crypto family as invoices** |
+| Build receipt JSON, uuid, `previousUUID` | API (`packages/eta-core` receipts + `receipts.service`) | No (already shipped) |
+| POS OAuth (`/connect/token` + PSK headers) | API, using stored `PosDevice` + tenant `client_id`/`client_secret` | No |
+| Canonicalize batch + SHA-256 | API (new receipt-batch digest module; **not** invoice `canonical-serialize.ts`) | No |
+| CAdES-BES | API, software RSA key / PFX in our keystore (or skip cryptographic CAdES while ETA validation is disabled — see Phase 3) | **No** |
+| `POST /api/v1/receiptsubmissions` | API with Bearer POS token | No |
+| Invoice CAdES | Existing Windows agent + USB token | Yes — **invoices only** |
 
-SDK [Receipt Batch Signature Creation](https://sdk.invoicing.eta.gov.eg/receipt-batch-signature-creation/) and [Submit Receipt](https://sdk.invoicing.eta.gov.eg/ereceiptapi/02-submit-receipt/): `signatureType` `I` (issuer) or `S` (service provider); `value` is **CAdES-BES Base64**. “Sign the hash, using CAdES-BES signature” / “using eSeal certificate”.
+The invoice agent exists because Egyptian **B2B eSeal** is issued as a hardware token and our invoice path talks PKCS#11. Receipt SDK never requires that channel. Do **not** create a receipt `SignatureJob` or wait for `SigningDevice` ready.
 
-ETA note (repeated on FAQ and submit): *signature validation may not be deployed yet*. We still send the structure; we must not skip eSeal because validation is currently loose.
+### 6.4 POS authentication for submission (exact flow)
 
-### 6.2 Exact difference vs our invoice signing (why the agent needs a second path)
+Receipt submit is a protected eReceipt API. The caller must send `Authorization: Bearer <access_token>` from identity. That token is **not** the invoice ERP token.
 
-| Step | e-Invoice (keep frozen) | eReceipt |
+**Invoice ERP login** ([Login as Taxpayer System](https://sdk.invoicing.eta.gov.eg/api/01-login-as-taxpayer-system/)) — keep as-is, do not reuse for receipts:
+
+```
+POST {identity}/connect/token
+Headers:
+  Authorization: Basic base64(client_id:client_secret)
+  Content-Type: application/x-www-form-urlencoded
+Body:
+  grant_type=client_credentials
+```
+
+**POS login** ([Authenticate POS](https://sdk.invoicing.eta.gov.eg/ereceiptapi/01-authenticate-pos/)) — **different request shape**. The official table does **not** use `Authorization: Basic`. Client id/secret are **body** fields; PSK is a **header**:
+
+```
+POST {identity}/connect/token
+Headers:
+  posserial:            <PosDevice.serialNumber>          // max 100
+  pososversion:         <PosDevice.osVersion>             // max 50
+  posmodelframework:    <PosDevice.modelFramework>        // max 10
+  presharedkey:         <decrypted PosDevice PSK>         // max 200
+  Content-Type: application/x-www-form-urlencoded
+Body (x-www-form-urlencoded):
+  grant_type=client_credentials
+  client_id=<system client id>
+  client_secret=<system client secret>
+```
+
+Response: HTTP 200, `access_token` (JWT, `token_type` Bearer, `expires_in` ~3600). JWT carries `TaxProfTags` (must include **B2C** or receipt submit is refused). Toolkit example JWT also includes `PosSerial` / `DeviceId`.
+
+POS errors (400): `invalid_posserial`, `invalid_pososversion`, `invalid_posmodelframework`, `invalid_presharedkey`, `invalid_clientsecret`, `unauthorized_client`, …
+
+[Toolkit NuGet token](https://sdk.invoicing.eta.gov.eg/nugetoperation/02-toolkit-nuget-connect-token/) documents two options:
+
+1. **Option 1** — `client_id` + `client_secret` only (ERP-style token).  
+2. **Option 2** — those plus `posserial`, `pososversion`, `presharedkey`, `posmodelframework` (optional in toolkit wording).  
+
+> To be able to authenticate the POS, the developer must provide the **client ID and client secret that were provided when registering the POS**.
+
+Receipt submission on the POS channel **must use option 2**. FAQ: “POS should be activated before submission on any other channel.” Only taxpayers with the **B2C** tag may submit receipts.
+
+Then:
+
+```
+POST {api}/api/v1/receiptsubmissions
+Authorization: Bearer <POS access_token>
+Content-Type: application/json
+Body: { "receipts": [ ... ], "signatures": [ { "signatureType": "I", "value": "..." } ] }
+```
+
+HTTP **202** + `submissionUUID`. Poll `GET /api/v1/receiptsubmissions/{submissionUuid}/details`.
+
+PSK is **never** sent on the submit call. It is **never** the CAdES key.
+
+### 6.5 PSK / credentials mapping to what we already store
+
+**Each ETA POS has its own pre-shared key**, issued when the taxpayer registers that serial on the portal. That is the self-service secret we already encrypt on `PosDevice`.
+
+| ETA Authenticate POS | Our store (already built) | Notes |
 | --- | --- | --- |
-| Canonical **root** | **One document object** (not the `documents[]` wrapper). Signatures stripped. | **Entire batch** `{ receipts: [...] }` (JSON only). Serialization “applied to the entire batch”. |
-| Hash | SHA-256(UTF-8 canonical) | SHA-256(UTF-8 canonical of the batch) |
-| Sign | Detached CAdES-BES, eSeal | Same CAdES-BES / eSeal **algorithm** |
-| Where signature is stored | **Each** document: `documents[i].signatures` | **Once** on the HTTP body: top-level `signatures` |
-| Taxpayer-generated uuid | No | **Per receipt**, SHA-256 hex of that receipt with `uuid: ""`, including `previousUUID` |
-| Agent job shape today | One job per document | One job per **batch** (or sign the already-assembled `receipts` JSON) |
+| header `posserial` | `PosDevice.serialNumber` | Must equal `seller.deviceSerialNumber` on every receipt in the batch |
+| header `pososversion` | `PosDevice.osVersion` | Portal string, max 50 |
+| header `posmodelframework` | `PosDevice.modelFramework` | Portal string, max 10 |
+| header `presharedkey` | `PosDevice.preSharedKeyCiphertext` + `preSharedKeyNonce` | Decrypt at token time only; never log; UI shows masked |
+| body `client_id` / `client_secret` | `TenantEtaCredential.clientId` + encrypted secret | Toolkit: “provided when registering the POS.” Many taxpayers reuse the same ERP system creds for POS; if a tenant registered the POS as **its own system**, they need **POS-scoped** creds we do **not** store yet (optional Phase 4 field on `PosDevice`) |
+| B2C tag | ETA profile (not us) | Token JWT `TaxProfTags` must include B2C |
+| POS active / not retired | `PosDevice.status` (local mirror) | ETA still rejects retired serials even if our row is ACTIVE |
 
-[Document Serialization Approach](https://sdk.invoicing.eta.gov.eg/document-serialization-approach/) calls this out explicitly:
+**Not** mapped to PSK: the CAdES certificate. PSK ≠ eSeal. Do not put the USB token PIN on `PosDevice`.
 
-- **eInvoicing:** root is the document object, **not** the `documents` array.  
-- **eReceipt:** receipts grouped into batches; serialize the **entire batch**.
+Tenant isolation: each tenant pastes **their** portal serial + OS + model + PSK in Settings → POS devices. Platform owner never holds a global PSK. Company-wide vs per-branch **serial scope** (`Tenant.posSerialScope`) only chooses **which `PosDevice` row** (and therefore which PSK + `previousUUID` chain) a receipt uses; it does not change the OAuth header names.
 
-So: **reuse the CAdES primitive and eSeal token; do not reuse the invoice digest input builder or per-document `SignatureJob` as-is.** Add a parallel “receipt batch” path. Do not edit `packages/eta-core` invoice canonical serialize to “also handle receipts” in a way that can change invoice bytes.
+### 6.6 UUID algorithm (FAQ) — not CAdES
 
-### 6.3 UUID algorithm (FAQ) — not CAdES
+Unchanged from Phase 2 (already implemented in `packages/eta-core` receipts). Recap so it is not confused with batch signing:
 
 1. Include all key fields, including `previousUUID` of the last receipt from **this POS**.  
 2. Returns: include `referenceUUID`.  
 3. Set `uuid` to empty.  
-4. Serialize/normalize (flatten) the receipt.  
+4. Serialize/normalize (flatten) **that one receipt**.  
 5. SHA-256 → 64 hex chars → that is `uuid`.
 
 Correcting an invalid receipt in a chain: new uuid, same `previousUUID` as the invalid one, `referenceOldUUID` = old uuid. Unchanged neighbours keep their uuids. Amendment windows: **96h** with reference, **72h** without; late-submission request for older documents.
@@ -351,13 +509,16 @@ Correcting an invalid receipt in a chain: new uuid, same `previousUUID` as the i
 
 ### 7.1 Auth
 
-| | Invoice (current) | Receipt POS |
+See §6.4 for the full POS token request. Summary:
+
+| | Invoice (current — do not change) | Receipt POS (new helper) |
 | --- | --- | --- |
 | URL | `{identity}/connect/token` | **same** identity host |
-| Headers | `Authorization: Basic` | Basic **plus** `posserial`, `pososversion`, `posmodelframework`, `presharedkey` |
-| Body | `grant_type=client_credentials` | same (+ optional scope) |
+| Headers | `Authorization: Basic` | **`posserial`, `pososversion`, `posmodelframework`, `presharedkey`** — **no** Basic header per Authenticate POS |
+| Body | `grant_type=client_credentials` | `grant_type=client_credentials` **plus** `client_id` and `client_secret` as form fields |
 | Token TTL | ~3600 s | ~3600 s |
-| Tag | B2B | JWT carries B2C (and/or B2B) tags |
+| Tag | B2B | JWT must carry **B2C** (and/or B2B) |
+| Cache key | tenant ERP creds | tenant creds **+ POS serial** (PSK differs per device; do not reuse the invoice token cache entry) |
 
 ### 7.2 Submit
 
@@ -414,18 +575,23 @@ Operational rules we should impose (stricter than ETA’s batch-local rule):
 
 ---
 
-## 9. Implementation plan (proposal only — do not build yet)
+## 9. Implementation plan (proposal only for Phase 3–4 — do not build signing/submit yet)
 
-Order matches the constraint: **branch/POS coding → receipt builder → signing → submission**. Invoice canonical/digest stays untouched.
+Phases 1–2 are **done**. Remaining order: **server-side batch CAdES → POS OAuth → submit**. Invoice canonical/digest stays untouched. **No receipt work on the desktop agent.**
 
-### Phase 0 — product decisions to approve with this spec
+### Phase 0 — remaining product decisions (signing)
 
-1. Confirm **extra branch fields** in §4.1–4.2 (especially tenant `syndicateLicenseNumber`, `receiptsEnabled`, optional `nameAr` / activity dates).  
-2. Confirm POS is a **new entity** linked to `Branch`, optionally to `SigningDevice`, sharing the **account device quota**.  
-3. First document types: Receipt v1.2 `s`/`r` only vs also Retail `SR`.  
-4. POS credentials: always extra headers on the existing tenant client_id, vs per-POS client_id/secret.
+Phases 1–2 decisions (branch fields, `PosDevice`, `s`/`r`/`SR` builder, company vs branch POS serial) are already implemented.
 
-### Phase 1 — Branch / POS coding (first build)
+Approve before coding Phase 3–4:
+
+1. **No USB / no agent for receipts** — confirmed by this spec (§6.3).  
+2. **Not HMAC/PSK** — PSK is only `presharedkey` on `/connect/token` (§6.1, §6.4).  
+3. **CAdES-BES in our API** over SHA-256 of canonical `{ receipts: [...] }`, `signatures[]` on the batch (§6.2).  
+4. **Software certificate:** start with a **platform-held PFX** in the API so every tenant can submit without uploading a cert (ETA signature validation is not deployed). Add optional **tenant PFX** later if ETA starts verifying the issuer certificate. Still never the USB token.  
+5. **POS token:** new `requestPosToken` using `PosDevice` PSK headers + tenant ERP `client_id`/`client_secret` in the body; per-POS creds only if preprod proves ERP creds are insufficient.
+
+### Phase 1 — Branch / POS coding — **done**
 
 - Tighten branch settings UI/API: when `receiptsEnabled`, require portal `etaBranchCode`, `activityCode`, complete address; copy helper text that the code is the **portal branch ID**, HQ often `0`.  
 - Add `syndicateLicenseNumber` (tenant + optional branch override).  
@@ -434,7 +600,7 @@ Order matches the constraint: **branch/POS coding → receipt builder → signin
 - Validation: serial ≤ 100; refuse receipts if POS not `ACTIVE`.  
 - Tests: branch completeness for receipts; quota still account-pooled; invoice branch create path unchanged for `receiptsEnabled=false`.
 
-### Phase 2 — Receipt document builder (new code, new package surface)
+### Phase 2 — Receipt document builder — **done**
 
 - New builder alongside invoice `buildDocumentPayload` — **do not** extend invoice `DocumentKind` with a flag that changes invoice JSON.  
 - Map seller from tenant legal name + RIN + branch address + POS serial.  
@@ -444,30 +610,65 @@ Order matches the constraint: **branch/POS coding → receipt builder → signin
 - Local validators from FAQ (structure, codes, core fields).  
 - Golden JSON fixtures from SDK samples (download linked from FAQ “receipt batch schema”) — not invoice `gv-01`.
 
-### Phase 3 — Signing (receipt-specific path)
+### Phase 3 — Receipt signing (server-side, **no USB / no agent**) — **do not build until this section is approved**
 
-- Canonicalize `{ receipts: [...] }` with a **receipt-batch** serializer. Prefer a new module (`receipt-canonical.ts` / agent equivalent) that may share *helpers* but not the invoice golden-vector entrypoint.  
-- Hash + existing CAdES-BES eSeal (BouncyCastle / PKCS#11) — same token, new digest input.  
-- New job type: sign this batch (not one invoice). Agent UI can stay; claim/submit contract changes.  
-- Per-receipt uuid hash is **not** the CAdES digest; implement separately.  
-- **Do not** modify invoice `SignatureJob`, `cades-digest` goldens, or `gv-01`.
+Goal: produce the submit body’s `signatures[]` in the API. **Do not** touch invoice `SignatureJob`, `canonical-serialize.ts`, `cades-digest`, PKCS#11, or the desktop agent.
 
-### Phase 4 — Submission
+Recommended build order:
 
-- `EtaAuthClient` variant that adds POS headers (leave current invoice token helper unchanged).  
-- `POST /api/v1/receiptsubmissions`; store `submissionUUID` / uuid / longId.  
-- Poll receipt submission details; map `InProgress`/`Valid`/`Invalid`.  
-- DuplicateSubmission / size / 24h window / same-POS-in-batch rules.  
-- QR generation for print.  
-- Returns (`r` + `referenceUUID`) after sales path is stable.
+1. **Batch canonical (new module only)**  
+   - Input: `{ receipts: ReceiptJson[] }` with each receipt already carrying `uuid` (Phase 2). Strip / omit `signatures`.  
+   - Output: SerializeToken over the **batch root** (uppercase names, array name repeated per element).  
+   - Reuse *helpers* from `packages/eta-core` receipts `receipt-canonical.ts` if they are root-agnostic; **do not** call invoice `canonicalSerialize`. New goldens from SDK batch examples, not `gv-01`.
+
+2. **Batch digest**  
+   - `SHA-256(UTF-8(canonical))` → 32 bytes. This is the CAdES message digest, **not** the per-receipt uuid.
+
+3. **`signatures[]` assembly**  
+   - API builds **CAdES-BES** over the batch hash with a **server-side RSA private key** (platform PFX first; optional tenant PFX later). Place `{ signatureType: "I", value: Base64(cms) }`. Optional `{ signatureType: "S", ... }` only if we act as intermediary.  
+   - While ETA documents “signing is not required / validation not deployed”, we still send this array because Submit Receipt requires the issuer signature **to be present**. A real CMS from a software cert is safer than an empty string.  
+   - **Rejected:** HMAC-SHA256(PSK, body); invoice USB agent; omit `signatures`; put `signatures` inside each receipt.
+
+4. **Key storage**  
+   - Platform PFX in API secret store (ops), not in git.  
+   - Later: optional encrypted tenant PFX + password on tenant settings (not on `SigningDevice`). Self-service upload. Never log. Invoice USB pairing UI stays invoice-only.
+
+5. **Tests**  
+   - Batch canonical golden; digest stable; signatures array shape; invoice goldens + cades-digest remain green; **no** agent/e2e USB tests for receipts.
+
+### Phase 4 — Submission (server-side POS token) — **do not build until Phase 3 path is approved**
+
+1. **`EtaAuthClient.requestPosToken`** (new method; leave `requestToken` Basic invoice path untouched)  
+   - Headers from decrypted `PosDevice`; body `grant_type` + tenant (or future per-POS) `client_id`/`client_secret`.  
+   - Separate cache key: tenant + POS id. Never log PSK / secret / access_token.  
+   - Map `invalid_presharedkey` / `invalid_posserial` / … to tenant-visible errors (PSK wrong vs POS not activated on portal).
+
+2. **Submit**  
+   - `POST /api/v1/receiptsubmissions` with Bearer POS token, body `{ receipts, signatures }` from Phase 3.  
+   - Persist `submissionUUID`, accepted `uuid` / `longId` / `receiptNumber`.  
+   - Same-POS-in-batch: all receipts in one HTTP call share one `PosDevice`. Size 1–500 / 1.5 MB; 24h window; DuplicateSubmission 10-minute payload hash.
+
+3. **Status**  
+   - Poll `GET /api/v1/receiptsubmissions/{submissionUuid}/details`; map InProgress / Valid / Invalid.  
+   - Optional later: `GET /api/v1/receipts/{uuid}/details`.
+
+4. **Print QR** (FAQ; no signing):  
+   `{portal}/receipts/search/{UUID}/share/{dateTimeIssued}#Total:{total},IssuerRIN:{rin}`
+
+5. **Credentials gap (only if preprod tokens fail with invalid_client)**  
+   - Add optional encrypted `clientId` / `clientSecret` on `PosDevice` for taxpayers who registered the POS as its own system. Default remains tenant ERP creds.
+
+6. **Still no agent.** Receipt submit must succeed for a tenant that has never paired a signing device.
 
 ### Phase 5 — later
 
-- Retail `SR` + `orderdeliveryMode`.  
+- Retail `SR` + `orderdeliveryMode` (builder already accepts `SR`).  
 - Specialized activity types.  
 - Late submission requests.  
 - POS expiry notifications webhook.  
-- Optional HMAC/toolkit CLI is **not** our signing path.
+- Per-POS `client_id`/`client_secret` if ERP creds are insufficient.  
+- Tenant eSeal PFX upload **if/when** ETA enables receipt signature validation.  
+- HMAC/toolkit CLI remains **not** our signing path.
 
 ---
 
@@ -475,11 +676,12 @@ Order matches the constraint: **branch/POS coding → receipt builder → signin
 
 | # | Decision | Recommendation |
 | --- | --- | --- |
-| D1 | Extra **branch** columns beyond today’s address + codes | Only `syndicateLicenseNumber` (tenant-first), optional `nameAr`, `receiptsEnabled`, optional activity dates. Make existing `etaBranchCode` + `activityCode` required when receipts are on. |
-| D2 | POS serial / PSK / OS / model | **New POS entity**, not Branch columns. |
-| D3 | Signing | Same **eSeal CAdES-BES**, **different digest root** (batch). Not HMAC. Not the invoice serialize function. |
-| D4 | Agent | Reuse hardware/token; **new batch signing path**. |
-| D5 | Auth | Invoice token helper stays; receipt token adds POS headers. |
-| D6 | Numbering | New receipt sequences; `previousUUID` stored per POS. |
+| D1 | Extra **branch** columns beyond today’s address + codes | Only `syndicateLicenseNumber` (tenant-first), optional `nameAr`, `receiptsEnabled`, optional activity dates. Make existing `etaBranchCode` + `activityCode` required when receipts are on. **Done (Phase 1).** |
+| D2 | POS serial / PSK / OS / model | **New POS entity**, not Branch columns. **Done** — `PosDevice` encrypted PSK is the Authenticate POS `presharedkey` header. |
+| D3 | Signing mechanism | **Not HMAC/PSK.** Documented CAdES-BES over SHA-256 of canonical `{ receipts: [...] }`, Base64 in top-level `signatures[]` (`I` required, `S` optional). **Not** invoice serialize / USB PKCS#11. |
+| D4 | Where signing runs | **API / cloud only.** No desktop agent for receipts. Software X.509 (platform PFX first; optional tenant PFX if ETA later validates). Invoice USB path untouched. |
+| D5 | Auth | Invoice `requestToken` (Basic) stays. New `requestPosToken`: POS headers + `client_id`/`client_secret` **in the body**. Cache per POS. |
+| D6 | Numbering / chain | Receipt sequences; `previousUUID` on `PosDevice.lastReceiptUuid`. **Done (Phase 2).** |
+| D7 | PSK mapping | Confirm: tenant self-service `PosDevice` PSK = OAuth `presharedkey`. Each POS has its own. `client_id`/`client_secret` default from `TenantEtaCredential`; optional per-POS creds only if needed. |
 
-**Stop here until the branch-fields gap (§4) is approved.**
+**Approve §6 + Phase 3 (server-side CAdES + platform PFX) and Phase 4 (POS token + submit) before any signing/submission code.** Do not start USB/agent work for receipts.

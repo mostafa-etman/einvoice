@@ -37,6 +37,8 @@ import {
   downloadReceiptLocalPrintoutFromBody,
   getReceipt,
   previewReceipt,
+  submitReceipt,
+  syncReceiptStatus,
   updateReceipt,
   type ReceiptWrite,
 } from '@/lib/api/receipts';
@@ -92,6 +94,20 @@ function emptyLine(currency = 'EGP'): Line {
     internalCode: '',
     taxes: [defaultTaxableTax()],
   };
+}
+
+function receiptStatusBadge(status: string): 'draft' | 'submitted' | 'valid' | 'invalid' | 'neutral' {
+  if (status === 'VALID') return 'valid';
+  if (status === 'INVALID') return 'invalid';
+  if (status === 'SUBMITTED') return 'submitted';
+  if (status === 'READY') return 'valid';
+  return 'draft';
+}
+
+function apiCode(err: unknown): string | undefined {
+  if (!(err instanceof ApiError) || !err.body || typeof err.body !== 'object') return undefined;
+  const code = (err.body as { code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
 }
 
 function nowLocalInput() {
@@ -159,6 +175,10 @@ export default function ReceiptEditorPage() {
   const [uuid, setUuid] = useState('');
   const [previousUuid, setPreviousUuid] = useState('');
   const [status, setStatus] = useState('DRAFT');
+  const [etaStatus, setEtaStatus] = useState<string | null>(null);
+  const [etaLongId, setEtaLongId] = useState<string | null>(null);
+  const [submissionUuid, setSubmissionUuid] = useState<string | null>(null);
+  const [cooldownUntil, setCooldownUntil] = useState<string | null>(null);
   const [isChainTip, setIsChainTip] = useState(true);
   const [canReturn, setCanReturn] = useState(false);
   const [etaJson, setEtaJson] = useState('');
@@ -193,6 +213,8 @@ export default function ReceiptEditorPage() {
     queryKey: ['receipt', tenantId, params.id],
     queryFn: () => getReceipt(params.id),
     enabled: !isNew,
+    refetchInterval: (query) =>
+      query.state.data?.status === 'SUBMITTED' ? 3000 : false,
   });
 
   const [unitTypes, setUnitTypes] = useState<EtaCodeEntry[]>([]);
@@ -259,6 +281,10 @@ export default function ReceiptEditorPage() {
     const row = receiptQ.data;
     const form = row.form;
     setStatus(row.status);
+    setEtaStatus(row.etaStatus ?? null);
+    setEtaLongId(row.etaLongId ?? null);
+    setSubmissionUuid(row.submissionUuid ?? null);
+    setCooldownUntil(row.submitCooldownUntil ?? null);
     setUuid(row.uuid);
     setPreviousUuid(row.previousUuid);
     setIsChainTip(row.isChainTip !== false);
@@ -309,7 +335,8 @@ export default function ReceiptEditorPage() {
 
   const selectedBranch = receiptBranches.find((b) => b.id === branchId);
   const selectedPos = posForBranch.find((p) => p.id === posDeviceId) ?? activePos.find((p) => p.id === posDeviceId);
-  const documentReadOnly = !isNew && !isChainTip;
+  const etaLocked = status === 'VALID' || status === 'SUBMITTED';
+  const documentReadOnly = !isNew && (!isChainTip || etaLocked);
   const currencies = (currenciesQ.data ?? []).map((c) => c.currencyCode);
   const currencyOptions = currencies.length ? currencies : ['EGP'];
   const itemCodes: ItemCode[] = itemsQ.data ?? [];
@@ -553,14 +580,46 @@ export default function ReceiptEditorPage() {
           subtitle={
             !isNew ? (
               <span className="inline-flex flex-wrap items-center gap-token-sm">
-                <Badge variant={status === 'READY' ? 'valid' : 'draft'}>
-                  {status === 'READY' ? t('statusReady') : t('statusDraft')}
+                <Badge variant={receiptStatusBadge(status)}>
+                  {status === 'VALID'
+                    ? t('statusValid')
+                    : status === 'INVALID'
+                      ? t('statusInvalid')
+                      : status === 'SUBMITTED'
+                        ? t('statusSubmitted')
+                        : status === 'READY'
+                          ? t('statusReady')
+                          : t('statusDraft')}
                 </Badge>
+                {etaStatus ? (
+                  <span className="text-token-sm text-foreground/70" dir="ltr">
+                    {t('etaStatus')}: {etaStatus}
+                  </span>
+                ) : null}
               </span>
             ) : undefined
           }
         />
         <p className="text-token-sm text-foreground/70">{t('selfService')}</p>
+        {!isNew && (uuid || submissionUuid || etaLongId) ? (
+          <Card className="space-y-token-xs" data-testid="receipt-eta-status">
+            <h2 className="m-0 text-token-sm font-semibold">{t('etaIds')}</h2>
+            <p className="m-0 font-en text-token-sm" dir="ltr">
+              {t('uuid')}: {uuid || '—'}
+            </p>
+            <p className="m-0 font-en text-token-sm" dir="ltr">
+              {t('longId')}: {etaLongId || '—'}
+            </p>
+            <p className="m-0 font-en text-token-sm" dir="ltr">
+              {t('submissionUuid')}: {submissionUuid || '—'}
+            </p>
+            {cooldownUntil ? (
+              <p className="m-0 text-token-sm text-warning">
+                {t('cooldownUntil', { until: cooldownUntil })}
+              </p>
+            ) : null}
+          </Card>
+        ) : null}
         {selectedBranch && !selectedBranch.receiptsReady ? (
           <div
             role="status"
@@ -1254,6 +1313,74 @@ export default function ReceiptEditorPage() {
           >
             {t('previewPrint')}
           </Button>
+          {!isNew && status !== 'VALID' && status !== 'SUBMITTED' ? (
+            <Button
+              title={t('sendHint')}
+              disabled={submitting || Boolean(cooldownUntil && Date.parse(cooldownUntil) > Date.now())}
+              onClick={async () => {
+                try {
+                  setSubmitting(true);
+                  setError(null);
+                  const sent = await submitReceipt(params.id);
+                  setStatus(sent.status);
+                  setEtaStatus(sent.etaStatus ?? null);
+                  setEtaLongId(sent.etaLongId ?? null);
+                  setSubmissionUuid(sent.submissionUuid ?? null);
+                  setCooldownUntil(sent.submitCooldownUntil ?? null);
+                  setUuid(sent.uuid);
+                  if (sent.status === 'SUBMITTED') {
+                    for (let i = 0; i < 20; i += 1) {
+                      await new Promise((r) => setTimeout(r, 2000));
+                      try {
+                        await syncReceiptStatus(params.id);
+                      } catch {
+                        /* keep polling */
+                      }
+                      const again = await getReceipt(params.id);
+                      setStatus(again.status);
+                      setEtaStatus(again.etaStatus ?? null);
+                      setEtaLongId(again.etaLongId ?? null);
+                      setSubmissionUuid(again.submissionUuid ?? null);
+                      if (again.status !== 'SUBMITTED') break;
+                    }
+                    await receiptQ.refetch();
+                  }
+                } catch (e) {
+                  const code = apiCode(e);
+                  setError(
+                    code === 'ETA_B2C_REQUIRED'
+                      ? t('b2cRequired')
+                      : e instanceof Error
+                        ? e.message
+                        : t('sendFailed'),
+                  );
+                } finally {
+                  setSubmitting(false);
+                }
+              }}
+            >
+              {submitting ? t('sending') : t('send')}
+            </Button>
+          ) : null}
+          {!isNew && status === 'SUBMITTED' ? (
+            <Button
+              variant="secondary"
+              disabled={submitting}
+              onClick={async () => {
+                try {
+                  setSubmitting(true);
+                  await syncReceiptStatus(params.id);
+                  await receiptQ.refetch();
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : t('sendFailed'));
+                } finally {
+                  setSubmitting(false);
+                }
+              }}
+            >
+              {t('refreshStatus')}
+            </Button>
+          ) : null}
           {!documentReadOnly ? (
             <Button disabled={submitting} onClick={() => void save()}>
               {t('save')}

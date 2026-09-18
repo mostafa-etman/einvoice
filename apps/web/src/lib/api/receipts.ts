@@ -15,6 +15,11 @@ export type ReceiptListItem = {
   posDeviceId: string;
   buyerType: string;
   buyerName: string | null;
+  etaStatus?: string | null;
+  etaLongId?: string | null;
+  submissionUuid?: string | null;
+  lastErrorMessage?: string | null;
+  submitCooldownUntil?: string | null;
   isChainTip?: boolean;
   canReturn?: boolean;
 };
@@ -67,6 +72,7 @@ export type ReceiptDetail = ReceiptListItem & {
   etaPayloadText: string;
   uuidCanonicalString: string;
   canonicalString: string;
+  lastErrorCode?: string | null;
   form?: ReceiptWrite;
 };
 
@@ -133,6 +139,20 @@ export function updateReceipt(id: string, body: ReceiptWrite) {
 
 export function createReturnReceipt(id: string) {
   return apiFetch<ReceiptDetail>(`/receipts/${id}/return`, {
+    method: 'POST',
+    tenantScoped: true,
+  });
+}
+
+export function submitReceipt(id: string) {
+  return apiFetch<ReceiptDetail>(`/receipts/${id}/submit`, {
+    method: 'POST',
+    tenantScoped: true,
+  });
+}
+
+export function syncReceiptStatus(id: string) {
+  return apiFetch<ReceiptDetail>(`/receipts/${id}/sync-status`, {
     method: 'POST',
     tenantScoped: true,
   });

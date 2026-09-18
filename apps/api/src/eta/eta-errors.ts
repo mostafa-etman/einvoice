@@ -6,9 +6,18 @@ export type EtaMappedError = {
 
 const OAUTH_MESSAGES: Record<string, string> = {
   invalid_client: 'ETA rejected the Client ID or Client Secret.',
+  invalid_clientsecret: 'ETA rejected the Client Secret.',
   invalid_grant: 'ETA rejected the grant; check credentials and on-behalf-of.',
   unauthorized_client: 'This client is not authorized for ETA client credentials.',
   invalid_request: 'The ETA token request was invalid.',
+  invalid_presharedkey:
+    'ETA rejected the POS pre-shared key. Check Settings → POS devices.',
+  invalid_posserial:
+    'ETA rejected the POS serial. It must match the serial registered on your ETA profile.',
+  invalid_pososversion:
+    'ETA rejected the POS OS version. It must match the value registered on your ETA profile.',
+  invalid_posmodelframework:
+    'ETA rejected the POS model/framework. It must match the value registered on your ETA profile.',
 };
 
 export function mapEtaOAuthError(

@@ -19,11 +19,15 @@ import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { PermissionsGuard, RequirePermissions } from '../rbac/permissions.guard';
 import { requireTenant } from '../settings/require-tenant';
 import { ReceiptsService, type ReceiptUpsertDto } from './receipts.service';
+import { ReceiptSubmitService } from './receipt-submit.service';
 
 @Controller('receipts')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class ReceiptsController {
-  constructor(private readonly receipts: ReceiptsService) {}
+  constructor(
+    private readonly receipts: ReceiptsService,
+    private readonly submitService: ReceiptSubmitService,
+  ) {}
 
   @Get()
   @RequirePermissions(PERMISSIONS.DOCUMENTS_VIEW)
@@ -124,6 +128,31 @@ export class ReceiptsController {
       user.userId,
       id,
     );
+  }
+
+  @Post(':id/submit')
+  @HttpCode(200)
+  @RequirePermissions(PERMISSIONS.DOCUMENTS_MANAGE)
+  async submit(
+    @Headers('x-tenant-id') tenantHeader: string | undefined,
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+  ) {
+    const tenantId = requireTenant(tenantHeader);
+    await this.submitService.submit(tenantId, user.userId, id);
+    return this.receipts.get(tenantId, id);
+  }
+
+  @Post(':id/sync-status')
+  @HttpCode(200)
+  @RequirePermissions(PERMISSIONS.DOCUMENTS_VIEW)
+  async syncStatus(
+    @Headers('x-tenant-id') tenantHeader: string | undefined,
+    @Param('id') id: string,
+  ) {
+    const tenantId = requireTenant(tenantHeader);
+    await this.submitService.syncStatus(tenantId, id);
+    return this.receipts.get(tenantId, id);
   }
 
   @Put(':id')
