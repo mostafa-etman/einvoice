@@ -23,6 +23,15 @@ function IconBranch() {
   );
 }
 
+function IconPos() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+      <rect x="4" y="3" width="16" height="12" rx="2" />
+      <path d="M8 19h8M12 15v4" />
+    </svg>
+  );
+}
+
 function IconNumbering() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
@@ -84,6 +93,12 @@ export default function SettingsHubPage() {
       label: t('branches'),
       description: t('cardBranches'),
       icon: <IconBranch />,
+    },
+    {
+      href: `/${locale}/settings/pos-devices`,
+      label: t('posDevices'),
+      description: t('cardPosDevices'),
+      icon: <IconPos />,
     },
     {
       href: `/${locale}/settings/invoice-numbering`,

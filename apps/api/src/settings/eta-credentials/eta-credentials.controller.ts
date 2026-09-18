@@ -49,6 +49,7 @@ export class EtaCredentialsController {
       onBehalfOfName?: string;
       taxpayerLegalName?: string;
       issuerType?: string;
+      syndicateLicenseNumber?: string | null;
     },
   ) {
     return this.eta.upsert(requireTenant(tenantHeader), user.userId, body);

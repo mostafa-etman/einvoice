@@ -14,6 +14,10 @@ export type Branch = {
   /** Issuer (seller) address inherited by every document from this branch. */
   address: BranchAddress;
   addressComplete: boolean;
+  receiptsEnabled: boolean;
+  syndicateLicenseNumber: string | null;
+  receiptsReady: boolean;
+  receiptsGaps: string[];
 };
 
 export async function listBranches(): Promise<Branch[]> {
@@ -27,6 +31,8 @@ export async function createBranch(body: {
   activityCode?: string;
   defaultCurrencyCode?: string;
   address?: BranchAddress;
+  receiptsEnabled?: boolean;
+  syndicateLicenseNumber?: string | null;
 }): Promise<Branch> {
   return apiFetch<Branch>('/branches', {
     method: 'POST',
@@ -45,6 +51,8 @@ export async function updateBranch(
     activityCode: string | null;
     defaultCurrencyCode: string | null;
     address: BranchAddress;
+    receiptsEnabled: boolean;
+    syndicateLicenseNumber: string | null;
   }>,
 ): Promise<Branch> {
   return apiFetch<Branch>(`/branches/${id}`, {

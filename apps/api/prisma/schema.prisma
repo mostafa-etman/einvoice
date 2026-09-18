@@ -203,6 +203,13 @@ enum DeviceStatus {
   REVOKED
 }
 
+/// ETA POS device lifecycle (portal registration). Distinct from SigningDevice pairing.
+enum PosDeviceStatus {
+  ACTIVE
+  RETIRED
+  PERMANENTLY_RETIRED
+}
+
 enum UsageMeter {
   issued
   received
@@ -352,6 +359,8 @@ model Tenant {
   rejectedReason       String?   @map("rejected_reason")
   /// When set, login no longer redirects to ETA credentials for this tenant.
   etaSetupPromptDismissedAt DateTime? @map("eta_setup_prompt_dismissed_at")
+  /// ETA receipt seller.syndicateLicenseNumber default. Persons: ≥10 digit zero-padded; companies: "C" or omit.
+  syndicateLicenseNumber String? @map("syndicate_license_number")
   account              Account   @relation(fields: [accountId], references: [id], onDelete: Restrict)
   quotaOverrides       QuotaOverride[]
   paymentCustomers     PaymentCustomer[]
@@ -366,6 +375,7 @@ model Tenant {
   tenantDocumentPointCosts TenantDocumentPointCost[]
   trialUsedTaxRegistrations TrialUsedTaxRegistration[]
   screenFeedback       TenantScreenFeedback[]
+  posDevices           PosDevice[]
 
   @@index([accountId])
   @@map("tenants")
@@ -380,6 +390,10 @@ model Branch {
   etaBranchCode       String?  @map("eta_branch_code")
   activityCode        String?  @map("activity_code")
   defaultCurrencyCode String?  @map("default_currency_code")
+  /// Tenant opts this branch into B2C e-receipts. Default false: invoice-only, existing rows unchanged.
+  receiptsEnabled     Boolean  @default(false) @map("receipts_enabled")
+  /// Optional override of Tenant.syndicateLicenseNumber for this branch.
+  syndicateLicenseNumber String? @map("syndicate_license_number")
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
@@ -401,6 +415,7 @@ model Branch {
   documents             Document[]
   receivedDocuments     ReceivedDocument[]
   documentNumberSequences DocumentNumberSequence[]
+  posDevices            PosDevice[]
 
   @@index([tenantId])
   @@map("branches")
@@ -1067,10 +1082,44 @@ model SigningDevice {
   pairingCodesClosed PairingCode[]  @relation("PairingCodeConsumedDevice")
   signatureJobs      SignatureJob[]
   signedDocuments     Document[]    @relation("DocumentSignedByDevice")
+  posDevices          PosDevice[]
 
   @@index([tenantId])
   @@index([tokenHash])
   @@map("signing_devices")
+}
+
+/// ETA POS identity for B2C e-receipts (serial / PSK / previousUUID chain).
+/// Separate from SigningDevice (eSeal agent pairing). Optionally linked to one agent.
+model PosDevice {
+  id                     String          @id @default(uuid()) @db.Uuid
+  tenantId               String          @map("tenant_id") @db.Uuid
+  branchId               String          @map("branch_id") @db.Uuid
+  label                  String
+  serialNumber           String          @map("serial_number")
+  osVersion              String          @map("os_version")
+  modelFramework         String          @map("model_framework")
+  preSharedKeyCiphertext Bytes           @map("pre_shared_key_ciphertext")
+  preSharedKeyNonce      Bytes           @map("pre_shared_key_nonce")
+  status                 PosDeviceStatus @default(ACTIVE)
+  /// SHA-256 hex of the last receipt issued from this POS; empty until the first receipt.
+  lastReceiptUuid        String          @default("") @map("last_receipt_uuid")
+  signingDeviceId        String?         @map("signing_device_id") @db.Uuid
+  activatedAt            DateTime?       @map("activated_at")
+  expiresAt              DateTime?       @map("expires_at")
+  retiredAt              DateTime?       @map("retired_at")
+  createdAt              DateTime        @default(now()) @map("created_at")
+  updatedAt              DateTime        @updatedAt @map("updated_at")
+
+  tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch        Branch          @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  signingDevice SigningDevice?  @relation(fields: [signingDeviceId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, serialNumber])
+  @@index([tenantId])
+  @@index([tenantId, branchId])
+  @@index([tenantId, status])
+  @@map("pos_devices")
 }
 
 model SignatureJob {

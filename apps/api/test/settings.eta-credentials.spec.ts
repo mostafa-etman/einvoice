@@ -55,12 +55,15 @@ describe('ETA credentials API', () => {
         clientId: 'client-1',
         clientSecret: plaintext,
         registrationNumber: '123456789',
+        taxpayerLegalName: 'ETA Tenant Legal',
         activityCode: '1000',
         isIntermediary: false,
+        syndicateLicenseNumber: 'C',
       })
       .expect(200);
 
     expect(put.body.clientId).toBe('client-1');
+    expect(put.body.syndicateLicenseNumber).toBe('C');
     expect(put.body.hasClientSecret).toBe(true);
     expect(put.body.clientSecretMasked).toBe('••••••••');
     expect(JSON.stringify(put.body)).not.toContain(plaintext);

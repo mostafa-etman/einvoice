@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useTranslations } from 'next-intl';
+import Link from 'next/link';
+import { useLocale, useTranslations } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -37,13 +38,33 @@ const addressSchema = z.object({
   additionalInformation: z.string().optional(),
 });
 
-const schema = z.object({
-  name: z.string().min(1),
-  etaBranchCode: z.string().optional(),
-  activityCode: z.string().optional(),
-  isDefault: z.boolean().optional(),
-  address: addressSchema,
-});
+const schema = z
+  .object({
+    name: z.string().min(1),
+    etaBranchCode: z.string().optional(),
+    activityCode: z.string().optional(),
+    syndicateLicenseNumber: z.string().optional(),
+    isDefault: z.boolean().optional(),
+    receiptsEnabled: z.boolean().optional(),
+    address: addressSchema,
+  })
+  .superRefine((value, ctx) => {
+    if (!value.receiptsEnabled) return;
+    if (!value.etaBranchCode?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['etaBranchCode'],
+        message: 'required',
+      });
+    }
+    if (!value.activityCode?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['activityCode'],
+        message: 'required',
+      });
+    }
+  });
 
 type FormValues = z.infer<typeof schema>;
 
@@ -62,9 +83,17 @@ const OPTIONAL_ADDRESS_FIELDS = [
   'additionalInformation',
 ] as const;
 
+const GAP_KEYS: Record<string, string> = {
+  MISSING_ETA_BRANCH_CODE: 'gapMissingEtaBranchCode',
+  MISSING_ACTIVITY_CODE: 'gapMissingActivityCode',
+  INCOMPLETE_ADDRESS: 'gapIncompleteAddress',
+  MISSING_SYNDICATE_LICENSE: 'gapMissingSyndicateLicense',
+};
+
 export default function BranchesSettingsPage() {
   const t = useTranslations('settingsBranches');
   const tRetry = useTranslations('common.actions');
+  const locale = useLocale();
   const { tenantId } = useTenant();
   const qc = useQueryClient();
   const toast = useMutationToast();
@@ -84,14 +113,22 @@ export default function BranchesSettingsPage() {
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { isDefault: false, address: { country: 'EG' } },
+    defaultValues: {
+      isDefault: false,
+      receiptsEnabled: false,
+      address: { country: 'EG' },
+    },
   });
 
   const create = useMutation({
     mutationFn: (values: FormValues) => createBranch(values),
     onSuccess: async () => {
       setError(null);
-      reset({ isDefault: false, address: { country: 'EG' } });
+      reset({
+        isDefault: false,
+        receiptsEnabled: false,
+        address: { country: 'EG' },
+      });
       await qc.invalidateQueries({ queryKey: ['branches', tenantId] });
       toast.created();
     },
@@ -104,6 +141,7 @@ export default function BranchesSettingsPage() {
   return (
     <div className="space-y-token-lg">
       <SettingsPageHeader title={t('title')} />
+      <p className="text-token-sm text-foreground-muted">{t('b2cSelfService')}</p>
 
       <Card>
         <form
@@ -113,10 +151,33 @@ export default function BranchesSettingsPage() {
         >
           <div className="grid gap-token-md sm:grid-cols-2 lg:grid-cols-3">
             <Input label={t('name')} {...register('name')} />
-            <Input label={t('etaBranchCode')} dir="ltr" {...register('etaBranchCode')} />
-            <Input label={t('activityCode')} dir="ltr" {...register('activityCode')} />
+            <Input
+              label={t('etaBranchCode')}
+              hint={t('etaBranchCodeHelp')}
+              dir="ltr"
+              error={errors.etaBranchCode ? t('required') : undefined}
+              {...register('etaBranchCode')}
+            />
+            <Input
+              label={t('activityCode')}
+              hint={t('activityCodeHelp')}
+              dir="ltr"
+              error={errors.activityCode ? t('required') : undefined}
+              {...register('activityCode')}
+            />
+            <Input
+              label={t('syndicateLicense')}
+              hint={t('syndicateLicenseHelp')}
+              dir="ltr"
+              {...register('syndicateLicenseNumber')}
+            />
           </div>
           <Checkbox label={t('default')} {...register('isDefault')} />
+          <Checkbox
+            label={t('receiptsEnabled')}
+            hint={t('receiptsHelp')}
+            {...register('receiptsEnabled')}
+          />
 
           <fieldset className="rounded-lg border border-border p-token-md">
             <legend className="px-token-xs text-token-sm font-medium">
@@ -178,7 +239,10 @@ export default function BranchesSettingsPage() {
           title={t('empty')}
           action={{
             label: t('create'),
-            onClick: () => document.getElementById('branch-create-form')?.scrollIntoView({ behavior: 'smooth' }),
+            onClick: () =>
+              document.getElementById('branch-create-form')?.scrollIntoView({
+                behavior: 'smooth',
+              }),
           }}
         />
       ) : (
@@ -196,6 +260,19 @@ export default function BranchesSettingsPage() {
                   <Badge variant={b.addressComplete ? 'success' : 'danger'}>
                     {b.addressComplete ? t('addressComplete') : t('addressIncomplete')}
                   </Badge>
+                  {b.receiptsEnabled ? (
+                    <Badge variant={b.receiptsReady ? 'success' : 'danger'}>
+                      {b.receiptsReady ? t('receiptsReady') : t('receiptsNotReady')}
+                    </Badge>
+                  ) : (
+                    <Badge variant="info">{t('receiptsInvoiceOnly')}</Badge>
+                  )}
+                  <Link
+                    className="text-brand underline"
+                    href={`/${locale}/settings/pos-devices?branchId=${b.id}`}
+                  >
+                    {t('managePos')}
+                  </Link>
                   <Button
                     type="button"
                     variant="link"
@@ -205,8 +282,15 @@ export default function BranchesSettingsPage() {
                     {editing === b.id ? t('cancel') : t('edit')}
                   </Button>
                 </div>
+                {b.receiptsEnabled && b.receiptsGaps.length ? (
+                  <ul className="mt-token-xs list-disc ps-token-md text-token-xs text-danger">
+                    {b.receiptsGaps.map((gap) => (
+                      <li key={gap}>{t(GAP_KEYS[gap] ?? gap)}</li>
+                    ))}
+                  </ul>
+                ) : null}
                 {editing === b.id ? (
-                  <BranchAddressEditor
+                  <BranchEditor
                     branch={b}
                     onSaved={async () => {
                       setEditing(null);
@@ -223,7 +307,9 @@ export default function BranchesSettingsPage() {
   );
 }
 
-function BranchAddressEditor({
+const editorSchema = schema;
+
+function BranchEditor({
   branch,
   onSaved,
 }: {
@@ -237,29 +323,45 @@ function BranchAddressEditor({
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm<z.infer<typeof addressSchema>>({
-    resolver: zodResolver(addressSchema),
+  } = useForm<FormValues>({
+    resolver: zodResolver(editorSchema),
     defaultValues: {
-      country: branch.address.country ?? 'EG',
-      governate: branch.address.governate ?? '',
-      regionCity: branch.address.regionCity ?? '',
-      street: branch.address.street ?? '',
-      buildingNumber: branch.address.buildingNumber ?? '',
-      postalCode: branch.address.postalCode ?? '',
-      floor: branch.address.floor ?? '',
-      room: branch.address.room ?? '',
-      landmark: branch.address.landmark ?? '',
-      additionalInformation: branch.address.additionalInformation ?? '',
+      name: branch.name,
+      etaBranchCode: branch.etaBranchCode ?? '',
+      activityCode: branch.activityCode ?? '',
+      syndicateLicenseNumber: branch.syndicateLicenseNumber ?? '',
+      isDefault: branch.isDefault,
+      receiptsEnabled: branch.receiptsEnabled,
+      address: {
+        country: branch.address.country ?? 'EG',
+        governate: branch.address.governate ?? '',
+        regionCity: branch.address.regionCity ?? '',
+        street: branch.address.street ?? '',
+        buildingNumber: branch.address.buildingNumber ?? '',
+        postalCode: branch.address.postalCode ?? '',
+        floor: branch.address.floor ?? '',
+        room: branch.address.room ?? '',
+        landmark: branch.address.landmark ?? '',
+        additionalInformation: branch.address.additionalInformation ?? '',
+      },
     },
   });
 
   return (
     <form
       className="mt-token-sm space-y-token-sm"
-      onSubmit={handleSubmit(async (address) => {
+      onSubmit={handleSubmit(async (values) => {
         try {
           setError(null);
-          await updateBranch(branch.id, { address });
+          await updateBranch(branch.id, {
+            name: values.name,
+            etaBranchCode: values.etaBranchCode || null,
+            activityCode: values.activityCode || null,
+            syndicateLicenseNumber: values.syndicateLicenseNumber || null,
+            isDefault: values.isDefault,
+            receiptsEnabled: Boolean(values.receiptsEnabled),
+            address: values.address,
+          });
           toast.saved();
           await onSaved();
         } catch (e) {
@@ -269,21 +371,47 @@ function BranchAddressEditor({
       })}
     >
       <div className="grid gap-token-sm sm:grid-cols-2 lg:grid-cols-3">
+        <Input label={t('name')} {...register('name')} />
+        <Input
+          label={t('etaBranchCode')}
+          dir="ltr"
+          error={errors.etaBranchCode ? t('required') : undefined}
+          {...register('etaBranchCode')}
+        />
+        <Input
+          label={t('activityCode')}
+          dir="ltr"
+          error={errors.activityCode ? t('required') : undefined}
+          {...register('activityCode')}
+        />
+        <Input
+          label={t('syndicateLicense')}
+          dir="ltr"
+          {...register('syndicateLicenseNumber')}
+        />
+      </div>
+      <Checkbox label={t('default')} {...register('isDefault')} />
+      <Checkbox
+        label={t('receiptsEnabled')}
+        hint={t('receiptsHelp')}
+        {...register('receiptsEnabled')}
+      />
+      <div className="grid gap-token-sm sm:grid-cols-2 lg:grid-cols-3">
         <Input
           label={`${t('country')} *`}
-          error={errors.country ? t('required') : undefined}
-          {...register('country')}
+          error={errors.address?.country ? t('required') : undefined}
+          {...register('address.country')}
         />
         {REQUIRED_ADDRESS_FIELDS.map((field) => (
           <Input
             key={field}
             label={`${t(field)} *`}
-            error={errors[field] ? t('required') : undefined}
-            {...register(field)}
+            error={errors.address?.[field] ? t('required') : undefined}
+            {...register(`address.${field}`)}
           />
         ))}
         {OPTIONAL_ADDRESS_FIELDS.map((field) => (
-          <Input key={field} label={t(field)} {...register(field)} />
+          <Input key={field} label={t(field)} {...register(`address.${field}`)} />
         ))}
       </div>
       {error ? (

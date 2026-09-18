@@ -19,6 +19,17 @@ describe('settings branches smoke', () => {
     }
   });
 
+  it('has tenant self-service receipt fields in both locales', () => {
+    for (const messages of [en, ar]) {
+      expect(messages.settingsBranches.receiptsEnabled).toBeTruthy();
+      expect(messages.settingsBranches.receiptsInvoiceOnly).toBeTruthy();
+      expect(messages.settingsBranches.b2cSelfService).toBeTruthy();
+      expect(messages.settingsBranches.syndicateLicense).toBeTruthy();
+      expect(messages.settingsBranches.gapMissingEtaBranchCode).toBeTruthy();
+      expect(messages.settingsBranches.managePos).toBeTruthy();
+    }
+  });
+
   it('points issuer validation errors at the right settings area', () => {
     for (const messages of [en, ar]) {
       expect(messages.documents.issuerFromSettingsTitle).toBeTruthy();

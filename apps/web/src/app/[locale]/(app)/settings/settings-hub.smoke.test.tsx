@@ -48,6 +48,10 @@ describe('settings hub', () => {
       'href',
       '/en/settings/branches',
     );
+    expect(screen.getByRole('link', { name: new RegExp(en.settings.posDevices) })).toHaveAttribute(
+      'href',
+      '/en/settings/pos-devices',
+    );
     expect(
       screen.getByRole('link', { name: new RegExp(en.settings.invoiceNumbering) }),
     ).toHaveAttribute('href', '/en/settings/invoice-numbering');

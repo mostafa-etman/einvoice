@@ -42,6 +42,7 @@ const schema = z.object({
   registrationNumber: z.string().min(1),
   taxpayerLegalName: z.string().min(1),
   issuerType: z.enum(['B', 'P', 'F']),
+  syndicateLicenseNumber: z.string().optional(),
   activityCode: z.string().optional(),
   isIntermediary: z.boolean().optional(),
   onBehalfOfRegistrationNumber: z.string().optional(),
@@ -103,6 +104,7 @@ export default function EtaCredentialsPage() {
       registrationNumber: query.data?.registrationNumber ?? '',
       taxpayerLegalName: query.data?.taxpayerLegalName ?? '',
       issuerType: (query.data?.issuerType as 'B' | 'P' | 'F') ?? 'B',
+      syndicateLicenseNumber: query.data?.syndicateLicenseNumber ?? '',
       activityCode: query.data?.activityCode ?? '',
       isIntermediary: query.data?.isIntermediary ?? false,
       onBehalfOfRegistrationNumber:
@@ -500,6 +502,12 @@ export default function EtaCredentialsPage() {
                     <option value="P">{t('issuerTypeP')}</option>
                     <option value="F">{t('issuerTypeF')}</option>
                   </Select>
+                  <Input
+                    label={t('syndicateLicense')}
+                    hint={t('syndicateLicenseHelp')}
+                    dir="ltr"
+                    {...register('syndicateLicenseNumber')}
+                  />
                 </div>
               </fieldset>
 

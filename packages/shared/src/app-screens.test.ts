@@ -12,6 +12,7 @@ describe('app screens', () => {
     expect(matchAppScreen('/ar/documents')).toBe('documents');
     expect(matchAppScreen('/en/documents/abc')).toBe('documents.detail');
     expect(matchAppScreen('/en/settings/eta-credentials')).toBe('settings.eta-credentials');
+    expect(matchAppScreen('/en/settings/pos-devices')).toBe('settings.pos-devices');
     expect(matchAppScreen('/en/settings')).toBe('settings');
     expect(matchAppScreen('/en/sync/conflict')).toBe('sync.conflict');
     expect(matchAppScreen('/en/unknown-page')).toBe('other');

@@ -23,6 +23,8 @@ import { InvoiceNumberingController } from './invoice-numbering/invoice-numberin
 import { InvoiceNumberingService } from './invoice-numbering/invoice-numbering.service';
 import { CompanySettingsController } from './company/company.controller';
 import { CompanySettingsService } from './company/company.service';
+import { PosDevicesController } from './pos-devices/pos-devices.controller';
+import { PosDevicesService } from './pos-devices/pos-devices.service';
 
 @Module({
   imports: [PrismaModule, AuditModule, TenantModule, EtaModule, BillingModule],
@@ -35,6 +37,7 @@ import { CompanySettingsService } from './company/company.service';
     ItemCodesController,
     InvoiceNumberingController,
     CompanySettingsController,
+    PosDevicesController,
   ],
   providers: [
     SecretsEncryptionService,
@@ -48,6 +51,7 @@ import { CompanySettingsService } from './company/company.service';
     ItemCodesSyncService,
     InvoiceNumberingService,
     CompanySettingsService,
+    PosDevicesService,
   ],
   exports: [SecretsEncryptionService, InvoiceNumberingService, CompanySettingsService],
 })

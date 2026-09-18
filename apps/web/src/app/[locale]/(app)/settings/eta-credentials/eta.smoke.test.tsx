@@ -16,6 +16,8 @@ describe('ETA credentials smoke', () => {
       expect(messages.settingsEta.companyIdentity).toBeTruthy();
       expect(messages.settingsEta.issuerIdentityIncomplete).toBeTruthy();
       expect(messages.settingsEta.trialAlreadyUsed).toBeTruthy();
+      expect(messages.settingsEta.syndicateLicense).toBeTruthy();
+      expect(messages.settingsEta.syndicateLicenseHelp).toBeTruthy();
     }
   });
 

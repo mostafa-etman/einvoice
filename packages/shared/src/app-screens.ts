@@ -21,6 +21,7 @@ export const APP_SCREEN_KEYS = [
   'settings',
   'settings.company',
   'settings.branches',
+  'settings.pos-devices',
   'settings.item-codes',
   'settings.eta-credentials',
   'settings.eta-document-types',
@@ -39,6 +40,7 @@ type ScreenMatch = {
 };
 
 const SCREEN_MATCHES: ScreenMatch[] = [
+  { key: 'settings.pos-devices', pathPrefix: '/settings/pos-devices' },
   { key: 'settings.eta-document-types', pathPrefix: '/settings/eta-document-types' },
   { key: 'settings.invoice-numbering', pathPrefix: '/settings/invoice-numbering' },
   { key: 'settings.eta-credentials', pathPrefix: '/settings/eta-credentials' },

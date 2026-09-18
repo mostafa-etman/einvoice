@@ -11,6 +11,8 @@ import { TenantPrismaService } from '../../prisma/tenant-prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QuotaService } from '../../billing/quota.service';
+import { receiptBranchGaps } from '../receipts/receipt-readiness';
+import { normalizeSyndicateLicenseNumber } from '../receipts/syndicate-license';
 
 export type BranchAddressInput = IssuerAddress;
 
@@ -30,6 +32,18 @@ const ADDRESS_COLUMNS = {
 
 type BranchAddressColumns = {
   [K in (typeof ADDRESS_COLUMNS)[keyof typeof ADDRESS_COLUMNS]]?: string | null;
+};
+
+export type BranchReceiptInput = {
+  name?: string;
+  isDefault?: boolean;
+  isActive?: boolean;
+  etaBranchCode?: string | null;
+  activityCode?: string | null;
+  defaultCurrencyCode?: string | null;
+  address?: BranchAddressInput;
+  receiptsEnabled?: boolean;
+  syndicateLicenseNumber?: string | null;
 };
 
 export function branchAddressToIssuerAddress(
@@ -56,6 +70,13 @@ function addressToColumns(address: BranchAddressInput): BranchAddressColumns {
   return data;
 }
 
+function emptyToNull(value: string | null | undefined): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value == null) return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
 @Injectable()
 export class BranchesSettingsService {
   constructor(
@@ -66,40 +87,76 @@ export class BranchesSettingsService {
   ) {}
 
   async list(tenantId: string) {
+    const identity = await this.tenantIdentity(tenantId);
     const branches = await this.tenantPrisma.withTenant(tenantId, (tx) =>
       tx.branch.findMany({
         where: { tenantId },
         orderBy: { createdAt: 'asc' },
       }),
     );
-    return branches.map((b) => this.toDto(b));
+    return branches.map((b) => this.toDto(b, identity));
   }
 
-  private toDto<T extends BranchAddressColumns>(branch: T) {
+  private async tenantIdentity(tenantId: string) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { issuerType: true, syndicateLicenseNumber: true },
+    });
+    return {
+      issuerType: tenant?.issuerType ?? 'B',
+      syndicateLicenseNumber: tenant?.syndicateLicenseNumber ?? null,
+    };
+  }
+
+  private toDto<T extends BranchAddressColumns & {
+    etaBranchCode?: string | null;
+    activityCode?: string | null;
+    receiptsEnabled?: boolean;
+    syndicateLicenseNumber?: string | null;
+  }>(
+    branch: T,
+    identity: { issuerType: string; syndicateLicenseNumber: string | null },
+  ) {
     const address = branchAddressToIssuerAddress(branch);
+    const receiptsEnabled = Boolean(branch.receiptsEnabled);
+    const gaps = receiptBranchGaps({
+      receiptsEnabled,
+      etaBranchCode: branch.etaBranchCode,
+      activityCode: branch.activityCode,
+      address,
+      issuerType: identity.issuerType,
+      tenantSyndicateLicense: identity.syndicateLicenseNumber,
+      branchSyndicateLicense: branch.syndicateLicenseNumber,
+    });
     return {
       ...branch,
       address,
       addressComplete: missingIssuerAddressFields(address).length === 0,
+      receiptsReady: receiptsEnabled && gaps.length === 0,
+      receiptsGaps: gaps,
     };
   }
 
-  async create(
-    tenantId: string,
-    actorUserId: string,
-    input: {
-      name: string;
-      isDefault?: boolean;
-      etaBranchCode?: string;
-      activityCode?: string;
-      defaultCurrencyCode?: string;
-      address?: BranchAddressInput;
-    },
-  ) {
+  async create(tenantId: string, actorUserId: string, input: BranchReceiptInput & { name: string }) {
     if (input.defaultCurrencyCode) {
       await this.assertCurrency(input.defaultCurrencyCode);
     }
     this.assertCompleteAddress(input.address ?? {});
+
+    const identity = await this.tenantIdentity(tenantId);
+    const syndicate = normalizeSyndicateLicenseNumber(input.syndicateLicenseNumber);
+    const etaBranchCode = emptyToNull(input.etaBranchCode) ?? null;
+    const activityCode = emptyToNull(input.activityCode) ?? null;
+    const receiptsEnabled = Boolean(input.receiptsEnabled);
+    this.assertReceiptReady({
+      receiptsEnabled,
+      etaBranchCode,
+      activityCode,
+      address: input.address ?? {},
+      issuerType: identity.issuerType,
+      tenantSyndicateLicense: identity.syndicateLicenseNumber,
+      branchSyndicateLicense: syndicate,
+    });
 
     await this.quota.checkTenantWritable(tenantId);
     await this.quota.assertWithinLimits(tenantId, 'branches');
@@ -117,9 +174,11 @@ export class BranchesSettingsService {
           tenantId,
           name: input.name.trim(),
           isDefault: input.isDefault ?? count === 0,
-          etaBranchCode: input.etaBranchCode,
-          activityCode: input.activityCode,
+          etaBranchCode,
+          activityCode,
           defaultCurrencyCode: input.defaultCurrencyCode,
+          receiptsEnabled,
+          syndicateLicenseNumber: syndicate,
           ...addressToColumns({
             country: 'EG',
             ...(input.address ?? {}),
@@ -135,24 +194,20 @@ export class BranchesSettingsService {
       tenantId,
       resourceType: 'branch',
       resourceId: branch.id,
-      metadata: { name: branch.name, isDefault: branch.isDefault },
+      metadata: {
+        name: branch.name,
+        isDefault: branch.isDefault,
+        receiptsEnabled: branch.receiptsEnabled,
+      },
     });
-    return this.toDto(branch);
+    return this.toDto(branch, identity);
   }
 
   async update(
     tenantId: string,
     actorUserId: string,
     branchId: string,
-    input: {
-      name?: string;
-      isDefault?: boolean;
-      isActive?: boolean;
-      etaBranchCode?: string | null;
-      activityCode?: string | null;
-      defaultCurrencyCode?: string | null;
-      address?: BranchAddressInput;
-    },
+    input: BranchReceiptInput,
   ) {
     if (input.defaultCurrencyCode) {
       await this.assertCurrency(input.defaultCurrencyCode);
@@ -168,6 +223,8 @@ export class BranchesSettingsService {
       }
     }
 
+    const identity = await this.tenantIdentity(tenantId);
+
     const branch = await this.tenantPrisma.withTenant(tenantId, async (tx) => {
       const existing = await tx.branch.findFirst({
         where: { id: branchId, tenantId },
@@ -176,13 +233,11 @@ export class BranchesSettingsService {
         throw new NotFoundException('Branch not found');
       }
 
-      // Validate the merged result so an address can be completed field by
-      // field, but never blanked back out once documents depend on it.
+      const mergedAddress = input.address
+        ? { ...branchAddressToIssuerAddress(existing), ...input.address }
+        : branchAddressToIssuerAddress(existing);
       if (input.address) {
-        this.assertCompleteAddress({
-          ...branchAddressToIssuerAddress(existing),
-          ...input.address,
-        });
+        this.assertCompleteAddress(mergedAddress);
       }
 
       if (input.isActive === false && existing.isDefault) {
@@ -216,20 +271,47 @@ export class BranchesSettingsService {
         });
       }
 
+      const etaBranchCode =
+        input.etaBranchCode !== undefined
+          ? emptyToNull(input.etaBranchCode) ?? null
+          : existing.etaBranchCode;
+      const activityCode =
+        input.activityCode !== undefined
+          ? emptyToNull(input.activityCode) ?? null
+          : existing.activityCode;
+      const receiptsEnabled =
+        input.receiptsEnabled !== undefined
+          ? Boolean(input.receiptsEnabled)
+          : existing.receiptsEnabled;
+      const syndicate =
+        input.syndicateLicenseNumber !== undefined
+          ? normalizeSyndicateLicenseNumber(input.syndicateLicenseNumber)
+          : existing.syndicateLicenseNumber;
+
+      this.assertReceiptReady({
+        receiptsEnabled,
+        etaBranchCode,
+        activityCode,
+        address: mergedAddress,
+        issuerType: identity.issuerType,
+        tenantSyndicateLicense: identity.syndicateLicenseNumber,
+        branchSyndicateLicense: syndicate,
+      });
+
       return tx.branch.update({
         where: { id: branchId },
         data: {
           ...(input.name !== undefined ? { name: input.name.trim() } : {}),
           ...(input.isDefault !== undefined ? { isDefault: input.isDefault } : {}),
           ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
-          ...(input.etaBranchCode !== undefined
-            ? { etaBranchCode: input.etaBranchCode }
-            : {}),
-          ...(input.activityCode !== undefined
-            ? { activityCode: input.activityCode }
-            : {}),
+          ...(input.etaBranchCode !== undefined ? { etaBranchCode } : {}),
+          ...(input.activityCode !== undefined ? { activityCode } : {}),
           ...(input.defaultCurrencyCode !== undefined
             ? { defaultCurrencyCode: input.defaultCurrencyCode }
+            : {}),
+          ...(input.receiptsEnabled !== undefined ? { receiptsEnabled } : {}),
+          ...(input.syndicateLicenseNumber !== undefined
+            ? { syndicateLicenseNumber: syndicate }
             : {}),
           ...(input.address ? addressToColumns(input.address) : {}),
         },
@@ -251,9 +333,10 @@ export class BranchesSettingsService {
         name: branch.name,
         isDefault: branch.isDefault,
         isActive: branch.isActive,
+        receiptsEnabled: branch.receiptsEnabled,
       },
     });
-    return this.toDto(branch);
+    return this.toDto(branch, identity);
   }
 
   /**
@@ -267,6 +350,18 @@ export class BranchesSettingsService {
         code: 'ISSUER_ADDRESS_INCOMPLETE',
         message: `Branch issuer address is incomplete. Missing: ${missing.join(', ')}`,
         missing,
+      });
+    }
+  }
+
+  private assertReceiptReady(input: Parameters<typeof receiptBranchGaps>[0]) {
+    const gaps = receiptBranchGaps(input);
+    if (gaps.length) {
+      throw new BadRequestException({
+        code: 'RECEIPT_BRANCH_INCOMPLETE',
+        message:
+          'This branch is not ready for e-receipts. Fill the ETA branch ID, activity code, and address (and syndicate license if you are registered as a person). Enable B2C on your ETA taxpayer profile yourself — the platform cannot do it for you.',
+        gaps,
       });
     }
   }

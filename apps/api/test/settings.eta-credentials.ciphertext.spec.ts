@@ -55,6 +55,7 @@ describe('ETA credentials ciphertext at rest (T027)', () => {
         clientId: 'cipher-client',
         clientSecret: plaintext,
         registrationNumber: '999',
+        taxpayerLegalName: `Cipher Tenant ${suffix}`,
       })
       .expect(200);
 

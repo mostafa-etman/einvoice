@@ -187,15 +187,52 @@ export class QuotaService {
   }
 
   async countTenantBranchesDevices(tenantId: string): Promise<{ branches: number; devices: number }> {
-    const [branches, devices] = await Promise.all([
+    const [branches, deviceSlot] = await Promise.all([
       this.tenantPrisma.withTenant(tenantId, (tx) =>
         tx.branch.count({ where: { tenantId, isActive: true } }),
       ),
-      this.tenantPrisma.withTenant(tenantId, (tx) =>
-        tx.signingDevice.count({ where: { tenantId, status: 'PAIRED' } }),
-      ),
+      this.countTenantDeviceSlots(tenantId),
     ]);
-    return { branches, devices };
+    return { branches, devices: deviceSlot };
+  }
+
+  /**
+   * Paired signing agents + active POS devices that are not linked to a paired
+   * agent share one account-pooled device quota (same physical till = one slot).
+   */
+  async countTenantDeviceSlots(tenantId: string): Promise<number> {
+    return this.tenantPrisma.withTenant(tenantId, async (tx) => {
+      const [paired, activePos] = await Promise.all([
+        tx.signingDevice.findMany({
+          where: { tenantId, status: 'PAIRED' },
+          select: { id: true },
+        }),
+        tx.posDevice.findMany({
+          where: { tenantId, status: 'ACTIVE' },
+          select: { signingDeviceId: true },
+        }),
+      ]);
+      const pairedIds = new Set(paired.map((d) => d.id));
+      const extraPos = activePos.filter(
+        (p) => !p.signingDeviceId || !pairedIds.has(p.signingDeviceId),
+      ).length;
+      return paired.length + extraPos;
+    });
+  }
+
+  /** True when this POS can share the device slot of an already-paired signing agent. */
+  async posSharesSigningSlot(
+    tenantId: string,
+    signingDeviceId: string | null | undefined,
+  ): Promise<boolean> {
+    if (!signingDeviceId) return false;
+    const device = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.signingDevice.findFirst({
+        where: { id: signingDeviceId, tenantId, status: 'PAIRED' },
+        select: { id: true },
+      }),
+    );
+    return Boolean(device);
   }
 
   async countAccountBranchesDevices(accountId: string): Promise<{ branches: number; devices: number }> {

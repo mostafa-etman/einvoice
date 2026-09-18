@@ -37,6 +37,7 @@ export class CompanySettingsService {
           name: true,
           legalName: true,
           issuerType: true,
+          syndicateLicenseNumber: true,
           logoObjectKey: true,
           logoContentType: true,
           logoByteSize: true,
@@ -73,6 +74,7 @@ export class CompanySettingsService {
       workspaceName: tenant.name,
       legalName: tenant.legalName,
       issuerType: tenant.issuerType,
+      syndicateLicenseNumber: tenant.syndicateLicenseNumber,
       logo: tenant.logoObjectKey
         ? {
             contentType: tenant.logoContentType,

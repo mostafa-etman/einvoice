@@ -5,6 +5,7 @@ export type CompanyProfile = {
   workspaceName: string;
   legalName: string | null;
   issuerType: string;
+  syndicateLicenseNumber: string | null;
   logo: {
     contentType: string | null;
     byteSize: number | null;
