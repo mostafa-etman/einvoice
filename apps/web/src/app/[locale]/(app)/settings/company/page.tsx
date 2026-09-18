@@ -7,9 +7,11 @@ import {
   fetchCompanyLogoObjectUrl,
   getCompanyProfile,
   removeCompanyLogo,
+  updateCompanyReceiptPosScope,
   uploadCompanyLogo,
   type CompanyProfile,
 } from '@/lib/api/company';
+import { listPosDevices, type PosDevice } from '@/lib/api/pos-devices';
 import { CopyableTenantId } from '@/components/copyable-tenant-id';
 import { useTenant } from '@/lib/tenant-provider';
 import { Card } from '@/components/ui/card';
@@ -30,13 +32,24 @@ export default function CompanySettingsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [posScope, setPosScope] = useState<'PER_BRANCH' | 'COMPANY'>('PER_BRANCH');
+  const [sharedPosId, setSharedPosId] = useState('');
+  const [posDevices, setPosDevices] = useState<PosDevice[]>([]);
   const logoUrlRef = useRef<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const reload = async () => {
     const p = await getCompanyProfile();
     setProfile(p);
+    setPosScope(p.posSerialScope === 'COMPANY' ? 'COMPANY' : 'PER_BRANCH');
+    setSharedPosId(p.sharedPosDeviceId ?? '');
     setLoadError(null);
+    try {
+      const devices = await listPosDevices();
+      setPosDevices(devices.filter((d) => d.status === 'ACTIVE'));
+    } catch {
+      setPosDevices([]);
+    }
     if (logoUrlRef.current) {
       URL.revokeObjectURL(logoUrlRef.current);
       logoUrlRef.current = null;
@@ -56,6 +69,26 @@ export default function CompanySettingsPage() {
       if (logoUrlRef.current) URL.revokeObjectURL(logoUrlRef.current);
     };
   }, []);
+
+  const onSavePosScope = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const p = await updateCompanyReceiptPosScope({
+        posSerialScope: posScope,
+        ...(posScope === 'COMPANY' ? { sharedPosDeviceId: sharedPosId || null } : {}),
+      });
+      setProfile(p);
+      setPosScope(p.posSerialScope === 'COMPANY' ? 'COMPANY' : 'PER_BRANCH');
+      setSharedPosId(p.sharedPosDeviceId ?? '');
+      toast.saved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('posSerialSaveFailed'));
+      toast.error(e, t('posSerialSaveFailed'));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const onUpload = async (file: File | null) => {
     if (!file) return;
@@ -176,6 +209,73 @@ export default function CompanySettingsPage() {
                 </div>
               ) : null}
             </dl>
+          </div>
+
+          <div className="border-t border-border pt-token-md">
+            <h2 className="m-0 text-token-md font-semibold text-foreground">
+              {t('posSerialScope')}
+            </h2>
+            <p className="mt-token-xs text-token-sm text-foreground-muted">
+              {t('posSerialScopeHelp')}
+            </p>
+            <fieldset className="mt-token-md space-y-token-sm">
+              <legend className="sr-only">{t('posSerialScope')}</legend>
+              <label className="flex items-start gap-token-sm text-token-sm">
+                <input
+                  type="radio"
+                  name="posSerialScope"
+                  className="mt-1"
+                  checked={posScope === 'PER_BRANCH'}
+                  onChange={() => setPosScope('PER_BRANCH')}
+                />
+                <span>
+                  <span className="font-medium">{t('posSerialPerBranch')}</span>
+                  <span className="mt-token-xs block text-token-xs text-foreground-muted">
+                    {t('posSerialPerBranchHelp')}
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-token-sm text-token-sm">
+                <input
+                  type="radio"
+                  name="posSerialScope"
+                  className="mt-1"
+                  checked={posScope === 'COMPANY'}
+                  onChange={() => setPosScope('COMPANY')}
+                />
+                <span>
+                  <span className="font-medium">{t('posSerialCompany')}</span>
+                  <span className="mt-token-xs block text-token-xs text-foreground-muted">
+                    {t('posSerialCompanyHelp')}
+                  </span>
+                </span>
+              </label>
+            </fieldset>
+            {posScope === 'COMPANY' ? (
+              <label className="mt-token-md block text-token-sm">
+                {t('sharedPosDevice')}
+                <select
+                  className="mt-token-xs w-full rounded-control border border-border-strong bg-surface px-input-x py-input-y text-token-sm"
+                  value={sharedPosId}
+                  onChange={(e) => setSharedPosId(e.target.value)}
+                >
+                  <option value="">{t('selectSharedPos')}</option>
+                  {posDevices.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.label} — {d.serialNumber}
+                    </option>
+                  ))}
+                </select>
+                <span className="mt-token-xs block text-token-xs text-foreground-muted">
+                  {t('sharedPosDeviceHelp')}
+                </span>
+              </label>
+            ) : null}
+            <div className="mt-token-md">
+              <Button type="button" disabled={busy} onClick={() => void onSavePosScope()}>
+                {t('posSerialSave')}
+              </Button>
+            </div>
           </div>
 
           <div className="border-t border-border pt-token-md">

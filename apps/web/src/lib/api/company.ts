@@ -7,6 +7,8 @@ export type CompanyProfile = {
   issuerType: string;
   syndicateLicenseNumber: string | null;
   defaultReceiptType: string;
+  posSerialScope: 'PER_BRANCH' | 'COMPANY' | string;
+  sharedPosDeviceId: string | null;
   logo: {
     contentType: string | null;
     byteSize: number | null;
@@ -32,6 +34,17 @@ export type CompanyProfile = {
 
 export function getCompanyProfile() {
   return apiFetch<CompanyProfile>('/settings/company', { tenantScoped: true });
+}
+
+export function updateCompanyReceiptPosScope(body: {
+  posSerialScope: 'PER_BRANCH' | 'COMPANY';
+  sharedPosDeviceId?: string | null;
+}) {
+  return apiFetch<CompanyProfile>('/settings/company', {
+    method: 'PUT',
+    tenantScoped: true,
+    body,
+  });
 }
 
 export async function uploadCompanyLogo(file: File) {

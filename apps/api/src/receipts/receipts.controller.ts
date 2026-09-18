@@ -9,8 +9,10 @@ import {
   Post,
   Put,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { PERMISSIONS } from '@einvoice/shared';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
@@ -46,6 +48,28 @@ export class ReceiptsController {
     return this.receipts.preview(requireTenant(tenantHeader), body);
   }
 
+  @Post('local-printout')
+  @HttpCode(200)
+  @RequirePermissions(PERMISSIONS.DOCUMENTS_VIEW)
+  async localPrintoutUnsaved(
+    @Headers('x-tenant-id') tenantHeader: string | undefined,
+    @Query('locale') locale: string | undefined,
+    @Body() body: ReceiptUpsertDto,
+    @Res() res: Response,
+  ) {
+    const result = await this.receipts.localPrintoutFromDto(
+      requireTenant(tenantHeader),
+      body,
+      locale,
+    );
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${result.filename}"`,
+    );
+    return res.send(result.pdf);
+  }
+
   @Post()
   @HttpCode(201)
   @RequirePermissions(PERMISSIONS.DOCUMENTS_MANAGE)
@@ -64,6 +88,42 @@ export class ReceiptsController {
     @Param('id') id: string,
   ) {
     return this.receipts.get(requireTenant(tenantHeader), id);
+  }
+
+  @Get(':id/local-printout')
+  @RequirePermissions(PERMISSIONS.DOCUMENTS_VIEW)
+  async localPrintout(
+    @Headers('x-tenant-id') tenantHeader: string | undefined,
+    @Param('id') id: string,
+    @Query('locale') locale: string | undefined,
+    @Res() res: Response,
+  ) {
+    const result = await this.receipts.localPrintoutById(
+      requireTenant(tenantHeader),
+      id,
+      locale,
+    );
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${result.filename}"`,
+    );
+    return res.send(result.pdf);
+  }
+
+  @Post(':id/return')
+  @HttpCode(201)
+  @RequirePermissions(PERMISSIONS.DOCUMENTS_MANAGE)
+  createReturn(
+    @Headers('x-tenant-id') tenantHeader: string | undefined,
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+  ) {
+    return this.receipts.createReturn(
+      requireTenant(tenantHeader),
+      user.userId,
+      id,
+    );
   }
 
   @Put(':id')

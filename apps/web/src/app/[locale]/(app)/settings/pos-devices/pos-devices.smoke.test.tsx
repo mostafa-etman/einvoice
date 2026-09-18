@@ -13,6 +13,7 @@ describe('settings POS devices smoke', () => {
       expect(messages.settingsPosDevices.modelFramework).toBeTruthy();
       expect(messages.settingsPosDevices.statusPermanentlyRetired).toBeTruthy();
       expect(messages.settingsPosDevices.lastReceiptUuid).toBeTruthy();
+      expect(messages.settingsPosDevices.serialScopeHint).toBeTruthy();
       expect(messages.screens['settings_pos-devices']).toBeTruthy();
     }
   });

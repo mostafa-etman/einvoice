@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -21,16 +22,23 @@ import {
 } from '@einvoice/eta-core';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { AuditService } from '../audit/audit.service';
+import type { ArtifactStorage } from '../storage/storage.module';
 import { branchAddressToIssuerAddress } from '../settings/branches/branches.service';
 import { isReceiptBranchReady, receiptBranchGaps } from '../settings/receipts/receipt-readiness';
 import { resolveSyndicateLicenseNumber } from '../settings/receipts/syndicate-license';
 import { resolveReceiptType } from '../settings/receipts/receipt-type';
+import { parsePosSerialScope } from '../settings/receipts/pos-serial-scope';
+import { renderLocalInvoicePdf } from '../documents/local-invoice-pdf';
+import {
+  receiptPayloadToPdfInput,
+  type ReceiptPdfPayload,
+} from './local-receipt-pdf';
 
 export type ReceiptLineDto = ReceiptLineInput;
 
 export type ReceiptUpsertDto = {
   branchId: string;
-  posDeviceId: string;
+  posDeviceId?: string;
   receiptType?: string;
   receiptNumber?: string;
   dateTimeIssued: string;
@@ -50,6 +58,7 @@ export class ReceiptsService {
   constructor(
     private readonly tenantPrisma: TenantPrismaService,
     private readonly audit: AuditService,
+    @Inject('ArtifactStorage') private readonly artifacts: ArtifactStorage,
   ) {}
 
   async list(tenantId: string, opts?: { posDeviceId?: string; branchId?: string }) {
@@ -60,6 +69,7 @@ export class ReceiptsService {
           ...(opts?.posDeviceId ? { posDeviceId: opts.posDeviceId } : {}),
           ...(opts?.branchId ? { branchId: opts.branchId } : {}),
         },
+        include: { posDevice: { select: { lastReceiptUuid: true } } },
         orderBy: { dateTimeIssued: 'desc' },
         take: 100,
       }),
@@ -69,7 +79,10 @@ export class ReceiptsService {
 
   async get(tenantId: string, id: string) {
     const row = await this.tenantPrisma.withTenant(tenantId, (tx) =>
-      tx.receipt.findFirst({ where: { id, tenantId } }),
+      tx.receipt.findFirst({
+        where: { id, tenantId },
+        include: { posDevice: { select: { lastReceiptUuid: true } } },
+      }),
     );
     if (!row) throw new NotFoundException('Receipt not found');
     return this.toDetail(row);
@@ -230,6 +243,178 @@ export class ReceiptsService {
     return { ok: true };
   }
 
+  async createReturn(tenantId: string, actorUserId: string, sourceId: string) {
+    const source = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.receipt.findFirst({
+        where: { id: sourceId, tenantId },
+        include: { posDevice: { select: { lastReceiptUuid: true } } },
+      }),
+    );
+    if (!source) throw new NotFoundException('Receipt not found');
+    if (source.receiptType === 'r') {
+      throw new BadRequestException({
+        code: 'RETURN_REQUIRES_SALE',
+        message: 'Return is only available for a sale or retail receipt, not another return.',
+      });
+    }
+    if (!source.uuid?.trim()) {
+      throw new BadRequestException({
+        code: 'RETURN_REQUIRES_UUID',
+        message: 'Original receipt has no uuid to reference.',
+      });
+    }
+    const dto = this.upsertDtoFromStored(source);
+    dto.receiptType = 'r';
+    dto.referenceUUID = source.uuid;
+    dto.dateTimeIssued = new Date().toISOString();
+    dto.receiptNumber = undefined;
+    const created = await this.create(tenantId, actorUserId, dto);
+    await this.audit.write({
+      action: 'receipt.return.create',
+      outcome: 'success',
+      actorUserId,
+      tenantId,
+      resourceType: 'receipt',
+      resourceId: created.id,
+      metadata: {
+        sourceReceiptId: source.id,
+        sourceUuid: source.uuid,
+        sourceReceiptNumber: source.receiptNumber,
+      },
+    });
+    return created;
+  }
+
+  async localPrintoutById(
+    tenantId: string,
+    id: string,
+    locale?: string,
+  ): Promise<{ pdf: Buffer; filename: string }> {
+    const detail = await this.get(tenantId, id);
+    const pdf = await this.renderPdf(tenantId, detail.etaPayload, locale);
+    return { pdf, filename: `receipt-${detail.receiptNumber}-preview.pdf` };
+  }
+
+  async localPrintoutFromDto(
+    tenantId: string,
+    dto: ReceiptUpsertDto,
+    locale?: string,
+  ): Promise<{ pdf: Buffer; filename: string }> {
+    const preview = await this.preview(tenantId, dto);
+    const pdf = await this.renderPdf(tenantId, preview.etaPayload, locale);
+    const header = (preview.etaPayload as { header?: { receiptNumber?: string } })
+      .header?.receiptNumber;
+    return { pdf, filename: `receipt-${header || 'draft'}-preview.pdf` };
+  }
+
+  private async renderPdf(tenantId: string, payload: unknown, locale?: string) {
+    const loc = locale?.toLowerCase().startsWith('ar') ? 'ar' : 'en';
+    const logo = await this.loadTenantLogo(tenantId);
+    const body = (payload ?? {}) as ReceiptPdfPayload;
+    return renderLocalInvoicePdf(
+      receiptPayloadToPdfInput({
+        locale: loc,
+        payload: body,
+        logo,
+      }),
+    );
+  }
+
+  private async loadTenantLogo(tenantId: string) {
+    const tenant = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.tenant.findUnique({
+        where: { id: tenantId },
+        select: { logoObjectKey: true, logoContentType: true },
+      }),
+    );
+    if (!tenant?.logoObjectKey) return null;
+    try {
+      const buffer = await this.artifacts.getByKey(tenant.logoObjectKey);
+      return { buffer, contentType: tenant.logoContentType ?? undefined };
+    } catch {
+      return null;
+    }
+  }
+
+  private upsertDtoFromStored(row: {
+    branchId: string;
+    posDeviceId: string;
+    receiptType: string;
+    receiptNumber: string;
+    dateTimeIssued: Date;
+    currencyCode: string;
+    exchangeRate: string;
+    referenceUuid: string | null;
+    paymentMethod: string;
+    orderDeliveryMode: string | null;
+    buyerType: string;
+    buyerId: string | null;
+    buyerName: string | null;
+    etaPayloadJson: Prisma.JsonValue;
+  }): ReceiptUpsertDto {
+    const payload = (row.etaPayloadJson ?? {}) as Record<string, unknown>;
+    const header = (payload.header ?? {}) as Record<string, unknown>;
+    const buyer = (payload.buyer ?? {}) as Record<string, unknown>;
+    const itemData = Array.isArray(payload.itemData)
+      ? (payload.itemData as Array<Record<string, unknown>>)
+      : [];
+    return {
+      branchId: row.branchId,
+      posDeviceId: row.posDeviceId,
+      receiptType: row.receiptType,
+      receiptNumber: row.receiptNumber,
+      dateTimeIssued: row.dateTimeIssued.toISOString(),
+      currencyCode: row.currencyCode,
+      exchangeRate: row.exchangeRate,
+      referenceUUID: row.referenceUuid ?? undefined,
+      orderdeliveryMode:
+        row.orderDeliveryMode ||
+        (typeof header.orderdeliveryMode === 'string'
+          ? header.orderdeliveryMode
+          : undefined),
+      paymentMethod: row.paymentMethod,
+      buyer: {
+        type: isReceiptBuyerType(String(buyer.type ?? row.buyerType))
+          ? (String(buyer.type ?? row.buyerType) as ReceiptBuyerInput['type'])
+          : 'P',
+        id: String(buyer.id ?? row.buyerId ?? '') || undefined,
+        name: String(buyer.name ?? row.buyerName ?? '') || undefined,
+        mobileNumber:
+          typeof buyer.mobileNumber === 'string' ? buyer.mobileNumber : undefined,
+        paymentNumber:
+          typeof buyer.paymentNumber === 'string' ? buyer.paymentNumber : undefined,
+      },
+      lines: itemData.map((l) => {
+        const taxes = Array.isArray(l.taxableItems)
+          ? (l.taxableItems as Array<Record<string, unknown>>).map((t) => ({
+              taxType: String(t.taxType ?? ''),
+              subType: String(t.subType ?? ''),
+              rate: String(t.rate ?? '0'),
+              ...(t.amount != null ? { amount: String(t.amount) } : {}),
+            }))
+          : [];
+        const commercial = Array.isArray(l.commercialDiscountData)
+          ? (l.commercialDiscountData as Array<Record<string, unknown>>).map((d) => ({
+              amount: String(d.amount ?? '0'),
+              description: d.description != null ? String(d.description) : undefined,
+              rate: d.rate != null ? String(d.rate) : undefined,
+            }))
+          : undefined;
+        return {
+          internalCode: String(l.internalCode ?? ''),
+          description: String(l.description ?? ''),
+          itemType: String(l.itemType ?? 'EGS'),
+          itemCode: String(l.itemCode ?? ''),
+          unitType: String(l.unitType ?? 'EA'),
+          quantity: String(l.quantity ?? '1'),
+          unitPrice: String(l.unitPrice ?? '0'),
+          taxes,
+          commercialDiscountData: commercial,
+        };
+      }),
+    };
+  }
+
   private assertNoErrors(issues: ValidationIssue[]) {
     const errors = issues.filter((i) => i.severity === 'error');
     if (errors.length) {
@@ -263,7 +448,40 @@ export class ReceiptsService {
       receiptNumber?: string;
     },
   ) {
-    const posDeviceId = opts.posDeviceId ?? dto.posDeviceId;
+    const tenant = await tx.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant) throw new NotFoundException('Tenant not found');
+    const scope = parsePosSerialScope(tenant.posSerialScope);
+
+    let posDeviceId = opts.posDeviceId ?? dto.posDeviceId ?? '';
+    if (!opts.posDeviceId && scope === 'COMPANY') {
+      const sharedId = tenant.sharedPosDeviceId;
+      if (sharedId) {
+        posDeviceId = sharedId;
+      } else if (!posDeviceId) {
+        const active = await tx.posDevice.findMany({
+          where: { tenantId, status: 'ACTIVE' },
+          orderBy: { createdAt: 'asc' },
+          take: 2,
+        });
+        if (active.length === 1) {
+          posDeviceId = active[0]!.id;
+        } else {
+          throw new BadRequestException({
+            code: 'SHARED_POS_REQUIRED',
+            message:
+              'Choose the company POS serial in Settings → Company. previousUUID is one chain for that POS.',
+          });
+        }
+      }
+    }
+
+    if (!posDeviceId) {
+      throw new BadRequestException({
+        code: 'POS_REQUIRED',
+        message: 'Select a POS device.',
+      });
+    }
+
     const pos = await tx.posDevice.findFirst({
       where: { id: posDeviceId, tenantId },
     });
@@ -274,7 +492,9 @@ export class ReceiptsService {
         message: 'This POS is not active. Register or reactivate it in Settings → POS devices.',
       });
     }
-    if (dto.branchId && dto.branchId !== pos.branchId) {
+
+    const saleBranchId = dto.branchId || pos.branchId;
+    if (scope === 'PER_BRANCH' && dto.branchId && dto.branchId !== pos.branchId) {
       throw new BadRequestException({
         code: 'POS_BRANCH_MISMATCH',
         message: 'The POS does not belong to the selected branch.',
@@ -282,12 +502,9 @@ export class ReceiptsService {
     }
 
     const branch = await tx.branch.findFirst({
-      where: { id: pos.branchId, tenantId },
+      where: { id: saleBranchId, tenantId },
     });
     if (!branch) throw new NotFoundException('Branch not found');
-
-    const tenant = await tx.tenant.findUnique({ where: { id: tenantId } });
-    if (!tenant) throw new NotFoundException('Tenant not found');
 
     const cred =
       (await tx.tenantEtaCredential.findFirst({
@@ -514,7 +731,11 @@ export class ReceiptsService {
     posDeviceId: string;
     buyerType: string;
     buyerName: string | null;
+    posDevice?: { lastReceiptUuid: string } | null;
   }) {
+    const isChainTip = row.posDevice
+      ? row.posDevice.lastReceiptUuid === row.uuid
+      : true;
     return {
       id: row.id,
       status: row.status,
@@ -529,6 +750,8 @@ export class ReceiptsService {
       posDeviceId: row.posDeviceId,
       buyerType: row.buyerType,
       buyerName: row.buyerName,
+      isChainTip,
+      canReturn: row.receiptType !== 'r' && Boolean(row.uuid?.trim()),
     };
   }
 
@@ -558,7 +781,9 @@ export class ReceiptsService {
     canonicalPreview: string;
     branchId: string;
     posDeviceId: string;
+    posDevice?: { lastReceiptUuid: string } | null;
   }) {
+    const form = this.upsertDtoFromStored(row);
     return {
       ...this.toListItem(row),
       typeVersion: row.typeVersion,
@@ -573,6 +798,7 @@ export class ReceiptsService {
       etaPayloadText: row.etaPayloadText,
       uuidCanonicalString: row.uuidCanonical,
       canonicalString: row.canonicalPreview,
+      form,
     };
   }
 }

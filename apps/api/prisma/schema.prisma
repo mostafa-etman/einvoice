@@ -363,6 +363,11 @@ model Tenant {
   syndicateLicenseNumber String? @map("syndicate_license_number")
   /// Tenant default ETA receipt type: s (sale), r (return), SR (retail). Branch may override.
   defaultReceiptType String @default("s") @map("default_receipt_type") @db.VarChar(8)
+  /// PER_BRANCH: each branch POS keeps its own previousUUID chain. COMPANY: one shared POS serial/chain.
+  posSerialScope String @default("PER_BRANCH") @map("pos_serial_scope") @db.VarChar(16)
+  /// When posSerialScope=COMPANY, every receipt uses this POS device (and its lastReceiptUuid chain).
+  sharedPosDeviceId String? @map("shared_pos_device_id") @db.Uuid
+  sharedPosDevice PosDevice? @relation("TenantSharedPosDevice", fields: [sharedPosDeviceId], references: [id], onDelete: SetNull)
   account              Account   @relation(fields: [accountId], references: [id], onDelete: Restrict)
   quotaOverrides       QuotaOverride[]
   paymentCustomers     PaymentCustomer[]
@@ -1121,6 +1126,7 @@ model PosDevice {
   branch        Branch          @relation(fields: [branchId], references: [id], onDelete: Restrict)
   signingDevice SigningDevice?  @relation(fields: [signingDeviceId], references: [id], onDelete: SetNull)
   receipts      Receipt[]
+  sharedForTenant Tenant[]      @relation("TenantSharedPosDevice")
 
   @@unique([tenantId, serialNumber])
   @@index([tenantId])

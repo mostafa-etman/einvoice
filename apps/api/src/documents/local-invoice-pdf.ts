@@ -51,9 +51,11 @@ export type LocalInvoicePdfInput = {
     taxTotals?: unknown;
   };
   logo?: { buffer: Buffer; contentType?: string } | null;
+  /** Display-only label overrides (receipts reuse this renderer; invoice defaults stay). */
+  labelOverrides?: Partial<Labels>;
 };
 
-type Labels = {
+export type Labels = {
   title: string;
   localNote: string;
   emptyExport: string;
@@ -345,7 +347,7 @@ function paintLocalInvoiceOnDoc(
   input: LocalInvoicePdfInput,
 ): void {
   const rtl = input.locale === 'ar';
-  const L = rtl ? AR : EN;
+  const L = { ...(rtl ? AR : EN), ...input.labelOverrides };
   const margin = 40;
   const pageWidth = 595.28;
   const contentWidth = pageWidth - margin * 2;

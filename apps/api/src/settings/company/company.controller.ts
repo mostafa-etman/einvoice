@@ -1,9 +1,11 @@
 import {
+  Body,
   Controller,
   Delete,
   Get,
   Headers,
   Post,
+  Put,
   Res,
   UploadedFile,
   UseGuards,
@@ -30,6 +32,24 @@ export class CompanySettingsController {
   @RequirePermissions(PERMISSIONS.SETTINGS_COMPANY_VIEW)
   get(@Headers('x-tenant-id') tenantHeader: string | undefined) {
     return this.company.getProfile(requireTenant(tenantHeader));
+  }
+
+  @Put()
+  @RequirePermissions(PERMISSIONS.SETTINGS_COMPANY_MANAGE)
+  update(
+    @Headers('x-tenant-id') tenantHeader: string | undefined,
+    @CurrentUser() user: AuthUser,
+    @Body()
+    body: {
+      posSerialScope?: string;
+      sharedPosDeviceId?: string | null;
+    },
+  ) {
+    return this.company.updateReceiptPosScope(
+      requireTenant(tenantHeader),
+      user.userId,
+      body,
+    );
   }
 
   @Post('logo')

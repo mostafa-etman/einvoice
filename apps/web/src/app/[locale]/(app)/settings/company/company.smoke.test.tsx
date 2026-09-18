@@ -10,6 +10,8 @@ describe('company settings smoke', () => {
       expect(messages.settingsCompany.upload).toBeTruthy();
       expect(messages.settingsCompany.replace).toBeTruthy();
       expect(messages.settingsCompany.remove).toBeTruthy();
+      expect(messages.settingsCompany.posSerialScope).toBeTruthy();
+      expect(messages.settingsCompany.posSerialCompany).toBeTruthy();
     }
   });
 });

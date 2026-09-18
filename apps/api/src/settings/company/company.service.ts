@@ -9,6 +9,7 @@ import { TenantPrismaService } from '../../prisma/tenant-prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import type { ArtifactStorage } from '../../storage/storage.module';
 import { loadEnv } from '../../config/env';
+import { parsePosSerialScope } from '../receipts/pos-serial-scope';
 
 const ALLOWED_MIME = new Set([
   'image/png',
@@ -39,6 +40,8 @@ export class CompanySettingsService {
           issuerType: true,
           syndicateLicenseNumber: true,
           defaultReceiptType: true,
+          posSerialScope: true,
+          sharedPosDeviceId: true,
           logoObjectKey: true,
           logoContentType: true,
           logoByteSize: true,
@@ -77,6 +80,8 @@ export class CompanySettingsService {
       issuerType: tenant.issuerType,
       syndicateLicenseNumber: tenant.syndicateLicenseNumber,
       defaultReceiptType: tenant.defaultReceiptType || 's',
+      posSerialScope: tenant.posSerialScope || 'PER_BRANCH',
+      sharedPosDeviceId: tenant.sharedPosDeviceId,
       logo: tenant.logoObjectKey
         ? {
             contentType: tenant.logoContentType,
@@ -103,6 +108,89 @@ export class CompanySettingsService {
           }
         : null,
     };
+  }
+
+  async updateReceiptPosScope(
+    tenantId: string,
+    actorUserId: string | undefined,
+    input: {
+      posSerialScope?: string;
+      sharedPosDeviceId?: string | null;
+    },
+  ) {
+    const current = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.tenant.findUnique({
+        where: { id: tenantId },
+        select: {
+          posSerialScope: true,
+          sharedPosDeviceId: true,
+        },
+      }),
+    );
+    if (!current) throw new NotFoundException('Tenant not found');
+
+    const posSerialScope =
+      input.posSerialScope !== undefined
+        ? parsePosSerialScope(input.posSerialScope)
+        : parsePosSerialScope(current.posSerialScope);
+
+    let sharedPosDeviceId =
+      input.sharedPosDeviceId !== undefined
+        ? input.sharedPosDeviceId
+        : current.sharedPosDeviceId;
+
+    if (posSerialScope === 'COMPANY' && sharedPosDeviceId) {
+      const pos = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+        tx.posDevice.findFirst({
+          where: { id: sharedPosDeviceId!, tenantId },
+          select: { id: true, status: true },
+        }),
+      );
+      if (!pos) {
+        throw new BadRequestException({
+          code: 'SHARED_POS_NOT_FOUND',
+          message:
+            'The company POS serial must be a POS device that belongs to this company.',
+        });
+      }
+      if (pos.status !== 'ACTIVE') {
+        throw new BadRequestException({
+          code: 'SHARED_POS_NOT_ACTIVE',
+          message: 'The company POS serial must be an active POS device.',
+        });
+      }
+    } else if (posSerialScope === 'COMPANY' && !sharedPosDeviceId) {
+      const only = await this.tenantPrisma.withTenant(tenantId, (tx) =>
+        tx.posDevice.findMany({
+          where: { tenantId, status: 'ACTIVE' },
+          orderBy: { createdAt: 'asc' },
+          select: { id: true },
+          take: 2,
+        }),
+      );
+      if (only.length === 1) {
+        sharedPosDeviceId = only[0]!.id;
+      }
+    }
+
+    await this.tenantPrisma.withTenant(tenantId, (tx) =>
+      tx.tenant.update({
+        where: { id: tenantId },
+        data: { posSerialScope, sharedPosDeviceId },
+      }),
+    );
+
+    await this.audit.write({
+      action: 'settings.company.pos_serial_scope.update',
+      outcome: 'success',
+      actorUserId,
+      tenantId,
+      resourceType: 'tenant',
+      resourceId: tenantId,
+      metadata: { posSerialScope, sharedPosDeviceId },
+    });
+
+    return this.getProfile(tenantId);
   }
 
   async uploadLogo(

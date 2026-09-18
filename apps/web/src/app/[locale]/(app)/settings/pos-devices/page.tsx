@@ -2,7 +2,8 @@
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
+import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -81,6 +82,7 @@ export default function PosDevicesSettingsPage() {
 function PosDevicesSettingsInner() {
   const t = useTranslations('settingsPosDevices');
   const tRetry = useTranslations('common.actions');
+  const locale = useLocale();
   const { tenantId } = useTenant();
   const qc = useQueryClient();
   const toast = useMutationToast();
@@ -161,6 +163,15 @@ function PosDevicesSettingsInner() {
     <div className="space-y-token-lg">
       <SettingsPageHeader title={t('title')} subtitle={t('intro')} />
       <p className="text-token-sm text-foreground-muted">{t('b2cSelfService')}</p>
+      <p className="text-token-sm text-foreground-muted">
+        {t('serialScopeHint')}{' '}
+        <Link
+          className="text-brand underline-offset-2 hover:underline"
+          href={`/${locale}/settings/company`}
+        >
+          {t('serialScopeLink')}
+        </Link>
+      </p>
 
       <Card>
         <form

@@ -11,6 +11,7 @@ describe('app screens', () => {
     expect(matchAppScreen('/en')).toBe('home');
     expect(matchAppScreen('/ar/documents')).toBe('documents');
     expect(matchAppScreen('/en/receipts')).toBe('receipts');
+    expect(matchAppScreen('/en/receipts/abc')).toBe('receipts.detail');
     expect(matchAppScreen('/en/documents/abc')).toBe('documents.detail');
     expect(matchAppScreen('/en/settings/eta-credentials')).toBe('settings.eta-credentials');
     expect(matchAppScreen('/en/settings/pos-devices')).toBe('settings.pos-devices');
